@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { openai } from "@workspace/integrations-openai-ai-server";
+import { ai } from "@workspace/integrations-gemini-ai";
 import { ProcessInstructionBody } from "@workspace/api-zod";
 
 const router = Router();
@@ -54,7 +54,7 @@ Available operation types and their payload schemas:
     payload: { clipId: string, time: number, property: string, value: number }
     (property: "x", "y", "width", "height", "opacity", "rotation", "scale")
 
-13. setBlendMode — Set blend mode on a clip  
+13. setBlendMode — Set blend mode on a clip
     payload: { clipId: string, blendMode: string }
     Supported: "normal", "multiply", "screen", "overlay", "darken", "lighten", "hard-light", "soft-light"
 
@@ -77,7 +77,7 @@ IMPORTANT RULES:
 - "next to" means x offset by the width of the first clip
 - Timestamps like "10.2 seconds" = 10.2
 
-Respond ONLY with valid JSON:
+Respond ONLY with valid JSON (no markdown, no code blocks):
 {
   "operations": [...],
   "explanation": "Human readable description of what was done",
@@ -87,22 +87,22 @@ Respond ONLY with valid JSON:
 router.post("/ai/process-instruction", async (req, res) => {
   const body = ProcessInstructionBody.parse(req.body);
 
-  let contextMessage = "";
+  let userMessage = body.instruction;
   if (body.currentState) {
-    contextMessage = `\n\nCurrent editor state (for context):\n${body.currentState}`;
+    userMessage += `\n\nCurrent editor state (for context):\n${body.currentState}`;
   }
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-5.1",
-    max_completion_tokens: 8192,
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: `${body.instruction}${contextMessage}` },
-    ],
-    response_format: { type: "json_object" },
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: [{ role: "user", parts: [{ text: userMessage }] }],
+    config: {
+      systemInstruction: SYSTEM_PROMPT,
+      responseMimeType: "application/json",
+      maxOutputTokens: 8192,
+    },
   });
 
-  const content = response.choices[0]?.message?.content ?? "{}";
+  const content = response.text ?? "{}";
   let result;
   try {
     result = JSON.parse(content);
