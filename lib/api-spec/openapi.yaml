@@ -1,22 +1,25 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: AI Video Editor API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: projects
+    description: Video editor projects
+  - name: ai
+    description: AI instruction processing
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +27,115 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /projects:
+    get:
+      operationId: listProjects
+      tags: [projects]
+      summary: List all projects
+      responses:
+        "200":
+          description: List of projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+    post:
+      operationId: createProject
+      tags: [projects]
+      summary: Create a new project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectBody"
+      responses:
+        "201":
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+
+  /projects/{id}:
+    get:
+      operationId: getProject
+      tags: [projects]
+      summary: Get a project by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "404":
+          description: Not found
+    put:
+      operationId: updateProject
+      tags: [projects]
+      summary: Update a project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProjectBody"
+      responses:
+        "200":
+          description: Updated project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+    delete:
+      operationId: deleteProject
+      tags: [projects]
+      summary: Delete a project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /ai/process-instruction:
+    post:
+      operationId: processInstruction
+      tags: [ai]
+      summary: Process a natural language instruction into editor operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProcessInstructionBody"
+      responses:
+        "200":
+          description: Parsed editor operations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstructionResult"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +146,111 @@ components:
       required:
         - status
 
+    Project:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        state:
+          type: string
+          description: JSON stringified editor state
+        duration:
+          type: number
+          description: Total duration in seconds
+        canvasWidth:
+          type: integer
+        canvasHeight:
+          type: integer
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - name
+        - state
+        - duration
+        - canvasWidth
+        - canvasHeight
+        - createdAt
+        - updatedAt
+
+    CreateProjectBody:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        canvasWidth:
+          type: integer
+          default: 1920
+        canvasHeight:
+          type: integer
+          default: 1080
+      required:
+        - name
+
+    UpdateProjectBody:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        state:
+          type: string
+        duration:
+          type: number
+        canvasWidth:
+          type: integer
+        canvasHeight:
+          type: integer
+
+    ProcessInstructionBody:
+      type: object
+      properties:
+        instruction:
+          type: string
+          description: Natural language instruction from the user
+        currentState:
+          type: string
+          description: JSON stringified current editor state for context
+      required:
+        - instruction
+
+    EditorOperation:
+      type: object
+      properties:
+        type:
+          type: string
+          description: Operation type (e.g. addClip, cutClip, cropClip, moveClip, setAnimation, addTransition, setOpacity, setVolume, deleteClip)
+        payload:
+          type: object
+          description: Operation-specific payload
+          additionalProperties: true
+      required:
+        - type
+        - payload
+
+    InstructionResult:
+      type: object
+      properties:
+        operations:
+          type: array
+          items:
+            $ref: "#/components/schemas/EditorOperation"
+        explanation:
+          type: string
+          description: Human-readable explanation of what will be done
+        confidence:
+          type: number
+          description: Confidence score 0-1
+      required:
+        - operations
+        - explanation
+        - confidence
