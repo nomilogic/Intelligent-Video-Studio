@@ -199,7 +199,7 @@ export default function Canvas({ state, dispatch }: CanvasProps) {
     () =>
       state.clips
         .filter((c) => clipVisibleAt(c, state.currentTime) && !c.hidden)
-        .sort((a, b) => a.trackIndex - b.trackIndex),
+        .sort((a, b) => b.trackIndex - a.trackIndex),
     [state.clips, state.currentTime],
   );
 
