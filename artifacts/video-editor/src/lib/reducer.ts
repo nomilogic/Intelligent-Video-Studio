@@ -4,6 +4,8 @@ import {
   Clip,
   Track,
   Marker,
+  Keyframe,
+  EasingType,
   DEFAULT_FILTERS,
   DEFAULT_TEXT_STYLE,
 } from "./types";
@@ -27,6 +29,22 @@ const HISTORY_IGNORED_ACTIONS = new Set([
 
 function uid(prefix = "id"): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// Animatable transform properties that get an automatic anchor keyframe at a
+// new clip's start time. Having these defaults means any later edit naturally
+// turns into an animation, instead of the start value being implicitly lost.
+const DEFAULT_KF_PROPS = ["x", "y", "width", "height", "rotation", "scale", "opacity"] as const;
+
+function defaultClipKeyframes(clip: Clip): Keyframe[] {
+  return DEFAULT_KF_PROPS.map((prop) => ({
+    id: uid("kf"),
+    clipId: clip.id,
+    time: clip.startTime,
+    property: prop,
+    value: (clip as any)[prop] as number,
+    easing: "quadInOut" as EasingType,
+  }));
 }
 
 export function makeClip(partial: Partial<Clip> & { id?: string }): Clip {
@@ -291,9 +309,11 @@ function applyOps(state: EditorState, ops: any[]): EditorState {
     if (!op || !op.type) continue;
     const p = op.payload || {};
     switch (op.type) {
-      case "addClip":
-        s = { ...s, clips: [...s.clips, makeClip(p)] };
+      case "addClip": {
+        const c = makeClip(p);
+        s = { ...s, clips: [...s.clips, c], keyframes: [...s.keyframes, ...defaultClipKeyframes(c)] };
         break;
+      }
       case "moveClip":
         s = applyClipUpdate(s, [p.clipId], {
           ...(p.x !== undefined && { x: p.x }),
@@ -385,27 +405,30 @@ function applyOps(state: EditorState, ops: any[]): EditorState {
           ...(p.textStyle !== undefined && { textStyle: p.textStyle }),
         });
         break;
-      case "addText":
+      case "addText": {
+        const c = makeClip({
+          ...p,
+          mediaType: "text",
+          text: p.text || "New Text",
+          label: p.label || "Text",
+          textStyle: { ...DEFAULT_TEXT_STYLE, ...(p.textStyle || {}) },
+          color: "#8b5cf6",
+          startTime: p.startTime ?? s.currentTime,
+          duration: p.duration ?? 4,
+          x: p.x ?? 0.1,
+          y: p.y ?? 0.4,
+          width: p.width ?? 0.8,
+          height: p.height ?? 0.2,
+          animationIn: p.animationIn ?? "fade",
+          animationOut: p.animationOut ?? "fade",
+        });
         s = {
           ...s,
-          clips: [...s.clips, makeClip({
-            ...p,
-            mediaType: "text",
-            text: p.text || "New Text",
-            label: p.label || "Text",
-            textStyle: { ...DEFAULT_TEXT_STYLE, ...(p.textStyle || {}) },
-            color: "#8b5cf6",
-            startTime: p.startTime ?? s.currentTime,
-            duration: p.duration ?? 4,
-            x: p.x ?? 0.1,
-            y: p.y ?? 0.4,
-            width: p.width ?? 0.8,
-            height: p.height ?? 0.2,
-            animationIn: p.animationIn ?? "fade",
-            animationOut: p.animationOut ?? "fade",
-          })],
+          clips: [...s.clips, c],
+          keyframes: [...s.keyframes, ...defaultClipKeyframes(c)],
         };
         break;
+      }
       case "setKeyframe": {
         const existing = s.keyframes.findIndex(
           (k) => k.clipId === p.clipId && k.time === p.time && k.property === p.property,
@@ -530,7 +553,11 @@ function presentReducer(state: EditorState, action: EditorAction): EditorState {
     case "UPDATE_CLIPS":
       return applyClipUpdate(state, action.payload.ids, action.payload.updates);
     case "ADD_CLIP":
-      return { ...state, clips: [...state.clips, action.payload] };
+      return {
+        ...state,
+        clips: [...state.clips, action.payload],
+        keyframes: [...state.keyframes, ...defaultClipKeyframes(action.payload)],
+      };
     case "DELETE_CLIP":
       return {
         ...state,
@@ -552,7 +579,12 @@ function presentReducer(state: EditorState, action: EditorAction): EditorState {
         startTime: orig.startTime + orig.duration,
         label: `${orig.label} copy`,
       });
-      return { ...state, clips: [...state.clips, dup], selectedClipIds: [dup.id] };
+      return {
+        ...state,
+        clips: [...state.clips, dup],
+        keyframes: [...state.keyframes, ...defaultClipKeyframes(dup)],
+        selectedClipIds: [dup.id],
+      };
     }
     case "SPLIT_CLIP":
       return splitClipAt(state, action.payload.clipId, action.payload.time);
