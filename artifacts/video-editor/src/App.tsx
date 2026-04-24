@@ -139,7 +139,7 @@ function Editor() {
         <MediaPanel state={state} dispatch={dispatchTyped} />
 
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          <div className="flex-1 flex items-center justify-center bg-gradient-to-b from-black/80 to-black/95 p-4 min-h-0 overflow-hidden">
+          <div className="flex-1 flex items-center justify-center bg-neutral-600 p-4 min-h-0 overflow-hidden">
             <Canvas state={state} dispatch={dispatchTyped} />
           </div>
 
