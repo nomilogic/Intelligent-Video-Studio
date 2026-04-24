@@ -22,8 +22,16 @@ function Editor() {
   const durationRef = useRef(state.duration);
   const [canvasZoom, setCanvasZoom] = useState(1);
 
+  // Effective playback end = the last frame of the last clip in the timeline.
+  // Falls back to state.duration when there are no clips.
+  const playbackEnd = state.clips.length > 0
+    ? Math.max(...state.clips.map((c) => c.startTime + c.duration))
+    : state.duration;
+  const playbackEndRef = useRef(playbackEnd);
+
   currentTimeRef.current = state.currentTime;
   durationRef.current = state.duration;
+  playbackEndRef.current = playbackEnd;
 
   // Playback loop using rAF for smoother updates
   useEffect(() => {
@@ -33,9 +41,9 @@ function Editor() {
       const dt = (now - last) / 1000;
       last = now;
       const next = currentTimeRef.current + dt;
-      if (next >= durationRef.current) {
+      if (next >= playbackEndRef.current) {
         dispatch({ type: "SET_PLAYING", payload: false });
-        dispatch({ type: "SET_TIME", payload: 0 });
+        dispatch({ type: "SET_TIME", payload: playbackEndRef.current });
         return;
       }
       dispatch({ type: "SET_TIME", payload: next });
@@ -100,19 +108,19 @@ function Editor() {
         dispatchTyped({ type: "SET_PLAYING", payload: false });
       } else if (e.key.toLowerCase() === "l") {
         e.preventDefault();
-        dispatchTyped({ type: "SET_TIME", payload: Math.min(state.duration, state.currentTime + 1) });
+        dispatchTyped({ type: "SET_TIME", payload: Math.min(playbackEndRef.current, state.currentTime + 1) });
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
         dispatchTyped({ type: "SET_TIME", payload: Math.max(0, state.currentTime - (e.shiftKey ? 1 : 1 / 30)) });
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        dispatchTyped({ type: "SET_TIME", payload: Math.min(state.duration, state.currentTime + (e.shiftKey ? 1 : 1 / 30)) });
+        dispatchTyped({ type: "SET_TIME", payload: Math.min(playbackEndRef.current, state.currentTime + (e.shiftKey ? 1 : 1 / 30)) });
       } else if (e.key === "Home") {
         e.preventDefault();
         dispatchTyped({ type: "SET_TIME", payload: 0 });
       } else if (e.key === "End") {
         e.preventDefault();
-        dispatchTyped({ type: "SET_TIME", payload: state.duration });
+        dispatchTyped({ type: "SET_TIME", payload: playbackEndRef.current });
       } else if (e.key === "+" || e.key === "=") {
         e.preventDefault();
         setCanvasZoom((z) => Math.min(4, parseFloat((z + 0.25).toFixed(2))));
