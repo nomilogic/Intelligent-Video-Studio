@@ -163,8 +163,14 @@ function SplitSection({
   );
 }
 
+const TRANSFORM_PROPS = new Set(["x", "y", "width", "height", "rotation", "scale", "opacity"]);
+const FILTER_PROPS = new Set([
+  "brightness", "contrast", "saturation", "hue", "blur", "grayscale", "sepia", "invert",
+]);
+
 export default function PropertiesInspector({ state, dispatch }: PropertiesInspectorProps) {
   const clip = state.clips.find((c) => state.selectedClipIds.includes(c.id));
+  const [activeTab, setActiveTab] = useState<string>("basic");
 
   const update = (updates: Partial<Clip>) => {
     if (!clip) return;
@@ -187,6 +193,23 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
       type: "ADD_KEYFRAME",
       payload: { clipId: clip.id, time: state.currentTime, property, value, easing: "easeInOut" },
     });
+
+    // Open the Transform panel and activate the select / transform tool so the
+    // user can immediately drag the canvas handles to refine the keyframe.
+    if (TRANSFORM_PROPS.has(property)) {
+      setActiveTab("basic");
+    } else if (FILTER_PROPS.has(property)) {
+      setActiveTab("effects");
+    } else if (property === "volume") {
+      setActiveTab("audio");
+    }
+    if (state.tool !== "select") {
+      dispatch({ type: "SET_TOOL", payload: "select" });
+    }
+    // Make sure the clip stays selected so the transform handles render on the canvas
+    if (!state.selectedClipIds.includes(clip.id)) {
+      dispatch({ type: "SELECT_CLIP", payload: clip.id });
+    }
   };
 
   // Returns true if this property has ANY keyframes for the selected clip
@@ -381,7 +404,7 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
           </div>
         </div>
       ) : (
-        <Tabs defaultValue="basic" className="flex-1 flex flex-col overflow-hidden">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
           {isAtKfTime && (
             <div className="mx-2 mt-2 px-2 py-1 rounded bg-yellow-400/15 border border-yellow-400/40 flex items-center gap-1.5">
               <Diamond className="w-3 h-3 text-yellow-400 fill-yellow-400 shrink-0" />

@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect, useMemo } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo, memo } from "react";
 import { EditorState, EditorAction, Clip } from "../lib/types";
 import { resolveClip, clipVisibleAt } from "../lib/animation";
 import { cn } from "@/lib/utils";
@@ -36,7 +36,7 @@ function flipTransform(clip: Clip): string {
   return `scaleX(${clip.flipH ? -1 : 1}) scaleY(${clip.flipV ? -1 : 1})`;
 }
 
-function MediaContent({ clip, videoTime, isPlaying }: { clip: Clip; videoTime: number; isPlaying: boolean }) {
+function MediaContentBase({ clip, videoTime, isPlaying }: { clip: Clip; videoTime: number; isPlaying: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
@@ -191,6 +191,20 @@ function MediaContent({ clip, videoTime, isPlaying }: { clip: Clip; videoTime: n
     </div>
   );
 }
+
+// Memoize MediaContent so video/image clips don't re-render on every playhead
+// tick. Native <video> elements play independently of React; re-rendering them
+// 30+ times per second is pure waste and causes visible playback jitter.
+const MediaContent = memo(MediaContentBase, (prev, next) => {
+  if (prev.clip !== next.clip) return false;
+  if (prev.isPlaying !== next.isPlaying) return false;
+  // While playing, the browser advances the video natively — skip re-renders
+  // triggered solely by changes in `videoTime`.
+  if (next.isPlaying) return true;
+  // While paused (scrubbing), only re-render when the requested time actually
+  // changed enough to need a seek.
+  return Math.abs(prev.videoTime - next.videoTime) < 0.001;
+});
 
 export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange }: CanvasProps) {
   const outerRef = useRef<HTMLDivElement>(null);

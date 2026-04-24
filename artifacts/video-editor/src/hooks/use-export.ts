@@ -60,6 +60,32 @@ async function seekVideo(vid: HTMLVideoElement, time: number) {
   });
 }
 
+// Compute an aspect-ratio-preserving source rectangle so drawImage() reproduces
+// the CSS `object-cover` behavior used by the preview. Without this the export
+// stretches the source to the destination box, breaking parity for any clip
+// whose intrinsic aspect ratio differs from its on-canvas box.
+function objectCoverSourceRect(
+  srcW: number, srcH: number,
+  cropX: number, cropY: number, cropW: number, cropH: number,
+  destW: number, destH: number,
+): { sx: number; sy: number; sw: number; sh: number } {
+  const cSW = srcW * cropW;
+  const cSH = srcH * cropH;
+  const cSX = srcW * cropX;
+  const cSY = srcH * cropY;
+  const srcAspect = cSW / cSH;
+  const destAspect = destW / destH;
+  if (srcAspect > destAspect) {
+    // cropped source is wider than dest → trim sides
+    const newSW = cSH * destAspect;
+    return { sx: cSX + (cSW - newSW) / 2, sy: cSY, sw: newSW, sh: cSH };
+  } else {
+    // cropped source is taller than dest → trim top/bottom
+    const newSH = cSW / destAspect;
+    return { sx: cSX, sy: cSY + (cSH - newSH) / 2, sw: cSW, sh: newSH };
+  }
+}
+
 function drawClipToCanvas(
   ctx: CanvasRenderingContext2D,
   clip: Clip,
@@ -67,6 +93,7 @@ function drawClipToCanvas(
   mediaEl: HTMLVideoElement | HTMLImageElement | null,
   W: number,
   H: number,
+  resScale: number,
 ) {
   ctx.save();
   ctx.globalAlpha = Math.max(0, Math.min(1, resolved.opacity));
@@ -90,62 +117,72 @@ function drawClipToCanvas(
   ctx.scale(sx, sy);
 
   if (clip.borderRadius > 0) {
-    roundRectPath(ctx, -pw / 2, -ph / 2, pw, ph, clip.borderRadius);
+    // Border radius is authored in canvas-native pixels — scale down so a 720p
+    // export looks proportionally identical to a full-res export.
+    roundRectPath(ctx, -pw / 2, -ph / 2, pw, ph, clip.borderRadius * resScale);
     ctx.clip();
   }
 
+  const cropX = clip.cropX ?? 0;
+  const cropY = clip.cropY ?? 0;
+  const cropW = clip.cropWidth ?? 1;
+  const cropH = clip.cropHeight ?? 1;
+
   if (clip.mediaType === "video" && mediaEl instanceof HTMLVideoElement) {
     const vid = mediaEl;
-    const cropX = clip.cropX ?? 0;
-    const cropY = clip.cropY ?? 0;
-    const cropW = clip.cropWidth ?? 1;
-    const cropH = clip.cropHeight ?? 1;
-    const sw = vid.videoWidth * cropW;
-    const sh = vid.videoHeight * cropH;
-    const ssx = vid.videoWidth * cropX;
-    const ssy = vid.videoHeight * cropY;
-    if (vid.readyState >= 2 && sw > 0 && sh > 0) {
-      ctx.drawImage(vid, ssx, ssy, sw, sh, -pw / 2, -ph / 2, pw, ph);
+    if (vid.readyState >= 2 && vid.videoWidth > 0 && vid.videoHeight > 0 && pw > 0 && ph > 0) {
+      const r = objectCoverSourceRect(
+        vid.videoWidth, vid.videoHeight,
+        cropX, cropY, cropW, cropH,
+        pw, ph,
+      );
+      ctx.drawImage(vid, r.sx, r.sy, r.sw, r.sh, -pw / 2, -ph / 2, pw, ph);
     } else {
       ctx.fillStyle = clip.color || "#1a1a2e";
       ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
     }
   } else if (clip.mediaType === "image" && mediaEl instanceof HTMLImageElement) {
-    const cropX = clip.cropX ?? 0;
-    const cropY = clip.cropY ?? 0;
-    const cropW = clip.cropWidth ?? 1;
-    const cropH = clip.cropHeight ?? 1;
-    const sw = mediaEl.naturalWidth * cropW;
-    const sh = mediaEl.naturalHeight * cropH;
-    const ssx = mediaEl.naturalWidth * cropX;
-    const ssy = mediaEl.naturalHeight * cropY;
-    if (sw > 0 && sh > 0) {
-      ctx.drawImage(mediaEl, ssx, ssy, sw, sh, -pw / 2, -ph / 2, pw, ph);
+    if (mediaEl.naturalWidth > 0 && mediaEl.naturalHeight > 0 && pw > 0 && ph > 0) {
+      const r = objectCoverSourceRect(
+        mediaEl.naturalWidth, mediaEl.naturalHeight,
+        cropX, cropY, cropW, cropH,
+        pw, ph,
+      );
+      ctx.drawImage(mediaEl, r.sx, r.sy, r.sw, r.sh, -pw / 2, -ph / 2, pw, ph);
     }
   } else if (clip.mediaType === "text") {
     const ts = clip.textStyle!;
-    const fontSize = ts.fontSize || 64;
+    // Preview uses `${ts.fontSize / 10}cqw` (% of clip box width). Match that
+    // in export so the rendered text size scales with the clip's box.
+    const fontSize = Math.max(1, (pw * (ts.fontSize || 64)) / 1000);
     const fontStyle = ts.italic ? "italic " : "";
-    ctx.font = `${fontStyle}${ts.fontWeight || 700} ${fontSize}px ${ts.fontFamily || "sans-serif"}`;
-    ctx.textAlign = (ts.align || "center") as CanvasTextAlign;
-    ctx.textBaseline = "middle";
-    const lines = (clip.text || "").split("\n");
-    const lineH = fontSize * 1.2;
-    const totalH = lines.length * lineH;
+    const fontStr = `${fontStyle}${ts.fontWeight || 700} ${fontSize}px ${ts.fontFamily || "sans-serif"}`;
+
+    // Preview fills the entire clip box with the background, not just the
+    // text bounds — replicate that here.
     if (ts.background && ts.background !== "transparent") {
       ctx.save();
-      ctx.font = `${fontStyle}${ts.fontWeight || 700} ${fontSize}px ${ts.fontFamily || "sans-serif"}`;
-      const maxW = Math.max(...lines.map((l) => ctx.measureText(l).width));
-      const pad = fontSize * 0.3;
       ctx.fillStyle = ts.background;
-      ctx.fillRect(-maxW / 2 - pad, -totalH / 2 - pad, maxW + pad * 2, totalH + pad * 2);
+      ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
       ctx.restore();
     }
+
+    ctx.font = fontStr;
+    ctx.textAlign = (ts.align || "center") as CanvasTextAlign;
+    ctx.textBaseline = "middle";
     ctx.fillStyle = ts.color || "#ffffff";
-    if (ts.shadow) { ctx.shadowBlur = 12; ctx.shadowColor = "rgba(0,0,0,0.6)"; }
+    if (ts.shadow) { ctx.shadowBlur = 12 * resScale; ctx.shadowColor = "rgba(0,0,0,0.6)"; }
+
+    // Preview uses px-2 (8px horizontal) padding and align via flexbox.
+    // Anchor the text at the matching edge of the box so alignment matches.
+    const padX = 8 * resScale;
+    const align = ts.align || "center";
+    const anchorX = align === "left" ? -pw / 2 + padX : align === "right" ? pw / 2 - padX : 0;
+    const lines = (clip.text || "").split("\n");
+    const lineH = fontSize * 1.1; // matches preview lineHeight: 1.1
     lines.forEach((line, i) => {
       const lineY = (i - (lines.length - 1) / 2) * lineH;
-      ctx.fillText(line, 0, lineY);
+      ctx.fillText(line, anchorX, lineY);
     });
   } else {
     ctx.fillStyle = clip.color || "#3b82f6";
@@ -279,7 +316,7 @@ export function useExport(state: EditorState) {
             : clip.mediaType === "image"
               ? (imageEls.get(clip.id) ?? null)
               : null;
-          drawClipToCanvas(ctx, clip, resolved, mediaEl, W, H);
+          drawClipToCanvas(ctx, clip, resolved, mediaEl, W, H, scale);
         }
 
         // 3. Pace: wait until the frame's target real-world timestamp so the

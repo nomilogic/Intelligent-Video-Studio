@@ -33,20 +33,32 @@ function Editor() {
   durationRef.current = state.duration;
   playbackEndRef.current = playbackEnd;
 
-  // Playback loop using rAF for smoother updates
+  // Playback loop using rAF for smoother updates.
+  //
+  // Performance: dispatching SET_TIME on every frame (60Hz) re-renders the
+  // entire editor (Timeline + Inspector are large) which makes playback
+  // visibly laggy. Native <video> elements play at their own rate independently
+  // of React, so we only need to update the React playhead at ~30Hz to keep
+  // the UI in sync without starving the main thread.
   useEffect(() => {
     if (!state.isPlaying) return;
+    const DISPATCH_INTERVAL_MS = 33; // ~30Hz UI update rate
     let last = performance.now();
+    let lastDispatch = last;
+    let pending = currentTimeRef.current;
     const tick = (now: number) => {
       const dt = (now - last) / 1000;
       last = now;
-      const next = currentTimeRef.current + dt;
-      if (next >= playbackEndRef.current) {
+      pending += dt;
+      if (pending >= playbackEndRef.current) {
         dispatch({ type: "SET_PLAYING", payload: false });
         dispatch({ type: "SET_TIME", payload: playbackEndRef.current });
         return;
       }
-      dispatch({ type: "SET_TIME", payload: next });
+      if (now - lastDispatch >= DISPATCH_INTERVAL_MS) {
+        lastDispatch = now;
+        dispatch({ type: "SET_TIME", payload: pending });
+      }
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
