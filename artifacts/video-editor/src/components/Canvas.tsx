@@ -312,6 +312,31 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
 
+    // When the playhead sits on a keyframe for a given property, the displayed
+    // value is driven by keyframe interpolation — updating the clip's base
+    // value would have no visible effect. Route each property change to the
+    // matching keyframe instead, so the on-canvas transform handles act as
+    // keyframe editors. Falls back to UPDATE_CLIP when no keyframe is present.
+    const dispatchAnimatable = (clipId: string, updates: Record<string, number>) => {
+      const baseUpdates: Record<string, number> = {};
+      for (const [prop, value] of Object.entries(updates)) {
+        const kf = state.keyframes.find(
+          (k) =>
+            k.clipId === clipId &&
+            k.property === prop &&
+            Math.abs(k.time - state.currentTime) < 0.02,
+        );
+        if (kf) {
+          dispatch({ type: "UPDATE_KEYFRAME", payload: { id: kf.id, value } });
+        } else {
+          baseUpdates[prop] = value;
+        }
+      }
+      if (Object.keys(baseUpdates).length > 0) {
+        dispatch({ type: "UPDATE_CLIP", payload: { id: clipId, updates: baseUpdates as Partial<Clip> } });
+      }
+    };
+
     const onMove = (ev: MouseEvent) => {
       if (drag.kind === "move") {
         const dx = (ev.clientX - drag.startX) / rect.width;
@@ -336,10 +361,7 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
           if (Math.abs(ny + ch - 1) < SNAP) { ny = 1 - ch; guides.y = 1; }
         }
         setSnapGuides(guides);
-        dispatch({
-          type: "UPDATE_CLIP",
-          payload: { id: drag.clipId, updates: { x: nx, y: ny } },
-        });
+        dispatchAnimatable(drag.clipId, { x: nx, y: ny });
       } else if (drag.kind === "resize") {
         const dx = (ev.clientX - drag.startX) / rect.width;
         const dy = (ev.clientY - drag.startY) / rect.height;
@@ -358,16 +380,13 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
           const ratio = drag.origW / drag.origH;
           nh = nw / ratio;
         }
-        dispatch({
-          type: "UPDATE_CLIP",
-          payload: { id: drag.clipId, updates: { x: nx, y: ny, width: nw, height: nh } },
-        });
+        dispatchAnimatable(drag.clipId, { x: nx, y: ny, width: nw, height: nh });
       } else if (drag.kind === "rotate") {
         const angle = (Math.atan2(ev.clientY - drag.centerY, ev.clientX - drag.centerX) * 180) / Math.PI;
         const delta = angle - drag.startAngle;
         let r = drag.origRotation + delta;
         if (ev.shiftKey) r = Math.round(r / 15) * 15;
-        dispatch({ type: "UPDATE_CLIP", payload: { id: drag.clipId, updates: { rotation: r } } });
+        dispatchAnimatable(drag.clipId, { rotation: r });
       }
     };
     const onUp = () => {
