@@ -2,12 +2,13 @@ import { useRef, useCallback, useState, useEffect, useMemo } from "react";
 import {
   Play, Pause, Square, Plus, ChevronRight, Scissors, Magnet,
   Eye, EyeOff, Volume2, VolumeX, Lock, Unlock, Trash2, SkipBack, SkipForward,
-  MousePointer2, Flag, ZoomIn, ZoomOut,
+  MousePointer2, Flag, ZoomIn, ZoomOut, Diamond,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EditorState, EditorAction, Clip } from "../lib/types";
 import { cn } from "@/lib/utils";
 import Waveform from "./Waveform";
+import { interpolateKeyframes } from "../lib/animation";
 
 interface TimelineProps {
   state: EditorState;
@@ -35,7 +36,7 @@ type DragState =
   | { kind: "resize-l"; clipId: string; startX: number; origStart: number; origDuration: number; origTrim: number; speed: number }
   | { kind: "resize-r"; clipId: string; startX: number; origDuration: number }
   | { kind: "playhead"; startX: number; origTime: number }
-  | { kind: "keyframe"; kfId: string; clipStart: number; clipEnd: number; origTime: number; startX: number };
+  | { kind: "keyframe-group"; kfIds: string[]; clipStart: number; clipEnd: number; origTime: number; startX: number };
 
 export default function Timeline({ state, dispatch }: TimelineProps) {
   const rulerRef = useRef<HTMLDivElement>(null);
@@ -190,11 +191,13 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
           type: "UPDATE_CLIP",
           payload: { id: drag.clipId, updates: { duration: Math.max(0.1, clampedEnd - clip.startTime) } },
         });
-      } else if (drag.kind === "keyframe") {
+      } else if (drag.kind === "keyframe-group") {
         const dx = ev.clientX - drag.startX;
         const dt = dx / PPS;
         const newTime = Math.max(drag.clipStart, Math.min(drag.clipEnd, drag.origTime + dt));
-        dispatch({ type: "UPDATE_KEYFRAME", payload: { id: drag.kfId, time: newTime } });
+        for (const kfId of drag.kfIds) {
+          dispatch({ type: "UPDATE_KEYFRAME", payload: { id: kfId, time: newTime } });
+        }
       } else if (drag.kind === "resize-l") {
         const dx = ev.clientX - drag.startX;
         const dt = dx / PPS;
@@ -391,6 +394,40 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
         >
           <Flag className="w-3.5 h-3.5" /> Marker
         </Button>
+
+        {/* Add full keyframe snapshot for selected clip */}
+        {(() => {
+          const selectedClip = state.clips.find((c) => state.selectedClipIds.includes(c.id));
+          const CORE_PROPS = ["x", "y", "width", "height", "rotation", "scale", "opacity"] as const;
+          const FILTER_PROPS = ["brightness", "contrast", "saturation", "hue", "blur", "grayscale", "sepia", "invert"] as const;
+          const hasKfAtTime = selectedClip
+            ? state.keyframes.some((k) => k.clipId === selectedClip.id && Math.abs(k.time - state.currentTime) < 0.02)
+            : false;
+          return (
+            <Button
+              variant={hasKfAtTime ? "secondary" : "ghost"}
+              size="sm"
+              className={`h-7 text-xs gap-1.5 ${!selectedClip ? "opacity-40" : ""}`}
+              disabled={!selectedClip}
+              title={selectedClip ? "Add keyframe snapshot of all properties at playhead" : "Select a clip first"}
+              onClick={() => {
+                if (!selectedClip) return;
+                const t = state.currentTime;
+                for (const prop of CORE_PROPS) {
+                  const val = interpolateKeyframes(state.keyframes, selectedClip.id, prop, t, (selectedClip as any)[prop]) ?? (selectedClip as any)[prop];
+                  dispatch({ type: "ADD_KEYFRAME", payload: { clipId: selectedClip.id, time: t, property: prop, value: val, easing: "easeInOut" } });
+                }
+                for (const fp of FILTER_PROPS) {
+                  const val = interpolateKeyframes(state.keyframes, selectedClip.id, fp, t, (selectedClip.filters as any)[fp]) ?? (selectedClip.filters as any)[fp];
+                  dispatch({ type: "ADD_KEYFRAME", payload: { clipId: selectedClip.id, time: t, property: fp, value: val, easing: "easeInOut" } });
+                }
+              }}
+            >
+              <Diamond className={`w-3.5 h-3.5 ${hasKfAtTime ? "fill-yellow-400 text-yellow-400" : "text-yellow-400"}`} />
+              Keyframe
+            </Button>
+          );
+        })()}
 
         <Button
           variant={state.snapEnabled ? "secondary" : "ghost"}
@@ -746,42 +783,52 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
                           )}
                         </div>
 
-                        {/* Keyframe markers — click to jump, drag to reposition, right-click to delete */}
-                        {clipKeyframes.map((kf) => {
-                          const localPx = (kf.time - clip.startTime) * PPS;
+                        {/* Keyframe markers — one combined ♦ per unique timestamp */}
+                        {Array.from(
+                          new Map(clipKeyframes.map((kf) => [Math.round(kf.time * 100) / 100, kf.time])).values(),
+                        ).map((kfTime) => {
+                          const localPx = (kfTime - clip.startTime) * PPS;
                           if (localPx < 0 || localPx > width) return null;
+                          const kfsAtTime = clipKeyframes.filter((k) => Math.abs(k.time - kfTime) < 0.02);
+                          const isPlayhead = Math.abs(kfTime - state.currentTime) < 0.02;
                           return (
                             <div
-                              key={kf.id}
+                              key={kfTime}
                               className="absolute z-20 flex flex-col items-center cursor-ew-resize group/kf"
                               style={{ left: localPx, bottom: 2, transform: "translateX(-50%)" }}
-                              title={`${kf.property}: ${typeof kf.value === "number" ? kf.value.toFixed(2) : kf.value} @ ${kf.time.toFixed(2)}s\nDrag to reposition · Right-click to delete`}
+                              title={`Keyframe @ ${kfTime.toFixed(2)}s · ${kfsAtTime.length} properties\nClick to jump · Drag to move · Right-click to delete`}
                               onMouseDown={(e) => {
                                 e.stopPropagation();
-                                dispatch({ type: "SET_TIME", payload: kf.time });
+                                dispatch({ type: "SET_TIME", payload: kfTime });
                                 setDrag({
-                                  kind: "keyframe",
-                                  kfId: kf.id,
+                                  kind: "keyframe-group",
+                                  kfIds: kfsAtTime.map((k) => k.id),
                                   clipStart: clip.startTime,
                                   clipEnd: clip.startTime + clip.duration,
-                                  origTime: kf.time,
+                                  origTime: kfTime,
                                   startX: e.clientX,
                                 });
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                dispatch({ type: "SET_TIME", payload: kf.time });
+                                dispatch({ type: "SET_TIME", payload: kfTime });
                               }}
                               onContextMenu={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                dispatch({ type: "DELETE_KEYFRAME", payload: kf.id });
+                                dispatch({ type: "DELETE_KEYFRAMES_AT", payload: { clipId: clip.id, time: kfTime } });
                               }}
                             >
-                              <span className="text-[7px] text-yellow-200 leading-none mb-0.5 opacity-0 group-hover/kf:opacity-100 bg-black/60 px-0.5 rounded whitespace-nowrap pointer-events-none">
-                                {kf.property}
+                              <span className="text-[7px] text-yellow-200 leading-none mb-0.5 opacity-0 group-hover/kf:opacity-100 bg-black/70 px-1 rounded whitespace-nowrap pointer-events-none">
+                                {kfTime.toFixed(2)}s
                               </span>
-                              <div className="w-2.5 h-2.5 bg-yellow-400 rotate-45 border border-yellow-200/60 group-hover/kf:bg-yellow-200 group-hover/kf:scale-125 transition-transform" />
+                              <div
+                                className={`w-3 h-3 rotate-45 border transition-all group-hover/kf:scale-125 ${
+                                  isPlayhead
+                                    ? "bg-yellow-200 border-white scale-110"
+                                    : "bg-yellow-400 border-yellow-200/60 group-hover/kf:bg-yellow-200"
+                                }`}
+                              />
                             </div>
                           );
                         })}

@@ -180,6 +180,7 @@ export type EditorAction =
   | { type: "ADD_KEYFRAME"; payload: Omit<Keyframe, "id"> & { id?: string } }
   | { type: "UPDATE_KEYFRAME"; payload: { id: string; time?: number; value?: number; easing?: EasingType } }
   | { type: "DELETE_KEYFRAME"; payload: string }
+  | { type: "DELETE_KEYFRAMES_AT"; payload: { clipId: string; time: number } }
   | { type: "ADD_TRANSITION"; payload: Omit<Transition, "id"> & { id?: string } }
   | { type: "DELETE_TRANSITION"; payload: string }
   | { type: "ADD_ASSET"; payload: MediaAsset }

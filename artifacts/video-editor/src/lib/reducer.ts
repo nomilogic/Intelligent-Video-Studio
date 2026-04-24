@@ -633,6 +633,13 @@ function presentReducer(state: EditorState, action: EditorAction): EditorState {
       };
     case "DELETE_KEYFRAME":
       return { ...state, keyframes: state.keyframes.filter((k) => k.id !== action.payload) };
+    case "DELETE_KEYFRAMES_AT":
+      return {
+        ...state,
+        keyframes: state.keyframes.filter(
+          (k) => !(k.clipId === action.payload.clipId && Math.abs(k.time - action.payload.time) < 0.02),
+        ),
+      };
     case "ADD_TRANSITION": {
       const tr = { ...action.payload, id: action.payload.id ?? uid("tr") };
       return { ...state, transitions: [...state.transitions, tr] };

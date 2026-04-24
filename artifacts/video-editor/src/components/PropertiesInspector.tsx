@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { resolveClip } from "../lib/animation";
+import { resolveClip, interpolateKeyframes } from "../lib/animation";
 
 interface PropertiesInspectorProps {
   state: EditorState;
@@ -175,9 +175,14 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
   const resolved = clip ? resolveClip(clip, state.keyframes, state.currentTime) : null;
 
   const addKeyframe = (property: string) => {
-    if (!clip || !resolved) return;
-    // Capture the interpolated value at current time so the keyframe matches what you see
-    const value = (resolved as any)[property] ?? (clip as any)[property] ?? 0;
+    if (!clip) return;
+    // Capture the live (interpolated) value at current time so the keyframe matches what you see
+    const baseValue =
+      (resolved as any)?.[property] ??
+      (clip.filters as any)[property] ??
+      (clip as any)[property] ??
+      0;
+    const value = interpolateKeyframes(state.keyframes, clip.id, property, state.currentTime, baseValue) ?? baseValue;
     dispatch({
       type: "ADD_KEYFRAME",
       payload: { clipId: clip.id, time: state.currentTime, property, value, easing: "easeInOut" },
@@ -197,6 +202,43 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
   const setFilter = (key: keyof typeof DEFAULT_FILTERS, value: number) => {
     if (!clip) return;
     update({ filters: { ...clip.filters, [key]: value } as any });
+  };
+
+  // Live value at the current playhead time (interpolated from keyframes if any exist)
+  const liveVal = (property: string, base: number) =>
+    clip ? (interpolateKeyframes(state.keyframes, clip.id, property, state.currentTime, base) ?? base) : base;
+
+  // True if any keyframe for this clip exists at the current playhead time (within ±20ms)
+  const isAtKfTime = clip
+    ? state.keyframes.some((k) => k.clipId === clip.id && Math.abs(k.time - state.currentTime) < 0.02)
+    : false;
+
+  // Smart update for animatable clip properties:
+  // - if a keyframe already exists at the playhead → update that keyframe's value
+  // - otherwise → update the base clip property
+  const updateAnimatable = (property: string, value: number) => {
+    if (!clip) return;
+    if (isAtKf(property)) {
+      const kf = state.keyframes.find(
+        (k) => k.clipId === clip.id && k.property === property && Math.abs(k.time - state.currentTime) < 0.02,
+      );
+      if (kf) dispatch({ type: "UPDATE_KEYFRAME", payload: { id: kf.id, value } });
+    } else {
+      update({ [property]: value } as Partial<Clip>);
+    }
+  };
+
+  // Smart update for filter properties (same logic, stored as flat KF property names)
+  const updateFilter = (fp: keyof typeof DEFAULT_FILTERS, value: number) => {
+    if (!clip) return;
+    if (isAtKf(fp)) {
+      const kf = state.keyframes.find(
+        (k) => k.clipId === clip.id && k.property === fp && Math.abs(k.time - state.currentTime) < 0.02,
+      );
+      if (kf) dispatch({ type: "UPDATE_KEYFRAME", payload: { id: kf.id, value } });
+    } else {
+      update({ filters: { ...clip.filters, [fp]: value } as any });
+    }
   };
 
   return (
@@ -340,6 +382,14 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
         </div>
       ) : (
         <Tabs defaultValue="basic" className="flex-1 flex flex-col overflow-hidden">
+          {isAtKfTime && (
+            <div className="mx-2 mt-2 px-2 py-1 rounded bg-yellow-400/15 border border-yellow-400/40 flex items-center gap-1.5">
+              <Diamond className="w-3 h-3 text-yellow-400 fill-yellow-400 shrink-0" />
+              <p className="text-[10px] text-yellow-300 leading-tight">
+                <span className="font-semibold">Keyframe mode</span> — slider changes update the keyframe at {state.currentTime.toFixed(2)}s
+              </p>
+            </div>
+          )}
           <TabsList className="grid grid-cols-4 mx-2 mt-2 h-8">
             <TabsTrigger value="basic" className="text-[10px]">Basic</TabsTrigger>
             <TabsTrigger value="effects" className="text-[10px]">Effects</TabsTrigger>
@@ -374,14 +424,14 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
                   <RotateCcw className="w-3 h-3" />
                 </Button>
               }>
-                <NumPair label="X" value={clip.x} min={-1} max={2} step={0.01} onChange={(v) => update({ x: v })} onKeyframe={() => addKeyframe("x")} hasKeyframe={hasKf("x")} isAtKeyframe={isAtKf("x")} />
-                <NumPair label="Y" value={clip.y} min={-1} max={2} step={0.01} onChange={(v) => update({ y: v })} onKeyframe={() => addKeyframe("y")} hasKeyframe={hasKf("y")} isAtKeyframe={isAtKf("y")} />
-                <NumPair label="W" value={clip.width} min={0.01} max={2} step={0.01} onChange={(v) => update({ width: v })} onKeyframe={() => addKeyframe("width")} hasKeyframe={hasKf("width")} isAtKeyframe={isAtKf("width")} />
-                <NumPair label="H" value={clip.height} min={0.01} max={2} step={0.01} onChange={(v) => update({ height: v })} onKeyframe={() => addKeyframe("height")} hasKeyframe={hasKf("height")} isAtKeyframe={isAtKf("height")} />
+                <NumPair label="X" value={liveVal("x", clip.x)} min={-1} max={2} step={0.01} onChange={(v) => updateAnimatable("x", v)} onKeyframe={() => addKeyframe("x")} hasKeyframe={hasKf("x")} isAtKeyframe={isAtKf("x")} />
+                <NumPair label="Y" value={liveVal("y", clip.y)} min={-1} max={2} step={0.01} onChange={(v) => updateAnimatable("y", v)} onKeyframe={() => addKeyframe("y")} hasKeyframe={hasKf("y")} isAtKeyframe={isAtKf("y")} />
+                <NumPair label="W" value={liveVal("width", clip.width)} min={0.01} max={2} step={0.01} onChange={(v) => updateAnimatable("width", v)} onKeyframe={() => addKeyframe("width")} hasKeyframe={hasKf("width")} isAtKeyframe={isAtKf("width")} />
+                <NumPair label="H" value={liveVal("height", clip.height)} min={0.01} max={2} step={0.01} onChange={(v) => updateAnimatable("height", v)} onKeyframe={() => addKeyframe("height")} hasKeyframe={hasKf("height")} isAtKeyframe={isAtKf("height")} />
 
-                <NumPair label="Rotation" value={clip.rotation} min={-180} max={180} step={1} suffix="°" onChange={(v) => update({ rotation: v })} onKeyframe={() => addKeyframe("rotation")} hasKeyframe={hasKf("rotation")} isAtKeyframe={isAtKf("rotation")} />
-                <NumPair label="Scale" value={clip.scale} min={0.1} max={3} step={0.05} suffix="x" onChange={(v) => update({ scale: v })} onKeyframe={() => addKeyframe("scale")} hasKeyframe={hasKf("scale")} isAtKeyframe={isAtKf("scale")} />
-                <NumPair label="Opacity" value={clip.opacity} min={0} max={1} step={0.01} onChange={(v) => update({ opacity: v })} onKeyframe={() => addKeyframe("opacity")} hasKeyframe={hasKf("opacity")} isAtKeyframe={isAtKf("opacity")} />
+                <NumPair label="Rotation" value={liveVal("rotation", clip.rotation)} min={-180} max={180} step={1} suffix="°" onChange={(v) => updateAnimatable("rotation", v)} onKeyframe={() => addKeyframe("rotation")} hasKeyframe={hasKf("rotation")} isAtKeyframe={isAtKf("rotation")} />
+                <NumPair label="Scale" value={liveVal("scale", clip.scale)} min={0.1} max={3} step={0.05} suffix="x" onChange={(v) => updateAnimatable("scale", v)} onKeyframe={() => addKeyframe("scale")} hasKeyframe={hasKf("scale")} isAtKeyframe={isAtKf("scale")} />
+                <NumPair label="Opacity" value={liveVal("opacity", clip.opacity)} min={0} max={1} step={0.01} onChange={(v) => updateAnimatable("opacity", v)} onKeyframe={() => addKeyframe("opacity")} hasKeyframe={hasKf("opacity")} isAtKeyframe={isAtKf("opacity")} />
 
                 <div className="flex gap-1.5">
                   <Button variant={clip.flipH ? "secondary" : "outline"} size="sm" className="h-7 text-xs flex-1" onClick={() => update({ flipH: !clip.flipH })}>
@@ -475,14 +525,14 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
                   <RotateCcw className="w-3 h-3" />
                 </Button>
               }>
-                <NumPair label="Brightness" value={clip.filters.brightness} min={0} max={200} step={1} suffix="%" onChange={(v) => setFilter("brightness", v)} />
-                <NumPair label="Contrast" value={clip.filters.contrast} min={0} max={200} step={1} suffix="%" onChange={(v) => setFilter("contrast", v)} />
-                <NumPair label="Saturation" value={clip.filters.saturation} min={0} max={200} step={1} suffix="%" onChange={(v) => setFilter("saturation", v)} />
-                <NumPair label="Hue" value={clip.filters.hue} min={-180} max={180} step={1} suffix="°" onChange={(v) => setFilter("hue", v)} />
-                <NumPair label="Blur" value={clip.filters.blur} min={0} max={20} step={0.5} suffix="px" onChange={(v) => setFilter("blur", v)} />
-                <NumPair label="Grayscale" value={clip.filters.grayscale} min={0} max={100} step={1} suffix="%" onChange={(v) => setFilter("grayscale", v)} />
-                <NumPair label="Sepia" value={clip.filters.sepia} min={0} max={100} step={1} suffix="%" onChange={(v) => setFilter("sepia", v)} />
-                <NumPair label="Invert" value={clip.filters.invert} min={0} max={100} step={1} suffix="%" onChange={(v) => setFilter("invert", v)} />
+                <NumPair label="Brightness" value={liveVal("brightness", clip.filters.brightness)} min={0} max={200} step={1} suffix="%" onChange={(v) => updateFilter("brightness", v)} onKeyframe={() => addKeyframe("brightness")} hasKeyframe={hasKf("brightness")} isAtKeyframe={isAtKf("brightness")} />
+                <NumPair label="Contrast" value={liveVal("contrast", clip.filters.contrast)} min={0} max={200} step={1} suffix="%" onChange={(v) => updateFilter("contrast", v)} onKeyframe={() => addKeyframe("contrast")} hasKeyframe={hasKf("contrast")} isAtKeyframe={isAtKf("contrast")} />
+                <NumPair label="Saturation" value={liveVal("saturation", clip.filters.saturation)} min={0} max={200} step={1} suffix="%" onChange={(v) => updateFilter("saturation", v)} onKeyframe={() => addKeyframe("saturation")} hasKeyframe={hasKf("saturation")} isAtKeyframe={isAtKf("saturation")} />
+                <NumPair label="Hue" value={liveVal("hue", clip.filters.hue)} min={-180} max={180} step={1} suffix="°" onChange={(v) => updateFilter("hue", v)} onKeyframe={() => addKeyframe("hue")} hasKeyframe={hasKf("hue")} isAtKeyframe={isAtKf("hue")} />
+                <NumPair label="Blur" value={liveVal("blur", clip.filters.blur)} min={0} max={20} step={0.5} suffix="px" onChange={(v) => updateFilter("blur", v)} onKeyframe={() => addKeyframe("blur")} hasKeyframe={hasKf("blur")} isAtKeyframe={isAtKf("blur")} />
+                <NumPair label="Grayscale" value={liveVal("grayscale", clip.filters.grayscale)} min={0} max={100} step={1} suffix="%" onChange={(v) => updateFilter("grayscale", v)} onKeyframe={() => addKeyframe("grayscale")} hasKeyframe={hasKf("grayscale")} isAtKeyframe={isAtKf("grayscale")} />
+                <NumPair label="Sepia" value={liveVal("sepia", clip.filters.sepia)} min={0} max={100} step={1} suffix="%" onChange={(v) => updateFilter("sepia", v)} onKeyframe={() => addKeyframe("sepia")} hasKeyframe={hasKf("sepia")} isAtKeyframe={isAtKf("sepia")} />
+                <NumPair label="Invert" value={liveVal("invert", clip.filters.invert)} min={0} max={100} step={1} suffix="%" onChange={(v) => updateFilter("invert", v)} onKeyframe={() => addKeyframe("invert")} hasKeyframe={hasKf("invert")} isAtKeyframe={isAtKf("invert")} />
               </Section>
 
               <Separator />

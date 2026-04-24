@@ -239,6 +239,18 @@ export function resolveClip(
   const rotation = rotationKf ?? clip.rotation;
   const scale = scaleKf ?? clip.scale;
 
+  // Interpolate filter properties (stored as flat keyframe property names)
+  const filters = {
+    brightness: interpolateKeyframes(keyframes, clip.id, "brightness", time, clip.filters.brightness) ?? clip.filters.brightness,
+    contrast: interpolateKeyframes(keyframes, clip.id, "contrast", time, clip.filters.contrast) ?? clip.filters.contrast,
+    saturation: interpolateKeyframes(keyframes, clip.id, "saturation", time, clip.filters.saturation) ?? clip.filters.saturation,
+    hue: interpolateKeyframes(keyframes, clip.id, "hue", time, clip.filters.hue) ?? clip.filters.hue,
+    blur: interpolateKeyframes(keyframes, clip.id, "blur", time, clip.filters.blur) ?? clip.filters.blur,
+    grayscale: interpolateKeyframes(keyframes, clip.id, "grayscale", time, clip.filters.grayscale) ?? clip.filters.grayscale,
+    sepia: interpolateKeyframes(keyframes, clip.id, "sepia", time, clip.filters.sepia) ?? clip.filters.sepia,
+    invert: interpolateKeyframes(keyframes, clip.id, "invert", time, clip.filters.invert) ?? clip.filters.invert,
+  };
+
   const anim = getEntryExitState(clip, time);
 
   // videoTime maps timeline time -> source media time.
@@ -256,7 +268,7 @@ export function resolveClip(
     scale: scale * anim.scale,
     translateX: anim.translateX,
     translateY: anim.translateY,
-    filterCss: buildFilterCss(clip.filters),
+    filterCss: buildFilterCss(filters),
     visible,
     videoTime,
   };
