@@ -65,14 +65,15 @@ function NumPair({
             <button
               onClick={onKeyframe}
               title={isAtKeyframe ? "Keyframe set at playhead" : hasKeyframe ? "Update keyframe at playhead" : "Add keyframe at playhead"}
+              className="rounded px-0.5 py-0.5 hover:bg-yellow-400/20 transition-colors"
             >
               <Diamond
-                className={`w-2.5 h-2.5 transition-colors ${
+                className={`w-3 h-3 transition-colors ${
                   isAtKeyframe
                     ? "text-yellow-300 fill-yellow-300"
                     : hasKeyframe
-                      ? "text-yellow-500 fill-yellow-500/40 hover:fill-yellow-400"
-                      : "text-yellow-600 hover:text-yellow-400"
+                      ? "text-yellow-400 fill-yellow-400/50"
+                      : "text-yellow-400/60 fill-yellow-400/10 hover:text-yellow-400 hover:fill-yellow-400/30"
                 }`}
               />
             </button>
