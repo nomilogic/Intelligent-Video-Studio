@@ -229,7 +229,11 @@ export function useExport(state: EditorState) {
         ) ?? "video/webm";
       }
 
-      const stream = canvas.captureStream(FPS);
+      // captureStream(0) = demand mode — no automatic capture.
+      // We call videoTrack.requestFrame() explicitly AFTER each confirmed draw,
+      // so the recorder never captures mid-seek or stale frames.
+      const stream = canvas.captureStream(0);
+      const videoTrack = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack & { requestFrame?: () => void };
       const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
       const chunks: Blob[] = [];
       recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
@@ -239,26 +243,32 @@ export function useExport(state: EditorState) {
 
       const sortedClips = [...s.clips].sort((a, b) => b.trackIndex - a.trackIndex);
 
+      // Real-time reference point for pacing. Each frame is pushed at its target
+      // real-world time so the output plays back at exactly FPS.
+      const exportStartMs = performance.now();
+
       for (let frame = 0; frame <= TOTAL_FRAMES; frame++) {
         if (cancelRef.current) break;
         const time = frame / FPS;
 
+        // 1. Seek all visible video clips to their exact frame positions.
+        //    Sequential per-clip to avoid browser decoder contention.
+        for (const clip of sortedClips) {
+          if (clip.mediaType !== "video" || clip.hidden) continue;
+          const vid = videoEls.get(clip.id);
+          if (!vid) continue;
+          if (clipVisibleAt(clip, time)) {
+            const resolved = resolveClip(clip, s.keyframes, time);
+            await seekVideo(vid, resolved.videoTime);
+          }
+        }
+
+        if (cancelRef.current) break;
+
+        // 2. Clear and draw everything onto the offscreen canvas.
         ctx.clearRect(0, 0, W, H);
         ctx.fillStyle = s.background || "#000000";
         ctx.fillRect(0, 0, W, H);
-
-        await Promise.all(
-          sortedClips
-            .filter((clip) => clip.mediaType === "video" && !clip.hidden)
-            .map(async (clip) => {
-              const vid = videoEls.get(clip.id);
-              if (!vid) return;
-              if (clipVisibleAt(clip, time)) {
-                const resolved = resolveClip(clip, s.keyframes, time);
-                await seekVideo(vid, resolved.videoTime);
-              }
-            }),
-        );
 
         for (const clip of sortedClips) {
           if (clip.hidden) continue;
@@ -272,8 +282,23 @@ export function useExport(state: EditorState) {
           drawClipToCanvas(ctx, clip, resolved, mediaEl, W, H);
         }
 
+        // 3. Pace: wait until the frame's target real-world timestamp so the
+        //    resulting video plays at the correct speed.
+        const targetMs = frame * FRAME_MS;
+        const elapsedMs = performance.now() - exportStartMs;
+        if (elapsedMs < targetMs) {
+          await new Promise<void>((resolve) => setTimeout(resolve, targetMs - elapsedMs));
+        }
+
+        // 4. Push the fully-drawn frame into the MediaRecorder stream.
+        if (typeof videoTrack.requestFrame === "function") {
+          videoTrack.requestFrame();
+        }
+
+        // Yield to the event loop so the frame is flushed before we proceed.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
         setExportStatus({ phase: "rendering", progress: frame / TOTAL_FRAMES });
-        await new Promise<void>((resolve) => setTimeout(resolve, FRAME_MS));
       }
 
       for (const vid of videoEls.values()) vid.pause();
