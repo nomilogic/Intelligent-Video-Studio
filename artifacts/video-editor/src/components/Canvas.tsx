@@ -375,11 +375,18 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
   const displayW = Math.round(fitSize.w * canvasZoom);
   const displayH = Math.round(fitSize.h * canvasZoom);
 
+  const onOuterMouseDown = (e: React.MouseEvent) => {
+    if (e.target === outerRef.current) {
+      dispatch({ type: "SELECT_CLIP", payload: null });
+    }
+  };
+
   return (
     <div
       ref={outerRef}
       className="w-full h-full overflow-auto flex items-center justify-center"
       style={{ scrollbarGutter: "stable" }}
+      onMouseDown={onOuterMouseDown}
     >
       {/* Centering wrapper — shrinks to canvas size so scroll works correctly */}
       <div style={{ minWidth: displayW, minHeight: displayH, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>

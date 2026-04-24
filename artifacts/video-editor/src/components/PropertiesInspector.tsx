@@ -366,6 +366,57 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
                   </Button>
                 </div>
 
+                {(clip.mediaType === "video" || clip.mediaType === "image") && (
+                  <div className="space-y-1.5">
+                    <Label className="text-[10px] text-muted-foreground uppercase">Canvas Fit</Label>
+                    <div className="grid grid-cols-2 gap-1">
+                      <Button
+                        variant="outline" size="sm" className="h-7 text-[10px]"
+                        title="Stretch to fill canvas (ignores aspect ratio)"
+                        onClick={() => update({ x: 0, y: 0, width: 1, height: 1 })}
+                      >
+                        Stretch Fill
+                      </Button>
+                      <Button
+                        variant="outline" size="sm" className="h-7 text-[10px]"
+                        title="Scale to cover canvas, maintaining aspect ratio (may overflow)"
+                        onClick={() => {
+                          const s = 1 / Math.min(clip.width, clip.height);
+                          const nw = clip.width * s;
+                          const nh = clip.height * s;
+                          update({ x: (1 - nw) / 2, y: (1 - nh) / 2, width: nw, height: nh });
+                        }}
+                      >
+                        Scale Fill
+                      </Button>
+                      <Button
+                        variant="outline" size="sm" className="h-7 text-[10px]"
+                        title="Scale to fit inside canvas, maintaining aspect ratio"
+                        onClick={() => {
+                          const s = 1 / Math.max(clip.width, clip.height);
+                          const nw = clip.width * s;
+                          const nh = clip.height * s;
+                          update({ x: (1 - nw) / 2, y: (1 - nh) / 2, width: nw, height: nh });
+                        }}
+                      >
+                        Scale Fit
+                      </Button>
+                      <Button
+                        variant="outline" size="sm" className="h-7 text-[10px]"
+                        title="Center at original proportion (50% of canvas)"
+                        onClick={() => {
+                          const ratio = clip.width / clip.height;
+                          const nw = Math.min(0.8, ratio >= 1 ? 0.8 : 0.8 * ratio);
+                          const nh = nw / ratio;
+                          update({ x: (1 - nw) / 2, y: (1 - nh) / 2, width: nw, height: nh, rotation: 0, scale: 1 });
+                        }}
+                      >
+                        Original Ratio
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
                 <NumPair label="Border Radius" value={clip.borderRadius} min={0} max={64} step={1} suffix="px" onChange={(v) => update({ borderRadius: v })} />
               </Section>
 

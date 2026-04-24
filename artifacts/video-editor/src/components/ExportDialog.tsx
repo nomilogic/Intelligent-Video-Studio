@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { Download, X, Loader2 } from "lucide-react";
+import { Download, X, Loader2, Music, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
@@ -10,6 +10,9 @@ import { resolveClip, clipVisibleAt } from "../lib/animation";
 
 const FPS = 30;
 const FRAME_MS = 1000 / FPS;
+
+type Resolution = "full" | "720p" | "480p" | "half";
+type ExportFormat = "webm" | "mp4" | "audio";
 
 function buildCanvasFilter(filterCss: string): string {
   return filterCss || "none";
@@ -34,12 +37,12 @@ function roundRectPath(
 }
 
 async function seekVideo(vid: HTMLVideoElement, time: number) {
-  if (Math.abs(vid.currentTime - time) < 0.05) return;
+  if (Math.abs(vid.currentTime - time) < 0.001) return;
   vid.currentTime = Math.max(0, time);
   await new Promise<void>((resolve) => {
     const onSeeked = () => { vid.removeEventListener("seeked", onSeeked); resolve(); };
     vid.addEventListener("seeked", onSeeked);
-    setTimeout(resolve, 600);
+    setTimeout(resolve, 800);
   });
 }
 
@@ -133,9 +136,6 @@ function drawClipToCanvas(
       ctx.shadowBlur = 12;
       ctx.shadowColor = "rgba(0,0,0,0.6)";
     }
-    if (ts.underline) {
-      // Canvas doesn't support underline natively; skip for now
-    }
 
     lines.forEach((line, i) => {
       const lineY = (i - (lines.length - 1) / 2) * lineH;
@@ -154,10 +154,20 @@ function drawClipToCanvas(
   ctx.restore();
 }
 
+function computeScale(resolution: Resolution, canvasW: number, canvasH: number): number {
+  if (resolution === "full") return 1;
+  if (resolution === "half") return 0.5;
+  const target = resolution === "720p" ? 720 : 480;
+  // Use shorter dimension as reference so portrait & landscape are consistent
+  const shorter = Math.min(canvasW, canvasH);
+  return Math.min(1, target / shorter);
+}
+
 interface ExportState {
   phase: "idle" | "loading" | "rendering" | "done" | "error";
   progress: number;
   errorMsg?: string;
+  downloadedFile?: string;
 }
 
 interface ExportDialogProps {
@@ -167,14 +177,20 @@ interface ExportDialogProps {
 export default function ExportDialog({ state }: ExportDialogProps) {
   const [open, setOpen] = useState(false);
   const [exportState, setExportState] = useState<ExportState>({ phase: "idle", progress: 0 });
+  const [resolution, setResolution] = useState<Resolution>("full");
+  const [format, setFormat] = useState<ExportFormat>("webm");
   const cancelRef = useRef(false);
 
-  const runExport = useCallback(
-    async (scale: number) => {
+  const W_out = Math.round(state.canvasWidth * computeScale(resolution, state.canvasWidth, state.canvasHeight));
+  const H_out = Math.round(state.canvasHeight * computeScale(resolution, state.canvasWidth, state.canvasHeight));
+
+  const runVideoExport = useCallback(
+    async () => {
       cancelRef.current = false;
       setExportState({ phase: "loading", progress: 0 });
 
       try {
+        const scale = computeScale(resolution, state.canvasWidth, state.canvasHeight);
         const W = Math.round(state.canvasWidth * scale);
         const H = Math.round(state.canvasHeight * scale);
         const TOTAL = state.duration;
@@ -201,7 +217,7 @@ export default function ExportDialog({ state }: ExportDialogProps) {
               await new Promise<void>((resolve) => {
                 v.onloadeddata = () => resolve();
                 v.onerror = () => resolve();
-                setTimeout(resolve, 5000);
+                setTimeout(resolve, 8000);
                 v.load();
               });
               videoEls.set(clip.id, v);
@@ -223,10 +239,20 @@ export default function ExportDialog({ state }: ExportDialogProps) {
           return;
         }
 
-        // Pick best supported mime
-        const mimeType = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find(
-          (m) => MediaRecorder.isTypeSupported(m),
-        ) ?? "video/webm";
+        // Determine mime type
+        let mimeType: string;
+        if (format === "mp4") {
+          const mp4Types = ["video/mp4;codecs=avc1", "video/mp4;codecs=h264", "video/mp4"];
+          const supported = mp4Types.find((m) => MediaRecorder.isTypeSupported(m));
+          if (!supported) {
+            throw new Error("MP4 is not supported by this browser. Please use WebM instead.");
+          }
+          mimeType = supported;
+        } else {
+          mimeType = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find(
+            (m) => MediaRecorder.isTypeSupported(m),
+          ) ?? "video/webm";
+        }
 
         const stream = canvas.captureStream(FPS);
         const recorder = new MediaRecorder(stream, {
@@ -241,11 +267,8 @@ export default function ExportDialog({ state }: ExportDialogProps) {
 
         setExportState({ phase: "rendering", progress: 0 });
 
-        // Sort clips by trackIndex descending so higher-index draws last (behind lower-index)
+        // Sort clips by trackIndex descending so lower-index draws on top
         const sortedClips = [...state.clips].sort((a, b) => b.trackIndex - a.trackIndex);
-
-        // Track which videos are currently playing
-        const playingVideos = new Set<string>();
 
         for (let frame = 0; frame <= TOTAL_FRAMES; frame++) {
           if (cancelRef.current) break;
@@ -257,36 +280,20 @@ export default function ExportDialog({ state }: ExportDialogProps) {
           ctx.fillStyle = state.background || "#000000";
           ctx.fillRect(0, 0, W, H);
 
-          // Manage video playback — seek/play/pause as clips enter and exit
-          for (const clip of sortedClips) {
-            if (clip.mediaType !== "video") continue;
-            const vid = videoEls.get(clip.id);
-            if (!vid) continue;
-
-            const visible = clipVisibleAt(clip, time) && !clip.hidden;
-            const resolved = resolveClip(clip, state.keyframes, time);
-
-            if (visible) {
-              const targetVT = resolved.videoTime;
-              if (!playingVideos.has(clip.id)) {
-                // First frame this clip is visible — seek to correct position
-                await seekVideo(vid, targetVT);
-                vid.play().catch(() => {});
-                playingVideos.add(clip.id);
-              } else {
-                // Drift correction: if we're more than 0.15s off, re-seek
-                const drift = Math.abs(vid.currentTime - targetVT);
-                if (drift > 0.15) {
-                  await seekVideo(vid, targetVT);
+          // Seek all visible video clips to exact frame time before drawing
+          await Promise.all(
+            sortedClips
+              .filter((clip) => clip.mediaType === "video" && !clip.hidden)
+              .map(async (clip) => {
+                const vid = videoEls.get(clip.id);
+                if (!vid) return;
+                const visible = clipVisibleAt(clip, time);
+                if (visible) {
+                  const resolved = resolveClip(clip, state.keyframes, time);
+                  await seekVideo(vid, resolved.videoTime);
                 }
-              }
-            } else {
-              if (playingVideos.has(clip.id)) {
-                vid.pause();
-                playingVideos.delete(clip.id);
-              }
-            }
-          }
+              }),
+          );
 
           // Render clips
           for (const clip of sortedClips) {
@@ -306,41 +313,165 @@ export default function ExportDialog({ state }: ExportDialogProps) {
 
           setExportState({ phase: "rendering", progress: frame / TOTAL_FRAMES });
 
-          // Throttle to FPS so MediaRecorder captures each frame
+          // Wait one frame interval so MediaRecorder captures this frame
           await new Promise<void>((resolve) => setTimeout(resolve, FRAME_MS));
         }
 
-        // Stop all video elements
         for (const vid of videoEls.values()) vid.pause();
 
         recorder.stop();
-        await new Promise<void>((resolve) => {
-          recorder.onstop = () => resolve();
-        });
+        await new Promise<void>((resolve) => { recorder.onstop = () => resolve(); });
 
         if (cancelRef.current) {
           setExportState({ phase: "idle", progress: 0 });
           return;
         }
 
-        const blob = new Blob(chunks, { type: mimeType.split(";")[0] });
+        const ext = format === "mp4" ? "mp4" : "webm";
+        const baseMime = mimeType.split(";")[0];
+        const blob = new Blob(chunks, { type: baseMime });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `export-${Date.now()}.webm`;
+        const filename = `export-${Date.now()}.${ext}`;
+        a.download = filename;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(url), 30_000);
 
-        setExportState({ phase: "done", progress: 1 });
+        setExportState({ phase: "done", progress: 1, downloadedFile: filename });
       } catch (err: any) {
         console.error("Export error:", err);
         setExportState({ phase: "error", progress: 0, errorMsg: err?.message ?? String(err) });
       }
     },
-    [state],
+    [state, resolution, format],
   );
+
+  const runAudioExport = useCallback(async () => {
+    cancelRef.current = false;
+    setExportState({ phase: "loading", progress: 0 });
+
+    try {
+      const TOTAL = state.duration;
+
+      // Collect all clips that produce audio
+      const audibleClips = state.clips.filter(
+        (c) => !c.hidden && !c.muted && (c.mediaType === "audio" || c.mediaType === "video") && c.src,
+      );
+
+      if (audibleClips.length === 0) {
+        throw new Error("No audible clips found in the timeline.");
+      }
+
+      // Create an AudioContext with a stream destination for recording
+      const audioCtx = new AudioContext();
+      const destination = audioCtx.createMediaStreamDestination();
+
+      // Create media elements and connect them
+      const mediaEls: Array<{ el: HTMLMediaElement; clip: Clip }> = [];
+
+      await Promise.all(
+        audibleClips.map(async (clip) => {
+          const el = clip.mediaType === "video"
+            ? document.createElement("video")
+            : document.createElement("audio");
+          el.src = clip.src!;
+          el.preload = "auto";
+          el.crossOrigin = "anonymous";
+
+          await new Promise<void>((resolve) => {
+            el.onloadeddata = () => resolve();
+            el.onerror = () => resolve();
+            setTimeout(resolve, 8000);
+            el.load();
+          });
+
+          try {
+            const src = audioCtx.createMediaElementSource(el);
+            const gainNode = audioCtx.createGain();
+            gainNode.gain.value = clip.volume ?? 1;
+            src.connect(gainNode);
+            gainNode.connect(destination);
+          } catch {}
+
+          mediaEls.push({ el, clip });
+        }),
+      );
+
+      // Set up MediaRecorder for audio
+      const audioMime = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/ogg"].find(
+        (m) => MediaRecorder.isTypeSupported(m),
+      ) ?? "audio/webm";
+
+      const recorder = new MediaRecorder(destination.stream, { mimeType: audioMime });
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.start(200);
+
+      setExportState({ phase: "rendering", progress: 0 });
+
+      // Start playback for all clips at the correct start time
+      const startWallTime = audioCtx.currentTime;
+      for (const { el, clip } of mediaEls) {
+        el.currentTime = clip.trimStart ?? 0;
+        el.playbackRate = clip.speed ?? 1;
+        el.muted = false;
+        el.volume = Math.max(0, Math.min(1, clip.volume ?? 1));
+        // Schedule play at the clip's startTime offset
+        if (clip.startTime <= 0) {
+          el.play().catch(() => {});
+        } else {
+          setTimeout(() => {
+            if (!cancelRef.current) el.play().catch(() => {});
+          }, clip.startTime * 1000);
+        }
+      }
+
+      // Monitor progress in real-time
+      const startMs = Date.now();
+      await new Promise<void>((resolve) => {
+        const interval = setInterval(() => {
+          const elapsed = (Date.now() - startMs) / 1000;
+          const progress = Math.min(elapsed / TOTAL, 1);
+          setExportState({ phase: "rendering", progress });
+          if (cancelRef.current || elapsed >= TOTAL) {
+            clearInterval(interval);
+            resolve();
+          }
+        }, 200);
+      });
+
+      // Stop everything
+      for (const { el } of mediaEls) { el.pause(); }
+      recorder.stop();
+      await new Promise<void>((resolve) => { recorder.onstop = () => resolve(); });
+
+      if (cancelRef.current) {
+        setExportState({ phase: "idle", progress: 0 });
+        return;
+      }
+
+      const ext = audioMime.includes("ogg") ? "ogg" : "webm";
+      const blob = new Blob(chunks, { type: audioMime.split(";")[0] });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const filename = `audio-export-${Date.now()}.${ext}`;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+
+      audioCtx.close();
+      setExportState({ phase: "done", progress: 1, downloadedFile: filename });
+    } catch (err: any) {
+      console.error("Audio export error:", err);
+      setExportState({ phase: "error", progress: 0, errorMsg: err?.message ?? String(err) });
+    }
+  }, [state]);
 
   const cancel = () => {
     cancelRef.current = true;
@@ -350,6 +481,18 @@ export default function ExportDialog({ state }: ExportDialogProps) {
   const reset = () => setExportState({ phase: "idle", progress: 0 });
 
   const isRunning = exportState.phase === "loading" || exportState.phase === "rendering";
+
+  const resolutionOptions: { value: Resolution; label: string; dims: string }[] = [
+    { value: "full", label: "Full Res", dims: `${state.canvasWidth}×${state.canvasHeight}` },
+    { value: "720p", label: "720p", dims: `${Math.round(state.canvasWidth * computeScale("720p", state.canvasWidth, state.canvasHeight))}×${Math.round(state.canvasHeight * computeScale("720p", state.canvasWidth, state.canvasHeight))}` },
+    { value: "480p", label: "480p", dims: `${Math.round(state.canvasWidth * computeScale("480p", state.canvasWidth, state.canvasHeight))}×${Math.round(state.canvasHeight * computeScale("480p", state.canvasWidth, state.canvasHeight))}` },
+    { value: "half", label: "Half", dims: `${Math.round(state.canvasWidth * 0.5)}×${Math.round(state.canvasHeight * 0.5)}` },
+  ];
+
+  const videoFormatOptions: { value: ExportFormat; label: string; desc: string }[] = [
+    { value: "webm", label: "WebM", desc: "Best compatibility" },
+    { value: "mp4", label: "MP4", desc: "If browser supports" },
+  ];
 
   return (
     <Dialog
@@ -369,11 +512,12 @@ export default function ExportDialog({ state }: ExportDialogProps) {
 
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Export Video</DialogTitle>
+          <DialogTitle>Export</DialogTitle>
         </DialogHeader>
 
         {exportState.phase === "idle" && (
           <div className="space-y-4">
+            {/* Info */}
             <div className="text-xs text-muted-foreground space-y-1">
               <div className="flex justify-between">
                 <span>Duration</span>
@@ -383,29 +527,86 @@ export default function ExportDialog({ state }: ExportDialogProps) {
                 <span>Clips</span>
                 <span className="tabular-nums font-medium text-foreground">{state.clips.length}</span>
               </div>
-              <div className="flex justify-between">
-                <span>Format</span>
-                <span className="font-medium text-foreground">WebM (browser-encoded)</span>
+            </div>
+
+            {/* Format tabs */}
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Export Type</p>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md border text-xs transition-colors ${format !== "audio" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}
+                  onClick={() => setFormat(format === "mp4" ? "mp4" : "webm")}
+                >
+                  <Video className="w-3.5 h-3.5 shrink-0" />
+                  <span>Video</span>
+                </button>
+                <button
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md border text-xs transition-colors ${format === "audio" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}
+                  onClick={() => setFormat("audio")}
+                >
+                  <Music className="w-3.5 h-3.5 shrink-0" />
+                  <span>Audio Only</span>
+                </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-2">
-              <div className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
-                Full Resolution — {state.canvasWidth}×{state.canvasHeight}
-              </div>
-              <Button className="w-full gap-2" onClick={() => runExport(1)}>
-                <Download className="w-3.5 h-3.5" />
-                Export {state.canvasWidth}×{state.canvasHeight}
-              </Button>
-              <Button variant="outline" className="w-full gap-2 text-xs" onClick={() => runExport(0.5)}>
-                <Download className="w-3.5 h-3.5" />
-                Export Half-Res {Math.round(state.canvasWidth * 0.5)}×{Math.round(state.canvasHeight * 0.5)}
-              </Button>
-            </div>
+            {/* Video-specific options */}
+            {format !== "audio" && (
+              <>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Resolution</p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {resolutionOptions.map((r) => (
+                      <button
+                        key={r.value}
+                        className={`px-2 py-1.5 rounded-md border text-left text-[10px] transition-colors ${resolution === r.value ? "border-primary bg-primary/10" : "border-border hover:bg-muted/40"}`}
+                        onClick={() => setResolution(r.value)}
+                      >
+                        <div className={`font-medium ${resolution === r.value ? "text-primary" : "text-foreground"}`}>{r.label}</div>
+                        <div className="text-muted-foreground tabular-nums">{r.dims}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Format</p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {videoFormatOptions.map((f) => (
+                      <button
+                        key={f.value}
+                        className={`px-2 py-1.5 rounded-md border text-left text-[10px] transition-colors ${format === f.value ? "border-primary bg-primary/10" : "border-border hover:bg-muted/40"}`}
+                        onClick={() => setFormat(f.value)}
+                      >
+                        <div className={`font-medium ${format === f.value ? "text-primary" : "text-foreground"}`}>{f.label}</div>
+                        <div className="text-muted-foreground">{f.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <Button className="w-full gap-2" onClick={runVideoExport}>
+                  <Download className="w-3.5 h-3.5" />
+                  Export {W_out}×{H_out} · {format.toUpperCase()}
+                </Button>
+              </>
+            )}
+
+            {/* Audio export */}
+            {format === "audio" && (
+              <>
+                <div className="text-xs text-muted-foreground space-y-1 bg-muted/20 rounded-md p-2.5">
+                  <p>Exports all audio and video clips as a mixed audio file (WebM/Opus). Plays back in real time — takes the same time as your video duration.</p>
+                </div>
+                <Button className="w-full gap-2" onClick={runAudioExport}>
+                  <Music className="w-3.5 h-3.5" />
+                  Export Audio ({state.duration.toFixed(1)}s)
+                </Button>
+              </>
+            )}
 
             <p className="text-[10px] text-muted-foreground leading-relaxed">
-              Export renders your timeline frame-by-frame in the browser. The video file will download
-              automatically when complete. Export time approximately equals video duration.
+              Video export renders frame-by-frame in the browser. The file downloads automatically when complete.
             </p>
           </div>
         )}
@@ -416,12 +617,14 @@ export default function ExportDialog({ state }: ExportDialogProps) {
               <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
               <div className="flex-1">
                 <p className="text-sm font-medium">
-                  {exportState.phase === "loading" ? "Loading media assets…" : "Rendering frames…"}
+                  {exportState.phase === "loading" ? "Loading media assets…" : format === "audio" ? "Recording audio…" : "Rendering frames…"}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  {exportState.phase === "rendering"
+                  {exportState.phase === "rendering" && format !== "audio"
                     ? `${Math.round(exportState.progress * 100)}% · Frame ${Math.round(exportState.progress * Math.ceil(state.duration * FPS))} / ${Math.ceil(state.duration * FPS)}`
-                    : "Preloading video & image clips"}
+                    : exportState.phase === "rendering" && format === "audio"
+                      ? `${Math.round(exportState.progress * 100)}% · ${(exportState.progress * state.duration).toFixed(1)}s / ${state.duration.toFixed(1)}s`
+                      : "Preloading video & image clips"}
                 </p>
               </div>
             </div>
@@ -438,7 +641,9 @@ export default function ExportDialog({ state }: ExportDialogProps) {
           <div className="space-y-3 text-center py-2">
             <div className="text-2xl">✅</div>
             <p className="text-sm font-medium">Export complete!</p>
-            <p className="text-xs text-muted-foreground">Your .webm file has been downloaded.</p>
+            {exportState.downloadedFile && (
+              <p className="text-xs text-muted-foreground font-mono break-all">{exportState.downloadedFile}</p>
+            )}
             <Button variant="outline" size="sm" className="w-full" onClick={reset}>
               Export again
             </Button>
