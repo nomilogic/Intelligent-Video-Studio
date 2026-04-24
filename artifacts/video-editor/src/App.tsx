@@ -18,6 +18,11 @@ function Editor() {
   const [root, dispatch] = useReducer(rootReducer, initialRootState);
   const state = root.present;
   const rafRef = useRef<number | null>(null);
+  const currentTimeRef = useRef(state.currentTime);
+  const durationRef = useRef(state.duration);
+
+  currentTimeRef.current = state.currentTime;
+  durationRef.current = state.duration;
 
   // Playback loop using rAF for smoother updates
   useEffect(() => {
@@ -26,8 +31,8 @@ function Editor() {
     const tick = (now: number) => {
       const dt = (now - last) / 1000;
       last = now;
-      const next = state.currentTime + dt;
-      if (next >= state.duration) {
+      const next = currentTimeRef.current + dt;
+      if (next >= durationRef.current) {
         dispatch({ type: "SET_PLAYING", payload: false });
         dispatch({ type: "SET_TIME", payload: 0 });
         return;
