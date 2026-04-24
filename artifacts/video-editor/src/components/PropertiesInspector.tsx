@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { resolveClip } from "../lib/animation";
 
 interface PropertiesInspectorProps {
   state: EditorState;
@@ -49,10 +50,11 @@ function Section({ title, action, children }: { title: string; action?: React.Re
 }
 
 function NumPair({
-  label, value, min, max, step, onChange, onKeyframe, suffix = "",
+  label, value, min, max, step, onChange, onKeyframe, hasKeyframe, isAtKeyframe, suffix = "",
 }: {
   label: string; value: number; min: number; max: number; step: number;
-  onChange: (v: number) => void; onKeyframe?: () => void; suffix?: string;
+  onChange: (v: number) => void; onKeyframe?: () => void;
+  hasKeyframe?: boolean; isAtKeyframe?: boolean; suffix?: string;
 }) {
   return (
     <div className="space-y-1">
@@ -60,12 +62,25 @@ function NumPair({
         <Label className="text-muted-foreground flex items-center gap-1">
           {label}
           {onKeyframe && (
-            <button onClick={onKeyframe} title="Add keyframe at playhead">
-              <Diamond className="w-2.5 h-2.5 text-yellow-400 hover:text-yellow-300 fill-current" />
+            <button
+              onClick={onKeyframe}
+              title={isAtKeyframe ? "Keyframe set at playhead" : hasKeyframe ? "Update keyframe at playhead" : "Add keyframe at playhead"}
+            >
+              <Diamond
+                className={`w-2.5 h-2.5 transition-colors ${
+                  isAtKeyframe
+                    ? "text-yellow-300 fill-yellow-300"
+                    : hasKeyframe
+                      ? "text-yellow-500 fill-yellow-500/40 hover:fill-yellow-400"
+                      : "text-yellow-600 hover:text-yellow-400"
+                }`}
+              />
             </button>
           )}
         </Label>
-        <span className="tabular-nums text-foreground">{value.toFixed(value < 1 && value > -1 ? 2 : 1)}{suffix}</span>
+        <span className={`tabular-nums ${hasKeyframe ? "text-yellow-400" : "text-foreground"}`}>
+          {value.toFixed(value < 1 && value > -1 ? 2 : 1)}{suffix}
+        </span>
       </div>
       <Slider value={[value]} min={min} max={max} step={step} onValueChange={([v]) => onChange(v)} />
     </div>
@@ -155,14 +170,28 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
     dispatch({ type: "UPDATE_CLIP", payload: { id: clip.id, updates } });
   };
 
+  // Resolved clip values at the current playhead time (respects any existing keyframes)
+  const resolved = clip ? resolveClip(clip, state.keyframes, state.currentTime) : null;
+
   const addKeyframe = (property: string) => {
-    if (!clip) return;
-    const value = (clip as any)[property] ?? 0;
+    if (!clip || !resolved) return;
+    // Capture the interpolated value at current time so the keyframe matches what you see
+    const value = (resolved as any)[property] ?? (clip as any)[property] ?? 0;
     dispatch({
       type: "ADD_KEYFRAME",
       payload: { clipId: clip.id, time: state.currentTime, property, value, easing: "easeInOut" },
     });
   };
+
+  // Returns true if this property has ANY keyframes for the selected clip
+  const hasKf = (property: string) => clip
+    ? state.keyframes.some((k) => k.clipId === clip.id && k.property === property)
+    : false;
+
+  // Returns true if a keyframe exists at EXACTLY the current playhead time
+  const isAtKf = (property: string) => clip
+    ? state.keyframes.some((k) => k.clipId === clip.id && k.property === property && Math.abs(k.time - state.currentTime) < 0.02)
+    : false;
 
   const setFilter = (key: keyof typeof DEFAULT_FILTERS, value: number) => {
     if (!clip) return;
@@ -344,18 +373,14 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
                   <RotateCcw className="w-3 h-3" />
                 </Button>
               }>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {(["x", "y", "width", "height"] as const).map((k) => (
-                    <div key={k}>
-                      <Label className="text-[10px] text-muted-foreground uppercase">{k}</Label>
-                      <Input type="number" step={0.01} value={(clip as any)[k].toFixed(2)} onChange={(e) => update({ [k]: parseFloat(e.target.value) } as any)} className="h-7 text-xs" />
-                    </div>
-                  ))}
-                </div>
+                <NumPair label="X" value={clip.x} min={-1} max={2} step={0.01} onChange={(v) => update({ x: v })} onKeyframe={() => addKeyframe("x")} hasKeyframe={hasKf("x")} isAtKeyframe={isAtKf("x")} />
+                <NumPair label="Y" value={clip.y} min={-1} max={2} step={0.01} onChange={(v) => update({ y: v })} onKeyframe={() => addKeyframe("y")} hasKeyframe={hasKf("y")} isAtKeyframe={isAtKf("y")} />
+                <NumPair label="W" value={clip.width} min={0.01} max={2} step={0.01} onChange={(v) => update({ width: v })} onKeyframe={() => addKeyframe("width")} hasKeyframe={hasKf("width")} isAtKeyframe={isAtKf("width")} />
+                <NumPair label="H" value={clip.height} min={0.01} max={2} step={0.01} onChange={(v) => update({ height: v })} onKeyframe={() => addKeyframe("height")} hasKeyframe={hasKf("height")} isAtKeyframe={isAtKf("height")} />
 
-                <NumPair label="Rotation" value={clip.rotation} min={-180} max={180} step={1} suffix="°" onChange={(v) => update({ rotation: v })} onKeyframe={() => addKeyframe("rotation")} />
-                <NumPair label="Scale" value={clip.scale} min={0.1} max={3} step={0.05} suffix="x" onChange={(v) => update({ scale: v })} onKeyframe={() => addKeyframe("scale")} />
-                <NumPair label="Opacity" value={clip.opacity} min={0} max={1} step={0.01} onChange={(v) => update({ opacity: v })} onKeyframe={() => addKeyframe("opacity")} />
+                <NumPair label="Rotation" value={clip.rotation} min={-180} max={180} step={1} suffix="°" onChange={(v) => update({ rotation: v })} onKeyframe={() => addKeyframe("rotation")} hasKeyframe={hasKf("rotation")} isAtKeyframe={isAtKf("rotation")} />
+                <NumPair label="Scale" value={clip.scale} min={0.1} max={3} step={0.05} suffix="x" onChange={(v) => update({ scale: v })} onKeyframe={() => addKeyframe("scale")} hasKeyframe={hasKf("scale")} isAtKeyframe={isAtKf("scale")} />
+                <NumPair label="Opacity" value={clip.opacity} min={0} max={1} step={0.01} onChange={(v) => update({ opacity: v })} onKeyframe={() => addKeyframe("opacity")} hasKeyframe={hasKf("opacity")} isAtKeyframe={isAtKf("opacity")} />
 
                 <div className="flex gap-1.5">
                   <Button variant={clip.flipH ? "secondary" : "outline"} size="sm" className="h-7 text-xs flex-1" onClick={() => update({ flipH: !clip.flipH })}>
@@ -639,7 +664,7 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
 
             <TabsContent value="audio" className="m-0">
               <Section title="Volume">
-                <NumPair label="Volume" value={clip.volume} min={0} max={1} step={0.01} onChange={(v) => update({ volume: v })} onKeyframe={() => addKeyframe("volume")} />
+                <NumPair label="Volume" value={clip.volume} min={0} max={1} step={0.01} onChange={(v) => update({ volume: v })} onKeyframe={() => addKeyframe("volume")} hasKeyframe={hasKf("volume")} isAtKeyframe={isAtKf("volume")} />
                 <Button
                   variant={clip.muted ? "secondary" : "outline"}
                   size="sm"
