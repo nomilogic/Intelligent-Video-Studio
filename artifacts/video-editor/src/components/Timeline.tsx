@@ -34,7 +34,8 @@ type DragState =
   | { kind: "move"; clipId: string; startX: number; startY: number; origStart: number; origTrack: number }
   | { kind: "resize-l"; clipId: string; startX: number; origStart: number; origDuration: number; origTrim: number; speed: number }
   | { kind: "resize-r"; clipId: string; startX: number; origDuration: number }
-  | { kind: "playhead"; startX: number; origTime: number };
+  | { kind: "playhead"; startX: number; origTime: number }
+  | { kind: "keyframe"; kfId: string; clipStart: number; clipEnd: number; origTime: number; startX: number };
 
 export default function Timeline({ state, dispatch }: TimelineProps) {
   const rulerRef = useRef<HTMLDivElement>(null);
@@ -189,6 +190,11 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
           type: "UPDATE_CLIP",
           payload: { id: drag.clipId, updates: { duration: Math.max(0.1, clampedEnd - clip.startTime) } },
         });
+      } else if (drag.kind === "keyframe") {
+        const dx = ev.clientX - drag.startX;
+        const dt = dx / PPS;
+        const newTime = Math.max(drag.clipStart, Math.min(drag.clipEnd, drag.origTime + dt));
+        dispatch({ type: "UPDATE_KEYFRAME", payload: { id: drag.kfId, time: newTime } });
       } else if (drag.kind === "resize-l") {
         const dx = ev.clientX - drag.startX;
         const dt = dx / PPS;
@@ -740,17 +746,43 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
                           )}
                         </div>
 
-                        {/* Keyframe markers */}
+                        {/* Keyframe markers — click to jump, drag to reposition, right-click to delete */}
                         {clipKeyframes.map((kf) => {
                           const localPx = (kf.time - clip.startTime) * PPS;
                           if (localPx < 0 || localPx > width) return null;
                           return (
                             <div
                               key={kf.id}
-                              className="absolute bottom-0 w-1.5 h-1.5 bg-yellow-300 rotate-45 -translate-x-1/2"
-                              style={{ left: localPx }}
-                              title={`${kf.property} = ${kf.value}`}
-                            />
+                              className="absolute z-20 flex flex-col items-center cursor-ew-resize group/kf"
+                              style={{ left: localPx, bottom: 2, transform: "translateX(-50%)" }}
+                              title={`${kf.property}: ${typeof kf.value === "number" ? kf.value.toFixed(2) : kf.value} @ ${kf.time.toFixed(2)}s\nDrag to reposition · Right-click to delete`}
+                              onMouseDown={(e) => {
+                                e.stopPropagation();
+                                dispatch({ type: "SET_TIME", payload: kf.time });
+                                setDrag({
+                                  kind: "keyframe",
+                                  kfId: kf.id,
+                                  clipStart: clip.startTime,
+                                  clipEnd: clip.startTime + clip.duration,
+                                  origTime: kf.time,
+                                  startX: e.clientX,
+                                });
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                dispatch({ type: "SET_TIME", payload: kf.time });
+                              }}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                dispatch({ type: "DELETE_KEYFRAME", payload: kf.id });
+                              }}
+                            >
+                              <span className="text-[7px] text-yellow-200 leading-none mb-0.5 opacity-0 group-hover/kf:opacity-100 bg-black/60 px-0.5 rounded whitespace-nowrap pointer-events-none">
+                                {kf.property}
+                              </span>
+                              <div className="w-2.5 h-2.5 bg-yellow-400 rotate-45 border border-yellow-200/60 group-hover/kf:bg-yellow-200 group-hover/kf:scale-125 transition-transform" />
+                            </div>
                           );
                         })}
 

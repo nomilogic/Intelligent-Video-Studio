@@ -1,4 +1,4 @@
-import { EditorState, EditorAction, Clip, DEFAULT_FILTERS } from "../lib/types";
+import { EditorState, EditorAction, Clip, DEFAULT_FILTERS, EasingType } from "../lib/types";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
@@ -485,25 +485,102 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
                 <>
                   <Separator />
                   <Section title="Keyframes">
-                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                    <div className="space-y-1 max-h-52 overflow-y-auto">
                       {state.keyframes
                         .filter((k) => k.clipId === clip.id)
                         .sort((a, b) => a.time - b.time)
                         .map((kf) => (
-                          <div key={kf.id} className="flex items-center justify-between text-[10px] bg-muted/30 px-2 py-1 rounded group">
-                            <Diamond className="w-2.5 h-2.5 text-yellow-400 fill-current" />
-                            <span className="text-yellow-300">{kf.property}</span>
-                            <span className="tabular-nums text-muted-foreground">{kf.time.toFixed(1)}s</span>
-                            <span className="tabular-nums">{typeof kf.value === "number" ? kf.value.toFixed(2) : kf.value}</span>
-                            <button
-                              className="opacity-0 group-hover:opacity-100"
-                              onClick={() => dispatch({ type: "DELETE_KEYFRAME", payload: kf.id })}
-                            >
-                              <Trash2 className="w-2.5 h-2.5 text-destructive" />
-                            </button>
+                          <div key={kf.id} className="bg-muted/30 rounded overflow-hidden group">
+                            <div className="flex items-center gap-1.5 px-2 py-1 text-[10px]">
+                              <Diamond className="w-2.5 h-2.5 text-yellow-400 fill-current shrink-0" />
+                              <span className="text-yellow-300 font-medium min-w-[56px]">{kf.property}</span>
+                              <button
+                                className="tabular-nums text-muted-foreground hover:text-primary"
+                                title="Jump to this keyframe"
+                                onClick={() => dispatch({ type: "SET_TIME", payload: kf.time })}
+                              >
+                                {kf.time.toFixed(2)}s
+                              </button>
+                              <span className="tabular-nums text-foreground ml-auto">
+                                {typeof kf.value === "number" ? kf.value.toFixed(2) : kf.value}
+                              </span>
+                              <button
+                                className="opacity-0 group-hover:opacity-100 ml-1"
+                                onClick={() => dispatch({ type: "DELETE_KEYFRAME", payload: kf.id })}
+                                title="Delete keyframe"
+                              >
+                                <Trash2 className="w-2.5 h-2.5 text-destructive" />
+                              </button>
+                            </div>
+                            <div className="px-2 pb-1.5">
+                              <Select
+                                value={kf.easing || "quadInOut"}
+                                onValueChange={(v) =>
+                                  dispatch({
+                                    type: "UPDATE_KEYFRAME",
+                                    payload: { id: kf.id, easing: v as EasingType },
+                                  })
+                                }
+                              >
+                                <SelectTrigger className="h-5 text-[9px] bg-muted/40 border-0 px-1.5 gap-1">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="text-xs max-h-52">
+                                  {([
+                                    ["─── Linear", null],
+                                    ["Linear", "linear"],
+                                    ["─── Quadratic", null],
+                                    ["Quad In", "quadIn"],
+                                    ["Quad Out", "quadOut"],
+                                    ["Quad In-Out", "quadInOut"],
+                                    ["─── Cubic", null],
+                                    ["Cubic In", "cubicIn"],
+                                    ["Cubic Out", "cubicOut"],
+                                    ["Cubic In-Out", "cubicInOut"],
+                                    ["─── Quartic", null],
+                                    ["Quart In", "quartIn"],
+                                    ["Quart Out", "quartOut"],
+                                    ["Quart In-Out", "quartInOut"],
+                                    ["─── Sinusoidal", null],
+                                    ["Sine In", "sineIn"],
+                                    ["Sine Out", "sineOut"],
+                                    ["Sine In-Out", "sineInOut"],
+                                    ["─── Exponential", null],
+                                    ["Expo In", "expoIn"],
+                                    ["Expo Out", "expoOut"],
+                                    ["Expo In-Out", "expoInOut"],
+                                    ["─── Back (overshoot)", null],
+                                    ["Back In", "backIn"],
+                                    ["Back Out", "backOut"],
+                                    ["Back In-Out", "backInOut"],
+                                    ["─── Elastic", null],
+                                    ["Elastic In", "elasticIn"],
+                                    ["Elastic Out", "elasticOut"],
+                                    ["Elastic In-Out", "elasticInOut"],
+                                    ["─── Bounce", null],
+                                    ["Bounce In", "bounceIn"],
+                                    ["Bounce Out", "bounceOut"],
+                                    ["Bounce In-Out", "bounceInOut"],
+                                  ] as [string, string | null][]).map(([label, value]) =>
+                                    value === null ? (
+                                      <div key={label} className="px-2 py-0.5 text-[9px] text-muted-foreground font-medium tracking-wider">
+                                        {label}
+                                      </div>
+                                    ) : (
+                                      <SelectItem key={value} value={value} className="text-xs">
+                                        {label}
+                                      </SelectItem>
+                                    ),
+                                  )}
+                                </SelectContent>
+                              </Select>
+                            </div>
                           </div>
                         ))}
                     </div>
+                    <p className="text-[9px] text-muted-foreground mt-1 leading-relaxed">
+                      Drag diamonds on timeline to reposition · right-click to delete
+                    </p>
                   </Section>
                 </>
               )}

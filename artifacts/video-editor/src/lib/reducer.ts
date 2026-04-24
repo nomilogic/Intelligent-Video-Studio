@@ -624,6 +624,13 @@ function presentReducer(state: EditorState, action: EditorAction): EditorState {
       }
       return { ...state, keyframes: [...state.keyframes, kf] };
     }
+    case "UPDATE_KEYFRAME":
+      return {
+        ...state,
+        keyframes: state.keyframes.map((k) =>
+          k.id === action.payload.id ? { ...k, ...action.payload } : k,
+        ),
+      };
     case "DELETE_KEYFRAME":
       return { ...state, keyframes: state.keyframes.filter((k) => k.id !== action.payload) };
     case "ADD_TRANSITION": {

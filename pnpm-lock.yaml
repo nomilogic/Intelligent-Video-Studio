@@ -406,6 +406,10 @@ importers:
         version: 3.25.76
 
   artifacts/video-editor:
+    dependencies:
+      '@tweenjs/tween.js':
+        specifier: ^25.0.0
+        version: 25.0.0
     devDependencies:
       '@hookform/resolvers':
         specifier: ^3.10.0
@@ -1679,6 +1683,9 @@ packages:
     resolution: {integrity: sha512-0Lu6y5t+tvlTJMTO7oh5NSpJfpg/5D41LlThfepTixPYkJ0sE2Jj0m0f6yYqujBwIXlId87e234+MxG3D3g7kg==}
     peerDependencies:
       react: ^18 || ^19
+
+  '@tweenjs/tween.js@25.0.0':
+    resolution: {integrity: sha512-XKLA6syeBUaPzx4j3qwMqzzq+V4uo72BnlbOjmuljLrRqdsd3qnzvZZoxvMHZ23ndsRS4aufU6JOZYpCbU6T1A==}
 
   '@types/babel__core@7.20.5':
     resolution: {integrity: sha512-qoQprZvz5wQFJwMDqeseRXWv3rqMvhgpbXFfVyWhbx9X47POIA6i/+dXefEmZKoAgOaTdaIgNSMqMIU61yRyzA==}
@@ -4513,6 +4520,8 @@ snapshots:
     dependencies:
       '@tanstack/query-core': 5.90.20
       react: 19.1.0
+
+  '@tweenjs/tween.js@25.0.0': {}
 
   '@types/babel__core@7.20.5':
     dependencies:

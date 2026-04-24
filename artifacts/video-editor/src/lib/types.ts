@@ -1,6 +1,18 @@
 export type MediaType = "video" | "audio" | "image" | "text" | "blank";
 
-export type EasingType = "linear" | "ease" | "easeIn" | "easeOut" | "easeInOut";
+export type EasingType =
+  | "linear"
+  | "quadIn" | "quadOut" | "quadInOut"
+  | "cubicIn" | "cubicOut" | "cubicInOut"
+  | "quartIn" | "quartOut" | "quartInOut"
+  | "quintIn" | "quintOut" | "quintInOut"
+  | "sineIn" | "sineOut" | "sineInOut"
+  | "expoIn" | "expoOut" | "expoInOut"
+  | "circIn" | "circOut" | "circInOut"
+  | "backIn" | "backOut" | "backInOut"
+  | "elasticIn" | "elasticOut" | "elasticInOut"
+  | "bounceIn" | "bounceOut" | "bounceInOut"
+  | "ease" | "easeIn" | "easeOut" | "easeInOut";
 
 export interface ClipFilters {
   brightness: number;
@@ -166,6 +178,7 @@ export type EditorAction =
   | { type: "TOGGLE_SNAP" }
   | { type: "SET_BACKGROUND"; payload: string }
   | { type: "ADD_KEYFRAME"; payload: Omit<Keyframe, "id"> & { id?: string } }
+  | { type: "UPDATE_KEYFRAME"; payload: { id: string; time?: number; value?: number; easing?: EasingType } }
   | { type: "DELETE_KEYFRAME"; payload: string }
   | { type: "ADD_TRANSITION"; payload: Omit<Transition, "id"> & { id?: string } }
   | { type: "DELETE_TRANSITION"; payload: string }

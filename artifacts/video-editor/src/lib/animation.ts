@@ -1,19 +1,50 @@
 import type { Clip, ClipFilters, EasingType, Keyframe } from "./types";
+import TWEEN from "@tweenjs/tween.js";
+
+const E = TWEEN.Easing;
+
+const EASING_MAP: Record<string, (t: number) => number> = {
+  linear:       E.Linear.None,
+  quadIn:       E.Quadratic.In,
+  quadOut:      E.Quadratic.Out,
+  quadInOut:    E.Quadratic.InOut,
+  cubicIn:      E.Cubic.In,
+  cubicOut:     E.Cubic.Out,
+  cubicInOut:   E.Cubic.InOut,
+  quartIn:      E.Quartic.In,
+  quartOut:     E.Quartic.Out,
+  quartInOut:   E.Quartic.InOut,
+  quintIn:      E.Quintic.In,
+  quintOut:     E.Quintic.Out,
+  quintInOut:   E.Quintic.InOut,
+  sineIn:       E.Sinusoidal.In,
+  sineOut:      E.Sinusoidal.Out,
+  sineInOut:    E.Sinusoidal.InOut,
+  expoIn:       E.Exponential.In,
+  expoOut:      E.Exponential.Out,
+  expoInOut:    E.Exponential.InOut,
+  circIn:       E.Circular.In,
+  circOut:      E.Circular.Out,
+  circInOut:    E.Circular.InOut,
+  backIn:       E.Back.In,
+  backOut:      E.Back.Out,
+  backInOut:    E.Back.InOut,
+  elasticIn:    E.Elastic.In,
+  elasticOut:   E.Elastic.Out,
+  elasticInOut: E.Elastic.InOut,
+  bounceIn:     E.Bounce.In,
+  bounceOut:    E.Bounce.Out,
+  bounceInOut:  E.Bounce.InOut,
+  // Legacy aliases
+  ease:         E.Quadratic.InOut,
+  easeIn:       E.Quadratic.In,
+  easeOut:      E.Quadratic.Out,
+  easeInOut:    E.Quadratic.InOut,
+};
 
 export function easeFn(t: number, type: EasingType): number {
-  switch (type) {
-    case "linear":
-      return t;
-    case "easeIn":
-      return t * t;
-    case "easeOut":
-      return 1 - (1 - t) * (1 - t);
-    case "easeInOut":
-      return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-    case "ease":
-    default:
-      return t * t * (3 - 2 * t);
-  }
+  const fn = EASING_MAP[type] ?? E.Quadratic.InOut;
+  return fn(Math.max(0, Math.min(1, t)));
 }
 
 export function clipVisibleAt(clip: Clip, time: number): boolean {
