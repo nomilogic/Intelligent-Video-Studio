@@ -106,26 +106,42 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
   const resolveNoOverlap = useCallback(
     (movingId: string, newTrack: number, desiredStart: number, clipDuration: number): number => {
       const siblings = trackSiblings(movingId, newTrack);
-      let start = Math.max(0, desiredStart);
-      // Iterate until stable (handles cascading conflicts)
-      for (let pass = 0; pass < siblings.length; pass++) {
-        let changed = false;
-        for (const sib of siblings) {
-          const sibEnd = sib.startTime + sib.duration;
-          const myEnd = start + clipDuration;
-          if (start < sibEnd - 0.001 && myEnd > sib.startTime + 0.001) {
-            // Overlap: snap to whichever edge is closer to the desired position
-            const snapLeft = Math.max(0, sib.startTime - clipDuration);
-            const snapRight = sibEnd;
-            start = Math.abs(desiredStart - snapLeft) <= Math.abs(desiredStart - snapRight)
-              ? snapLeft
-              : snapRight;
-            changed = true;
+      if (siblings.length === 0) return Math.max(0, desiredStart);
+
+      const occupied = siblings
+        .map((s) => ({ start: s.startTime, end: s.startTime + s.duration }))
+        .sort((a, b) => a.start - b.start);
+
+      const isValid = (pos: number) =>
+        pos >= 0 &&
+        !occupied.some((o) => pos < o.end - 0.001 && pos + clipDuration > o.start + 0.001);
+
+      // Collect all candidate positions (free edges) and pick the nearest valid one
+      const candidates = [
+        Math.max(0, desiredStart),
+        0,
+        ...occupied.map((o) => o.end),
+        ...occupied.map((o) => Math.max(0, o.start - clipDuration)),
+      ];
+
+      let best = -1;
+      let bestDist = Infinity;
+      for (const pos of candidates) {
+        if (isValid(pos)) {
+          const dist = Math.abs(desiredStart - pos);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = pos;
           }
         }
-        if (!changed) break;
       }
-      return start;
+
+      // If no valid candidate found (track is completely full), fallback to after last clip
+      if (best < 0) {
+        best = occupied[occupied.length - 1].end;
+      }
+
+      return best;
     },
     [trackSiblings],
   );
