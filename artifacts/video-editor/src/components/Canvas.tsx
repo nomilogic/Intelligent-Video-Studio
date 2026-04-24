@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 interface CanvasProps {
   state: EditorState;
   dispatch: React.Dispatch<EditorAction>;
+  canvasZoom: number;
+  onCanvasZoomChange: (z: number) => void;
 }
 
 type DragMode =
@@ -190,10 +192,43 @@ function MediaContent({ clip, videoTime, isPlaying }: { clip: Clip; videoTime: n
   );
 }
 
-export default function Canvas({ state, dispatch }: CanvasProps) {
+export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange }: CanvasProps) {
+  const outerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragMode | null>(null);
   const [snapGuides, setSnapGuides] = useState<{ x?: number; y?: number }>({});
+  const [fitSize, setFitSize] = useState({ w: 960, h: 540 });
+
+  // Measure available space and compute the "fit" size at zoom=1
+  useEffect(() => {
+    const el = outerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      const ratio = state.canvasWidth / state.canvasHeight;
+      if (width / height > ratio) {
+        setFitSize({ w: Math.round(height * ratio), h: Math.round(height) });
+      } else {
+        setFitSize({ w: Math.round(width), h: Math.round(width / ratio) });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [state.canvasWidth, state.canvasHeight]);
+
+  // Ctrl+wheel → zoom canvas
+  useEffect(() => {
+    const el = outerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+      onCanvasZoomChange(Math.max(0.1, Math.min(4, canvasZoom + delta)));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [canvasZoom, onCanvasZoomChange]);
 
   const visibleClips = useMemo(
     () =>
@@ -337,25 +372,32 @@ export default function Canvas({ state, dispatch }: CanvasProps) {
 
   const handles = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 
+  const displayW = Math.round(fitSize.w * canvasZoom);
+  const displayH = Math.round(fitSize.h * canvasZoom);
+
   return (
-    <div className="relative flex items-center justify-center w-full h-full overflow-hidden">
-      <div
-        ref={containerRef}
-        data-testid="canvas-preview"
-        className={cn(
-          "relative overflow-hidden cursor-default select-none shadow-2xl",
-          drag?.kind === "move" && "cursor-grabbing",
-        )}
-        style={{
-          aspectRatio: `${state.canvasWidth} / ${state.canvasHeight}`,
-          width: "min(100%, calc((100vh - 220px) * " + state.canvasWidth + " / " + state.canvasHeight + "))",
-          maxWidth: "100%",
-          maxHeight: "100%",
-          background: state.background,
-          containerType: "size",
-        }}
-        onMouseDown={onCanvasMouseDown}
-      >
+    <div
+      ref={outerRef}
+      className="w-full h-full overflow-auto flex items-center justify-center"
+      style={{ scrollbarGutter: "stable" }}
+    >
+      {/* Centering wrapper — shrinks to canvas size so scroll works correctly */}
+      <div style={{ minWidth: displayW, minHeight: displayH, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+        <div
+          ref={containerRef}
+          data-testid="canvas-preview"
+          className={cn(
+            "relative overflow-hidden cursor-default select-none shadow-2xl shrink-0",
+            drag?.kind === "move" && "cursor-grabbing",
+          )}
+          style={{
+            width: displayW,
+            height: displayH,
+            background: state.background,
+            containerType: "size",
+          }}
+          onMouseDown={onCanvasMouseDown}
+        >
         {/* Subtle grid */}
         <div
           className="absolute inset-0 pointer-events-none opacity-50"
@@ -474,7 +516,8 @@ export default function Canvas({ state, dispatch }: CanvasProps) {
         )}
 
         <div className="absolute bottom-2 right-3 text-white/40 text-xs font-mono tabular-nums pointer-events-none">
-          {state.canvasWidth}×{state.canvasHeight}
+          {state.canvasWidth}×{state.canvasHeight} · {Math.round(canvasZoom * 100)}%
+        </div>
         </div>
       </div>
     </div>

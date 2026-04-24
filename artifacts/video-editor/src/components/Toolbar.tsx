@@ -18,6 +18,8 @@ interface ToolbarProps {
   projectId?: number;
   canUndo: boolean;
   canRedo: boolean;
+  canvasZoom: number;
+  onCanvasZoomChange: (z: number) => void;
 }
 
 const SHORTCUTS: [string, string][] = [
@@ -39,7 +41,7 @@ const SHORTCUTS: [string, string][] = [
 
 const FPS_OPTIONS = [24, 25, 30, 50, 60];
 
-export default function Toolbar({ state, dispatch, projectId, canUndo, canRedo }: ToolbarProps) {
+export default function Toolbar({ state, dispatch, projectId, canUndo, canRedo, canvasZoom, onCanvasZoomChange }: ToolbarProps) {
   const { toast } = useToast();
   const updateProject = useUpdateProject();
   const [projectName, setProjectName] = useState("Untitled Project");
@@ -113,24 +115,28 @@ export default function Toolbar({ state, dispatch, projectId, canUndo, canRedo }
         variant="ghost"
         size="icon"
         className="w-8 h-8"
-        onClick={() => dispatch({ type: "SET_ZOOM", payload: Math.max(0.25, state.zoom - 0.25) })}
+        onClick={() => onCanvasZoomChange(Math.max(0.1, parseFloat((canvasZoom - 0.25).toFixed(2))))}
         data-testid="button-zoom-out"
-        title="Zoom Out (-)"
+        title="Zoom canvas out"
       >
         <ZoomOut className="w-4 h-4" />
       </Button>
 
-      <span className="text-xs text-muted-foreground w-12 text-center tabular-nums">
-        {Math.round(state.zoom * 100)}%
-      </span>
+      <button
+        className="text-xs text-muted-foreground w-12 text-center tabular-nums hover:text-foreground hover:bg-muted/30 rounded px-1 py-0.5"
+        title="Reset canvas zoom to 100%"
+        onClick={() => onCanvasZoomChange(1)}
+      >
+        {Math.round(canvasZoom * 100)}%
+      </button>
 
       <Button
         variant="ghost"
         size="icon"
         className="w-8 h-8"
-        onClick={() => dispatch({ type: "SET_ZOOM", payload: Math.min(4, state.zoom + 0.25) })}
+        onClick={() => onCanvasZoomChange(Math.min(4, parseFloat((canvasZoom + 0.25).toFixed(2))))}
         data-testid="button-zoom-in"
-        title="Zoom In (+)"
+        title="Zoom canvas in"
       >
         <ZoomIn className="w-4 h-4" />
       </Button>

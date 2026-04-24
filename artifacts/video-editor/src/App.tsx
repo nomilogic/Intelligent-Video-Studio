@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useCallback } from "react";
+import { useEffect, useReducer, useRef, useCallback, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -20,6 +20,7 @@ function Editor() {
   const rafRef = useRef<number | null>(null);
   const currentTimeRef = useRef(state.currentTime);
   const durationRef = useRef(state.duration);
+  const [canvasZoom, setCanvasZoom] = useState(1);
 
   currentTimeRef.current = state.currentTime;
   durationRef.current = state.duration;
@@ -114,10 +115,13 @@ function Editor() {
         dispatchTyped({ type: "SET_TIME", payload: state.duration });
       } else if (e.key === "+" || e.key === "=") {
         e.preventDefault();
-        dispatchTyped({ type: "SET_ZOOM", payload: state.zoom + 0.25 });
+        setCanvasZoom((z) => Math.min(4, parseFloat((z + 0.25).toFixed(2))));
       } else if (e.key === "-" || e.key === "_") {
         e.preventDefault();
-        dispatchTyped({ type: "SET_ZOOM", payload: state.zoom - 0.25 });
+        setCanvasZoom((z) => Math.max(0.1, parseFloat((z - 0.25).toFixed(2))));
+      } else if (e.key === "0") {
+        e.preventDefault();
+        setCanvasZoom(1);
       } else if (e.key === "Escape") {
         dispatchTyped({ type: "SELECT_CLIP", payload: null });
       }
@@ -133,14 +137,16 @@ function Editor() {
         dispatch={dispatchTyped}
         canUndo={root.past.length > 0}
         canRedo={root.future.length > 0}
+        canvasZoom={canvasZoom}
+        onCanvasZoomChange={setCanvasZoom}
       />
 
       <div className="flex-1 flex overflow-hidden min-h-0">
         <MediaPanel state={state} dispatch={dispatchTyped} />
 
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          <div className="flex-1 flex items-center justify-center bg-neutral-600 p-4 min-h-0 overflow-hidden">
-            <Canvas state={state} dispatch={dispatchTyped} />
+          <div className="flex-1 min-h-0 overflow-hidden bg-neutral-600">
+            <Canvas state={state} dispatch={dispatchTyped} canvasZoom={canvasZoom} onCanvasZoomChange={setCanvasZoom} />
           </div>
 
           <div className="flex flex-col border-t border-border bg-card" style={{ height: 320 }}>
