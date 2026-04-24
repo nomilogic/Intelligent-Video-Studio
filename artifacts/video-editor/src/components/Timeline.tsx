@@ -93,28 +93,41 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
     [snapPoints, state.snapEnabled, PPS],
   );
 
-  // Snap a clip's startTime to avoid overlapping other clips on the same track
+  // Returns the sorted siblings on a given track (excluding the moving clip)
+  const trackSiblings = useCallback(
+    (excludeId: string, trackIdx: number) =>
+      state.clips
+        .filter((c) => c.id !== excludeId && c.trackIndex === trackIdx)
+        .sort((a, b) => a.startTime - b.startTime),
+    [state.clips],
+  );
+
+  // Clamp a clip's startTime so it never overlaps siblings — snaps to nearest free edge
   const resolveNoOverlap = useCallback(
     (movingId: string, newTrack: number, desiredStart: number, clipDuration: number): number => {
-      const others = state.clips
-        .filter((c) => c.id !== movingId && c.trackIndex === newTrack)
-        .sort((a, b) => a.startTime - b.startTime);
+      const siblings = trackSiblings(movingId, newTrack);
       let start = Math.max(0, desiredStart);
-      for (const other of others) {
-        const otherEnd = other.startTime + other.duration;
-        const myEnd = start + clipDuration;
-        if (start < otherEnd - 0.01 && myEnd > other.startTime + 0.01) {
-          // Overlap — push to whichever edge requires less movement
-          const snapLeft = Math.max(0, other.startTime - clipDuration);
-          const snapRight = otherEnd;
-          const distLeft = Math.abs(desiredStart - snapLeft);
-          const distRight = Math.abs(desiredStart - snapRight);
-          start = distLeft <= distRight ? snapLeft : snapRight;
+      // Iterate until stable (handles cascading conflicts)
+      for (let pass = 0; pass < siblings.length; pass++) {
+        let changed = false;
+        for (const sib of siblings) {
+          const sibEnd = sib.startTime + sib.duration;
+          const myEnd = start + clipDuration;
+          if (start < sibEnd - 0.001 && myEnd > sib.startTime + 0.001) {
+            // Overlap: snap to whichever edge is closer to the desired position
+            const snapLeft = Math.max(0, sib.startTime - clipDuration);
+            const snapRight = sibEnd;
+            start = Math.abs(desiredStart - snapLeft) <= Math.abs(desiredStart - snapRight)
+              ? snapLeft
+              : snapRight;
+            changed = true;
+          }
         }
+        if (!changed) break;
       }
       return start;
     },
-    [state.clips],
+    [trackSiblings],
   );
 
   useEffect(() => {
@@ -147,20 +160,32 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
         });
       } else if (drag.kind === "resize-r") {
         const dx = ev.clientX - drag.startX;
-        const newDuration = Math.max(0.1, drag.origDuration + dx / PPS);
+        const rawDuration = Math.max(0.1, drag.origDuration + dx / PPS);
         const clip = state.clips.find((c) => c.id === drag.clipId);
         if (!clip) return;
-        const snapped = trySnap(clip.startTime + newDuration, drag.clipId);
+        const snappedEnd = trySnap(clip.startTime + rawDuration, drag.clipId);
+        // Cap right edge at the start of the nearest clip to the right on the same track
+        const nextClip = trackSiblings(drag.clipId, clip.trackIndex)
+          .find((s) => s.startTime >= clip.startTime);
+        const maxEnd = nextClip ? nextClip.startTime : Infinity;
+        const clampedEnd = Math.min(snappedEnd, maxEnd);
         dispatch({
           type: "UPDATE_CLIP",
-          payload: { id: drag.clipId, updates: { duration: Math.max(0.1, snapped - clip.startTime) } },
+          payload: { id: drag.clipId, updates: { duration: Math.max(0.1, clampedEnd - clip.startTime) } },
         });
       } else if (drag.kind === "resize-l") {
         const dx = ev.clientX - drag.startX;
         const dt = dx / PPS;
         let newStart = trySnap(drag.origStart + dt, drag.clipId);
         const maxStart = drag.origStart + drag.origDuration - 0.1;
-        newStart = Math.max(0, Math.min(maxStart, newStart));
+        // Cap left edge at the end of the nearest clip to the left on the same track
+        const siblings = trackSiblings(drag.clipId, 
+          state.clips.find((c) => c.id === drag.clipId)?.trackIndex ?? 0);
+        const prevClip = [...siblings]
+          .reverse()
+          .find((s) => s.startTime + s.duration <= drag.origStart + 0.001);
+        const minStart = prevClip ? prevClip.startTime + prevClip.duration : 0;
+        newStart = Math.max(minStart, Math.min(maxStart, newStart));
         const deltaTimeline = newStart - drag.origStart;
         const newDuration = drag.origDuration - deltaTimeline;
         // Adjust trimStart so the source plays from the correct frame after trimming the head.
@@ -184,7 +209,7 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [drag, dispatch, PPS, state.duration, state.tracks.length, state.clips, trySnap, resolveNoOverlap]);
+  }, [drag, dispatch, PPS, state.duration, state.tracks.length, state.clips, trySnap, resolveNoOverlap, trackSiblings]);
 
   const handleClipMouseDown = (e: React.MouseEvent, clip: Clip) => {
     e.stopPropagation();
