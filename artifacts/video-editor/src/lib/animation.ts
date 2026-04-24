@@ -43,6 +43,10 @@ const EASING_MAP: Record<string, (t: number) => number> = {
 };
 
 export function easeFn(t: number, type: EasingType): number {
+  // "step" = no tween: hold the previous keyframe's value until the next
+  // keyframe time is reached, then snap. Matches Adobe Animate / Flash
+  // behavior when a property has no motion tween enabled.
+  if (type === "step") return t >= 1 ? 1 : 0;
   const fn = EASING_MAP[type] ?? E.Quadratic.InOut;
   return fn(Math.max(0, Math.min(1, t)));
 }

@@ -8,6 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   Trash2, Diamond, Copy, FlipHorizontal2, FlipVertical2, Eye, EyeOff,
   Lock, Unlock, RotateCcw, Volume2, VolumeX, Wand2, Scissors, Crop,
+  Activity, Minus,
 } from "lucide-react";
 import { useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -50,11 +51,14 @@ function Section({ title, action, children }: { title: string; action?: React.Re
 }
 
 function NumPair({
-  label, value, min, max, step, onChange, onKeyframe, hasKeyframe, isAtKeyframe, suffix = "",
+  label, value, min, max, step, onChange, onKeyframe, hasKeyframe, isAtKeyframe,
+  tweened, onToggleTween, suffix = "",
 }: {
   label: string; value: number; min: number; max: number; step: number;
   onChange: (v: number) => void; onKeyframe?: () => void;
-  hasKeyframe?: boolean; isAtKeyframe?: boolean; suffix?: string;
+  hasKeyframe?: boolean; isAtKeyframe?: boolean;
+  tweened?: boolean; onToggleTween?: () => void;
+  suffix?: string;
 }) {
   return (
     <div className="space-y-1">
@@ -76,6 +80,19 @@ function NumPair({
                       : "text-yellow-400/60 fill-yellow-400/10 hover:text-yellow-400 hover:fill-yellow-400/30"
                 }`}
               />
+            </button>
+          )}
+          {onToggleTween && (
+            <button
+              onClick={onToggleTween}
+              title={tweened ? "Tween ON — animates between keyframes. Click to turn off." : "Tween OFF — values hold/snap between keyframes. Click to animate."}
+              className={`rounded px-0.5 py-0.5 transition-colors ${
+                tweened ? "hover:bg-emerald-400/20" : "hover:bg-muted/40"
+              }`}
+            >
+              {tweened
+                ? <Activity className="w-3 h-3 text-emerald-400" />
+                : <Minus className="w-3 h-3 text-muted-foreground/60" />}
             </button>
           )}
         </Label>
@@ -189,9 +206,14 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
       (clip as any)[property] ??
       0;
     const value = interpolateKeyframes(state.keyframes, clip.id, property, state.currentTime, baseValue) ?? baseValue;
+    // Inherit the property's existing tween state so adding a keyframe doesn't
+    // silently turn animation on. If no keyframes exist yet for this property,
+    // default to "step" (Adobe Animate / Flash style — explicit opt-in).
+    const existing = state.keyframes.find((k) => k.clipId === clip.id && k.property === property);
+    const easing: EasingType = existing ? existing.easing : "step";
     dispatch({
       type: "ADD_KEYFRAME",
-      payload: { clipId: clip.id, time: state.currentTime, property, value, easing: "easeInOut" },
+      payload: { clipId: clip.id, time: state.currentTime, property, value, easing },
     });
 
     // Open the Transform panel and activate the select / transform tool so the
@@ -221,6 +243,30 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
   const isAtKf = (property: string) => clip
     ? state.keyframes.some((k) => k.clipId === clip.id && k.property === property && Math.abs(k.time - state.currentTime) < 0.02)
     : false;
+
+  // Tween state for a property = "is this property animated between keyframes?"
+  // Adobe Animate / Flash style: a property is "tweened" when its keyframes
+  // use a smooth easing (i.e. NOT "step"). Newly added clips default to "step"
+  // so values just hold/snap until the user explicitly turns animation on.
+  const isTweened = (property: string) => clip
+    ? state.keyframes.some(
+        (k) => k.clipId === clip.id && k.property === property && k.easing !== "step",
+      )
+    : false;
+
+  // Toggle tweening for ALL keyframes of a given property on the selected clip.
+  // OFF -> easing "step" (hold/snap, no animation)
+  // ON  -> easing "easeInOut" (smooth interpolation)
+  const toggleTween = (property: string) => {
+    if (!clip) return;
+    const kfs = state.keyframes.filter((k) => k.clipId === clip.id && k.property === property);
+    if (kfs.length === 0) return;
+    const turningOn = !isTweened(property);
+    const nextEasing: EasingType = turningOn ? "easeInOut" : "step";
+    for (const kf of kfs) {
+      dispatch({ type: "UPDATE_KEYFRAME", payload: { id: kf.id, easing: nextEasing } });
+    }
+  };
 
   const setFilter = (key: keyof typeof DEFAULT_FILTERS, value: number) => {
     if (!clip) return;
@@ -447,14 +493,14 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
                   <RotateCcw className="w-3 h-3" />
                 </Button>
               }>
-                <NumPair label="X" value={liveVal("x", clip.x)} min={-1} max={2} step={0.01} onChange={(v) => updateAnimatable("x", v)} onKeyframe={() => addKeyframe("x")} hasKeyframe={hasKf("x")} isAtKeyframe={isAtKf("x")} />
-                <NumPair label="Y" value={liveVal("y", clip.y)} min={-1} max={2} step={0.01} onChange={(v) => updateAnimatable("y", v)} onKeyframe={() => addKeyframe("y")} hasKeyframe={hasKf("y")} isAtKeyframe={isAtKf("y")} />
-                <NumPair label="W" value={liveVal("width", clip.width)} min={0.01} max={2} step={0.01} onChange={(v) => updateAnimatable("width", v)} onKeyframe={() => addKeyframe("width")} hasKeyframe={hasKf("width")} isAtKeyframe={isAtKf("width")} />
-                <NumPair label="H" value={liveVal("height", clip.height)} min={0.01} max={2} step={0.01} onChange={(v) => updateAnimatable("height", v)} onKeyframe={() => addKeyframe("height")} hasKeyframe={hasKf("height")} isAtKeyframe={isAtKf("height")} />
+                <NumPair label="X" value={liveVal("x", clip.x)} min={-1} max={2} step={0.01} onChange={(v) => updateAnimatable("x", v)} onKeyframe={() => addKeyframe("x")} hasKeyframe={hasKf("x")} isAtKeyframe={isAtKf("x")} tweened={isTweened("x")} onToggleTween={() => toggleTween("x")} />
+                <NumPair label="Y" value={liveVal("y", clip.y)} min={-1} max={2} step={0.01} onChange={(v) => updateAnimatable("y", v)} onKeyframe={() => addKeyframe("y")} hasKeyframe={hasKf("y")} isAtKeyframe={isAtKf("y")} tweened={isTweened("y")} onToggleTween={() => toggleTween("y")} />
+                <NumPair label="W" value={liveVal("width", clip.width)} min={0.01} max={2} step={0.01} onChange={(v) => updateAnimatable("width", v)} onKeyframe={() => addKeyframe("width")} hasKeyframe={hasKf("width")} isAtKeyframe={isAtKf("width")} tweened={isTweened("width")} onToggleTween={() => toggleTween("width")} />
+                <NumPair label="H" value={liveVal("height", clip.height)} min={0.01} max={2} step={0.01} onChange={(v) => updateAnimatable("height", v)} onKeyframe={() => addKeyframe("height")} hasKeyframe={hasKf("height")} isAtKeyframe={isAtKf("height")} tweened={isTweened("height")} onToggleTween={() => toggleTween("height")} />
 
-                <NumPair label="Rotation" value={liveVal("rotation", clip.rotation)} min={-180} max={180} step={1} suffix="°" onChange={(v) => updateAnimatable("rotation", v)} onKeyframe={() => addKeyframe("rotation")} hasKeyframe={hasKf("rotation")} isAtKeyframe={isAtKf("rotation")} />
-                <NumPair label="Scale" value={liveVal("scale", clip.scale)} min={0.1} max={3} step={0.05} suffix="x" onChange={(v) => updateAnimatable("scale", v)} onKeyframe={() => addKeyframe("scale")} hasKeyframe={hasKf("scale")} isAtKeyframe={isAtKf("scale")} />
-                <NumPair label="Opacity" value={liveVal("opacity", clip.opacity)} min={0} max={1} step={0.01} onChange={(v) => updateAnimatable("opacity", v)} onKeyframe={() => addKeyframe("opacity")} hasKeyframe={hasKf("opacity")} isAtKeyframe={isAtKf("opacity")} />
+                <NumPair label="Rotation" value={liveVal("rotation", clip.rotation)} min={-180} max={180} step={1} suffix="°" onChange={(v) => updateAnimatable("rotation", v)} onKeyframe={() => addKeyframe("rotation")} hasKeyframe={hasKf("rotation")} isAtKeyframe={isAtKf("rotation")} tweened={isTweened("rotation")} onToggleTween={() => toggleTween("rotation")} />
+                <NumPair label="Scale" value={liveVal("scale", clip.scale)} min={0.1} max={3} step={0.05} suffix="x" onChange={(v) => updateAnimatable("scale", v)} onKeyframe={() => addKeyframe("scale")} hasKeyframe={hasKf("scale")} isAtKeyframe={isAtKf("scale")} tweened={isTweened("scale")} onToggleTween={() => toggleTween("scale")} />
+                <NumPair label="Opacity" value={liveVal("opacity", clip.opacity)} min={0} max={1} step={0.01} onChange={(v) => updateAnimatable("opacity", v)} onKeyframe={() => addKeyframe("opacity")} hasKeyframe={hasKf("opacity")} isAtKeyframe={isAtKf("opacity")} tweened={isTweened("opacity")} onToggleTween={() => toggleTween("opacity")} />
 
                 <div className="flex gap-1.5">
                   <Button variant={clip.flipH ? "secondary" : "outline"} size="sm" className="h-7 text-xs flex-1" onClick={() => update({ flipH: !clip.flipH })}>
@@ -548,14 +594,14 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
                   <RotateCcw className="w-3 h-3" />
                 </Button>
               }>
-                <NumPair label="Brightness" value={liveVal("brightness", clip.filters.brightness)} min={0} max={200} step={1} suffix="%" onChange={(v) => updateFilter("brightness", v)} onKeyframe={() => addKeyframe("brightness")} hasKeyframe={hasKf("brightness")} isAtKeyframe={isAtKf("brightness")} />
-                <NumPair label="Contrast" value={liveVal("contrast", clip.filters.contrast)} min={0} max={200} step={1} suffix="%" onChange={(v) => updateFilter("contrast", v)} onKeyframe={() => addKeyframe("contrast")} hasKeyframe={hasKf("contrast")} isAtKeyframe={isAtKf("contrast")} />
-                <NumPair label="Saturation" value={liveVal("saturation", clip.filters.saturation)} min={0} max={200} step={1} suffix="%" onChange={(v) => updateFilter("saturation", v)} onKeyframe={() => addKeyframe("saturation")} hasKeyframe={hasKf("saturation")} isAtKeyframe={isAtKf("saturation")} />
-                <NumPair label="Hue" value={liveVal("hue", clip.filters.hue)} min={-180} max={180} step={1} suffix="°" onChange={(v) => updateFilter("hue", v)} onKeyframe={() => addKeyframe("hue")} hasKeyframe={hasKf("hue")} isAtKeyframe={isAtKf("hue")} />
-                <NumPair label="Blur" value={liveVal("blur", clip.filters.blur)} min={0} max={20} step={0.5} suffix="px" onChange={(v) => updateFilter("blur", v)} onKeyframe={() => addKeyframe("blur")} hasKeyframe={hasKf("blur")} isAtKeyframe={isAtKf("blur")} />
-                <NumPair label="Grayscale" value={liveVal("grayscale", clip.filters.grayscale)} min={0} max={100} step={1} suffix="%" onChange={(v) => updateFilter("grayscale", v)} onKeyframe={() => addKeyframe("grayscale")} hasKeyframe={hasKf("grayscale")} isAtKeyframe={isAtKf("grayscale")} />
-                <NumPair label="Sepia" value={liveVal("sepia", clip.filters.sepia)} min={0} max={100} step={1} suffix="%" onChange={(v) => updateFilter("sepia", v)} onKeyframe={() => addKeyframe("sepia")} hasKeyframe={hasKf("sepia")} isAtKeyframe={isAtKf("sepia")} />
-                <NumPair label="Invert" value={liveVal("invert", clip.filters.invert)} min={0} max={100} step={1} suffix="%" onChange={(v) => updateFilter("invert", v)} onKeyframe={() => addKeyframe("invert")} hasKeyframe={hasKf("invert")} isAtKeyframe={isAtKf("invert")} />
+                <NumPair label="Brightness" value={liveVal("brightness", clip.filters.brightness)} min={0} max={200} step={1} suffix="%" onChange={(v) => updateFilter("brightness", v)} onKeyframe={() => addKeyframe("brightness")} hasKeyframe={hasKf("brightness")} isAtKeyframe={isAtKf("brightness")} tweened={isTweened("brightness")} onToggleTween={() => toggleTween("brightness")} />
+                <NumPair label="Contrast" value={liveVal("contrast", clip.filters.contrast)} min={0} max={200} step={1} suffix="%" onChange={(v) => updateFilter("contrast", v)} onKeyframe={() => addKeyframe("contrast")} hasKeyframe={hasKf("contrast")} isAtKeyframe={isAtKf("contrast")} tweened={isTweened("contrast")} onToggleTween={() => toggleTween("contrast")} />
+                <NumPair label="Saturation" value={liveVal("saturation", clip.filters.saturation)} min={0} max={200} step={1} suffix="%" onChange={(v) => updateFilter("saturation", v)} onKeyframe={() => addKeyframe("saturation")} hasKeyframe={hasKf("saturation")} isAtKeyframe={isAtKf("saturation")} tweened={isTweened("saturation")} onToggleTween={() => toggleTween("saturation")} />
+                <NumPair label="Hue" value={liveVal("hue", clip.filters.hue)} min={-180} max={180} step={1} suffix="°" onChange={(v) => updateFilter("hue", v)} onKeyframe={() => addKeyframe("hue")} hasKeyframe={hasKf("hue")} isAtKeyframe={isAtKf("hue")} tweened={isTweened("hue")} onToggleTween={() => toggleTween("hue")} />
+                <NumPair label="Blur" value={liveVal("blur", clip.filters.blur)} min={0} max={20} step={0.5} suffix="px" onChange={(v) => updateFilter("blur", v)} onKeyframe={() => addKeyframe("blur")} hasKeyframe={hasKf("blur")} isAtKeyframe={isAtKf("blur")} tweened={isTweened("blur")} onToggleTween={() => toggleTween("blur")} />
+                <NumPair label="Grayscale" value={liveVal("grayscale", clip.filters.grayscale)} min={0} max={100} step={1} suffix="%" onChange={(v) => updateFilter("grayscale", v)} onKeyframe={() => addKeyframe("grayscale")} hasKeyframe={hasKf("grayscale")} isAtKeyframe={isAtKf("grayscale")} tweened={isTweened("grayscale")} onToggleTween={() => toggleTween("grayscale")} />
+                <NumPair label="Sepia" value={liveVal("sepia", clip.filters.sepia)} min={0} max={100} step={1} suffix="%" onChange={(v) => updateFilter("sepia", v)} onKeyframe={() => addKeyframe("sepia")} hasKeyframe={hasKf("sepia")} isAtKeyframe={isAtKf("sepia")} tweened={isTweened("sepia")} onToggleTween={() => toggleTween("sepia")} />
+                <NumPair label="Invert" value={liveVal("invert", clip.filters.invert)} min={0} max={100} step={1} suffix="%" onChange={(v) => updateFilter("invert", v)} onKeyframe={() => addKeyframe("invert")} hasKeyframe={hasKf("invert")} isAtKeyframe={isAtKf("invert")} tweened={isTweened("invert")} onToggleTween={() => toggleTween("invert")} />
               </Section>
 
               <Separator />

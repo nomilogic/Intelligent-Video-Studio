@@ -32,8 +32,9 @@ function uid(prefix = "id"): string {
 }
 
 // Animatable transform properties that get an automatic anchor keyframe at a
-// new clip's start time. Having these defaults means any later edit naturally
-// turns into an animation, instead of the start value being implicitly lost.
+// new clip's start time. The default easing is "step" — Adobe Animate / Flash
+// style. That means: until the user explicitly turns on tweening for a
+// property, additional keyframes will just hold/snap, not interpolate.
 const DEFAULT_KF_PROPS = ["x", "y", "width", "height", "rotation", "scale", "opacity"] as const;
 
 function defaultClipKeyframes(clip: Clip): Keyframe[] {
@@ -43,7 +44,7 @@ function defaultClipKeyframes(clip: Clip): Keyframe[] {
     time: clip.startTime,
     property: prop,
     value: (clip as any)[prop] as number,
-    easing: "quadInOut" as EasingType,
+    easing: "step" as EasingType,
   }));
 }
 

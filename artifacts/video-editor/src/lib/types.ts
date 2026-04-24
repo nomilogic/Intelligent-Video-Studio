@@ -1,6 +1,7 @@
 export type MediaType = "video" | "audio" | "image" | "text" | "blank";
 
 export type EasingType =
+  | "step"
   | "linear"
   | "quadIn" | "quadOut" | "quadInOut"
   | "cubicIn" | "cubicOut" | "cubicInOut"
