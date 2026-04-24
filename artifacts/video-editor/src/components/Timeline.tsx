@@ -93,6 +93,30 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
     [snapPoints, state.snapEnabled, PPS],
   );
 
+  // Snap a clip's startTime to avoid overlapping other clips on the same track
+  const resolveNoOverlap = useCallback(
+    (movingId: string, newTrack: number, desiredStart: number, clipDuration: number): number => {
+      const others = state.clips
+        .filter((c) => c.id !== movingId && c.trackIndex === newTrack)
+        .sort((a, b) => a.startTime - b.startTime);
+      let start = Math.max(0, desiredStart);
+      for (const other of others) {
+        const otherEnd = other.startTime + other.duration;
+        const myEnd = start + clipDuration;
+        if (start < otherEnd - 0.01 && myEnd > other.startTime + 0.01) {
+          // Overlap — push to whichever edge requires less movement
+          const snapLeft = Math.max(0, other.startTime - clipDuration);
+          const snapRight = otherEnd;
+          const distLeft = Math.abs(desiredStart - snapLeft);
+          const distRight = Math.abs(desiredStart - snapRight);
+          start = distLeft <= distRight ? snapLeft : snapRight;
+        }
+      }
+      return start;
+    },
+    [state.clips],
+  );
+
   useEffect(() => {
     if (!drag) return;
     const onMove = (ev: MouseEvent) => {
@@ -109,11 +133,11 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
         const dy = ev.clientY - drag.startY;
         const dt = dx / PPS;
         const dTrack = Math.round(dy / TRACK_HEIGHT);
-        const newStart = Math.max(0, trySnap(drag.origStart + dt, drag.clipId));
-        const newTrack = Math.max(
-          0,
-          Math.min(state.tracks.length - 1, drag.origTrack + dTrack),
-        );
+        const newTrack = Math.max(0, Math.min(state.tracks.length - 1, drag.origTrack + dTrack));
+        const snapped = trySnap(drag.origStart + dt, drag.clipId);
+        const movingClip = state.clips.find((c) => c.id === drag.clipId);
+        const clipDur = movingClip?.duration ?? 1;
+        const newStart = resolveNoOverlap(drag.clipId, newTrack, snapped, clipDur);
         dispatch({
           type: "UPDATE_CLIP",
           payload: {
@@ -160,7 +184,7 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [drag, dispatch, PPS, state.duration, state.tracks.length, state.clips, trySnap]);
+  }, [drag, dispatch, PPS, state.duration, state.tracks.length, state.clips, trySnap, resolveNoOverlap]);
 
   const handleClipMouseDown = (e: React.MouseEvent, clip: Clip) => {
     e.stopPropagation();
