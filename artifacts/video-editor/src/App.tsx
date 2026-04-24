@@ -70,8 +70,31 @@ function Editor() {
       } else if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
         if (state.selectedClipIds.length) {
-          dispatchTyped({ type: "DELETE_CLIPS", payload: state.selectedClipIds });
+          if (e.shiftKey && state.selectedClipIds[0]) {
+            // Ripple delete: remove and close the gap
+            state.selectedClipIds.forEach((id) => dispatchTyped({ type: "RIPPLE_DELETE", payload: id }));
+          } else {
+            dispatchTyped({ type: "DELETE_CLIPS", payload: state.selectedClipIds });
+          }
         }
+      } else if (e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        dispatchTyped({ type: "SET_TOOL", payload: "select" });
+      } else if (e.key.toLowerCase() === "b" && !meta) {
+        e.preventDefault();
+        dispatchTyped({ type: "SET_TOOL", payload: "blade" });
+      } else if (e.key.toLowerCase() === "m" && !meta) {
+        e.preventDefault();
+        dispatchTyped({ type: "ADD_MARKER", payload: { time: state.currentTime } });
+      } else if (e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        dispatchTyped({ type: "SET_TIME", payload: Math.max(0, state.currentTime - 1) });
+      } else if (e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        dispatchTyped({ type: "SET_PLAYING", payload: false });
+      } else if (e.key.toLowerCase() === "l") {
+        e.preventDefault();
+        dispatchTyped({ type: "SET_TIME", payload: Math.min(state.duration, state.currentTime + 1) });
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
         dispatchTyped({ type: "SET_TIME", payload: Math.max(0, state.currentTime - (e.shiftKey ? 1 : 1 / 30)) });

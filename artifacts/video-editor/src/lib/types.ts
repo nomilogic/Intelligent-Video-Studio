@@ -108,12 +108,22 @@ export interface AIMessage {
   timestamp: number;
 }
 
+export type ToolMode = "select" | "blade";
+
+export interface Marker {
+  id: string;
+  time: number;
+  label?: string;
+  color?: string;
+}
+
 export interface EditorState {
   clips: Clip[];
   transitions: Transition[];
   keyframes: Keyframe[];
   tracks: Track[];
   assets: MediaAsset[];
+  markers: Marker[];
   canvasWidth: number;
   canvasHeight: number;
   duration: number;
@@ -122,6 +132,7 @@ export interface EditorState {
   isPlaying: boolean;
   zoom: number;
   snapEnabled: boolean;
+  tool: ToolMode;
   aiHistory: AIMessage[];
   background: string;
 }
@@ -161,6 +172,13 @@ export type EditorAction =
   | { type: "ADD_ASSET"; payload: MediaAsset }
   | { type: "REMOVE_ASSET"; payload: string }
   | { type: "ADD_AI_MESSAGE"; payload: AIMessage }
+  | { type: "SET_TOOL"; payload: ToolMode }
+  | { type: "ADD_MARKER"; payload: { time: number; label?: string; color?: string } }
+  | { type: "DELETE_MARKER"; payload: string }
+  | { type: "CLEAR_MARKERS" }
+  | { type: "SPLIT_INTO_PARTS"; payload: { clipId: string; parts: number } }
+  | { type: "SPLIT_EVERY"; payload: { clipId: string; seconds: number } }
+  | { type: "RIPPLE_DELETE"; payload: string }
   | { type: "APPLY_OPERATIONS"; payload: any[] }
   | { type: "REPLACE_STATE"; payload: EditorState }
   | { type: "UNDO" }

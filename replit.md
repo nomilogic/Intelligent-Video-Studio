@@ -27,10 +27,22 @@ A professional browser-based video editor with AI instruction processing, multi-
 - Wouter for routing (single route at `/`)
 
 ### Editor State
-- `clips[]` — video/media clips with full canvas + timeline properties
+- `clips[]` — video/media clips with full canvas + timeline properties (cropX/Y/Width/Height for visual cropping)
 - `transitions[]` — transitions between clips
 - `keyframes[]` — per-property animation keyframes
 - `tracks[]` — named track lanes in the timeline
+- `markers[]` — colored ruler markers (id, time, label, color)
+- `tool` — `"select" | "blade"` for the timeline tool mode
+
+### Pro Features
+- **Video playback** — frame-accurate seek when paused (drift threshold 0.03s), permissive while playing (0.25s). videoTime correctly maps timeline → source via `trimStart + localTime * speed`.
+- **Visual cropping** — `cropX/Y/Width/Height` (0-1) zoom into a region of any video/image clip on the canvas, with reset and ratio presets.
+- **Pro splitting** — Blade tool (B): click any clip to split at cursor. Split @ (S): split at playhead. Split into N parts and Split every N seconds in the inspector.
+- **Pro timeline** — Audio waveforms (decoded with Web Audio API and cached), draggable zoom slider (0.1x–10x), frame ticks at high zoom, live frame counter, Shift+click ruler to add markers, blade hover indicator, snap to clips/markers/playhead.
+- **Ripple delete** — Shift+Delete removes a clip and shifts later clips left to close the gap.
+- **Markers** — M to add at playhead, click to jump, right-click to delete, full list in the project sidebar.
+- **Aspect ratios** — 14 presets (TikTok, Reels, YouTube Short, FB Cover, IG Post, Pinterest, Cinema, Ultrawide, etc.) plus a Rotate Canvas swap button. Custom width/height inputs always available.
+- **Keyboard shortcuts** — Space/play, S/split, B/blade, V/select, M/marker, J/K/L scrub, ←/→ frame step, Shift+Del ripple, ⌘D dupe, ⌘Z/Y undo/redo, +/- zoom.
 
 ### Backend (artifacts/api-server)
 - `GET/POST /api/projects` — project CRUD

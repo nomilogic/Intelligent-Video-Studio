@@ -13,63 +13,113 @@ type DragMode =
   | { kind: "resize"; clipId: string; handle: string; startX: number; startY: number; origX: number; origY: number; origW: number; origH: number }
   | { kind: "rotate"; clipId: string; centerX: number; centerY: number; startAngle: number; origRotation: number };
 
+function cropStyle(clip: Clip): React.CSSProperties {
+  const cw = clip.cropWidth ?? 1;
+  const ch = clip.cropHeight ?? 1;
+  const cx = clip.cropX ?? 0;
+  const cy = clip.cropY ?? 0;
+  if (cw === 1 && ch === 1 && cx === 0 && cy === 0) return {};
+  // Zoom into the cropped region so it fills the container.
+  const sx = 1 / Math.max(0.01, cw);
+  const sy = 1 / Math.max(0.01, ch);
+  return {
+    transformOrigin: "top left",
+    transform: `translate(${-cx * 100 * sx}%, ${-cy * 100 * sy}%) scale(${sx}, ${sy})`,
+    width: "100%",
+    height: "100%",
+  };
+}
+
+function flipTransform(clip: Clip): string {
+  return `scaleX(${clip.flipH ? -1 : 1}) scaleY(${clip.flipV ? -1 : 1})`;
+}
+
 function MediaContent({ clip, videoTime, isPlaying }: { clip: Clip; videoTime: number; isPlaying: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
+  // Sync video element to playhead. When playing, allow drift up to 0.25s before correcting.
+  // When paused, snap exactly to videoTime so scrubbing is frame-accurate.
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    if (Math.abs(v.currentTime - videoTime) > 0.2) {
-      try {
-        v.currentTime = Math.max(0, videoTime);
-      } catch {}
+    const target = Math.max(0, videoTime);
+    const drift = Math.abs(v.currentTime - target);
+    if (!isPlaying) {
+      if (drift > 0.03) {
+        try { v.currentTime = target; } catch {}
+      }
+    } else if (drift > 0.25) {
+      try { v.currentTime = target; } catch {}
     }
-    if (isPlaying && !clip.muted) {
-      v.playbackRate = clip.speed || 1;
-      v.volume = clip.volume;
+  }, [videoTime, isPlaying]);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.playbackRate = clip.speed || 1;
+    v.volume = clip.muted ? 0 : clip.volume;
+    v.muted = clip.muted;
+    if (isPlaying) {
       v.play().catch(() => {});
     } else {
       v.pause();
     }
-  }, [videoTime, isPlaying, clip.muted, clip.volume, clip.speed]);
+  }, [isPlaying, clip.muted, clip.volume, clip.speed]);
 
   useEffect(() => {
     const a = audioRef.current;
     if (!a) return;
-    if (Math.abs(a.currentTime - videoTime) > 0.2) {
-      try {
-        a.currentTime = Math.max(0, videoTime);
-      } catch {}
+    const target = Math.max(0, videoTime);
+    const drift = Math.abs(a.currentTime - target);
+    if (!isPlaying) {
+      if (drift > 0.05) {
+        try { a.currentTime = target; } catch {}
+      }
+    } else if (drift > 0.3) {
+      try { a.currentTime = target; } catch {}
     }
-    if (isPlaying && !clip.muted) {
-      a.playbackRate = clip.speed || 1;
-      a.volume = clip.volume;
+  }, [videoTime, isPlaying]);
+
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a) return;
+    a.playbackRate = clip.speed || 1;
+    a.volume = clip.muted ? 0 : clip.volume;
+    a.muted = clip.muted;
+    if (isPlaying) {
       a.play().catch(() => {});
     } else {
       a.pause();
     }
-  }, [videoTime, isPlaying, clip.muted, clip.volume, clip.speed]);
+  }, [isPlaying, clip.muted, clip.volume, clip.speed]);
+
+  const hasCrop =
+    (clip.cropWidth ?? 1) !== 1 ||
+    (clip.cropHeight ?? 1) !== 1 ||
+    (clip.cropX ?? 0) !== 0 ||
+    (clip.cropY ?? 0) !== 0;
 
   if (clip.mediaType === "video" && clip.src) {
     return (
-      <video
-        ref={videoRef}
-        src={clip.src}
-        muted={clip.muted}
-        playsInline
-        className="w-full h-full object-cover pointer-events-none"
-        style={{
-          transform: `scaleX(${clip.flipH ? -1 : 1}) scaleY(${clip.flipV ? -1 : 1})`,
-        }}
-      />
+      <div className="w-full h-full overflow-hidden pointer-events-none" style={{ transform: flipTransform(clip) }}>
+        <video
+          ref={videoRef}
+          src={clip.src}
+          muted={clip.muted}
+          playsInline
+          preload="auto"
+          className="block object-cover"
+          style={hasCrop ? cropStyle(clip) : { width: "100%", height: "100%" }}
+        />
+      </div>
     );
   }
 
   if (clip.mediaType === "audio" && clip.src) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-emerald-500/30">
-        <audio ref={audioRef} src={clip.src} />
+        <audio ref={audioRef} src={clip.src} preload="auto" />
         <div className="text-white/80 text-xs flex flex-col items-center gap-1">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
@@ -82,14 +132,14 @@ function MediaContent({ clip, videoTime, isPlaying }: { clip: Clip; videoTime: n
 
   if (clip.mediaType === "image" && clip.src) {
     return (
-      <img
-        src={clip.src}
-        alt={clip.label}
-        className="w-full h-full object-cover pointer-events-none"
-        style={{
-          transform: `scaleX(${clip.flipH ? -1 : 1}) scaleY(${clip.flipV ? -1 : 1})`,
-        }}
-      />
+      <div className="w-full h-full overflow-hidden pointer-events-none" style={{ transform: flipTransform(clip) }}>
+        <img
+          src={clip.src}
+          alt={clip.label}
+          className="block object-cover"
+          style={hasCrop ? cropStyle(clip) : { width: "100%", height: "100%" }}
+        />
+      </div>
     );
   }
 

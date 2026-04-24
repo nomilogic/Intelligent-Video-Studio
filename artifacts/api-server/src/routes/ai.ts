@@ -50,6 +50,10 @@ Return ONLY valid JSON, no markdown fences, no commentary:
 23. setCanvasSize — payload: { width, height }
 24. setDuration — payload: { duration }
 25. setBackground — payload: { color }   (#hex)
+26. splitIntoParts — payload: { clipId, parts }   (split a single clip into N equal pieces; great for "split into 5 highlights")
+27. splitEvery — payload: { clipId, seconds }   (split a clip every N seconds for fast-cut montages)
+28. rippleDelete — payload: { clipId }   (delete a clip and shift later clips on the same track left to close the gap)
+29. addMarker — payload: { time?, label?, color? }   (add a colored ruler marker; if time omitted, uses playhead)
 
 # Reasoning rules
 - Always reference real clip ids from the supplied state. NEVER invent ids like "clip-1" — use exact ids.

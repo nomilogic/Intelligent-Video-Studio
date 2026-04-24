@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
   Trash2, Diamond, Copy, FlipHorizontal2, FlipVertical2, Eye, EyeOff,
-  Lock, Unlock, RotateCcw, Volume2, VolumeX, Wand2,
+  Lock, Unlock, RotateCcw, Volume2, VolumeX, Wand2, Scissors, Crop,
 } from "lucide-react";
+import { useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 interface PropertiesInspectorProps {
@@ -68,6 +69,81 @@ function NumPair({
       </div>
       <Slider value={[value]} min={min} max={max} step={step} onValueChange={([v]) => onChange(v)} />
     </div>
+  );
+}
+
+function SplitSection({
+  clip, dispatch,
+}: {
+  clip: Clip;
+  dispatch: React.Dispatch<EditorAction>;
+}) {
+  const [parts, setParts] = useState(4);
+  const [every, setEvery] = useState(2);
+  return (
+    <Section title="Split">
+      <div className="space-y-1.5">
+        <Button
+          variant="default"
+          size="sm"
+          className="w-full h-7 text-xs gap-1.5"
+          onClick={() => dispatch({ type: "SPLIT_AT_PLAYHEAD" })}
+          title="Split at playhead (S)"
+        >
+          <Scissors className="w-3 h-3" /> Split at playhead
+        </Button>
+        <div className="flex items-center gap-1.5">
+          <Input
+            type="number"
+            min={2}
+            max={64}
+            value={parts}
+            onChange={(e) => setParts(Math.max(2, Math.min(64, parseInt(e.target.value) || 2)))}
+            className="h-7 text-xs w-14"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs flex-1"
+            onClick={() => dispatch({ type: "SPLIT_INTO_PARTS", payload: { clipId: clip.id, parts } })}
+            title="Split selected clip into N equal pieces"
+          >
+            Split into {parts} parts
+          </Button>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Input
+            type="number"
+            min={0.2}
+            step={0.5}
+            value={every}
+            onChange={(e) => setEvery(Math.max(0.2, parseFloat(e.target.value) || 1))}
+            className="h-7 text-xs w-14"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs flex-1"
+            onClick={() => dispatch({ type: "SPLIT_EVERY", payload: { clipId: clip.id, seconds: every } })}
+            title="Split selected clip every N seconds"
+          >
+            Split every {every}s
+          </Button>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full h-7 text-xs"
+          onClick={() => dispatch({ type: "RIPPLE_DELETE", payload: clip.id })}
+          title="Delete clip and close the gap (Shift+Del)"
+        >
+          <Trash2 className="w-3 h-3 mr-1" /> Ripple delete
+        </Button>
+      </div>
+      <p className="text-[10px] text-muted-foreground leading-relaxed pt-1">
+        Tip: Use the AI bar to "split clip at scenes", "split into 5 highlights", or "cut every 2 seconds for a montage".
+      </p>
+    </Section>
   );
 }
 
@@ -144,30 +220,92 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
             </div>
           </Section>
           <Separator />
-          <Section title="Quick Aspect Ratio">
+          <Section title="Aspect Ratio Presets">
             <div className="grid grid-cols-2 gap-1.5">
               {[
-                { label: "16:9 HD", w: 1920, h: 1080 },
+                { label: "16:9 1080p", w: 1920, h: 1080 },
+                { label: "16:9 4K", w: 3840, h: 2160 },
                 { label: "9:16 TikTok", w: 1080, h: 1920 },
+                { label: "9:16 Reels", w: 1080, h: 1920 },
                 { label: "1:1 Square", w: 1080, h: 1080 },
                 { label: "4:5 IG Post", w: 1080, h: 1350 },
+                { label: "2:3 Pinterest", w: 1000, h: 1500 },
+                { label: "3:4 Portrait", w: 1080, h: 1440 },
                 { label: "21:9 Cinema", w: 2560, h: 1080 },
+                { label: "2.39 Ultrawide", w: 2390, h: 1000 },
                 { label: "4:3 Classic", w: 1440, h: 1080 },
-              ].map((r) => (
-                <Button
-                  key={r.label}
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-[11px]"
-                  onClick={() => dispatch({ type: "SET_CANVAS_SIZE", payload: { width: r.w, height: r.h } })}
-                >
-                  {r.label}
-                </Button>
-              ))}
+                { label: "5:4 Photo", w: 1280, h: 1024 },
+                { label: "YT Short", w: 1080, h: 1920 },
+                { label: "FB Cover", w: 1640, h: 924 },
+              ].map((r) => {
+                const active = state.canvasWidth === r.w && state.canvasHeight === r.h;
+                return (
+                  <Button
+                    key={r.label}
+                    variant={active ? "secondary" : "outline"}
+                    size="sm"
+                    className="h-7 text-[10px] px-1.5"
+                    onClick={() => dispatch({ type: "SET_CANVAS_SIZE", payload: { width: r.w, height: r.h } })}
+                  >
+                    {r.label}
+                  </Button>
+                );
+              })}
+            </div>
+            <div className="flex gap-1.5 pt-1">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[10px] flex-1"
+                onClick={() => dispatch({ type: "SET_CANVAS_SIZE", payload: { width: state.canvasHeight, height: state.canvasWidth } })}
+                title="Swap width/height"
+              >
+                ↔ Rotate Canvas
+              </Button>
             </div>
           </Section>
-          <div className="px-3 py-6 text-xs text-muted-foreground text-center">
-            Select a clip to edit its properties
+          <Separator />
+          <Section title="Markers">
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {(state.markers || []).length === 0 && (
+                <p className="text-[10px] text-muted-foreground">No markers. Press M or Shift+click ruler.</p>
+              )}
+              {(state.markers || [])
+                .sort((a, b) => a.time - b.time)
+                .map((m) => (
+                  <div key={m.id} className="flex items-center gap-2 text-[10px] bg-muted/30 px-2 py-1 rounded group">
+                    <div className="w-2 h-2 rounded-sm" style={{ background: m.color || "#fb923c" }} />
+                    <button
+                      className="flex-1 text-left tabular-nums hover:text-primary"
+                      onClick={() => dispatch({ type: "SET_TIME", payload: m.time })}
+                    >
+                      {m.label || "Marker"} · {m.time.toFixed(2)}s
+                    </button>
+                    <button
+                      className="opacity-0 group-hover:opacity-100"
+                      onClick={() => dispatch({ type: "DELETE_MARKER", payload: m.id })}
+                    >
+                      <Trash2 className="w-2.5 h-2.5 text-destructive" />
+                    </button>
+                  </div>
+                ))}
+            </div>
+            {(state.markers || []).length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 w-full text-[10px]"
+                onClick={() => dispatch({ type: "CLEAR_MARKERS" })}
+              >
+                Clear all markers
+              </Button>
+            )}
+          </Section>
+          <div className="px-3 py-3 text-[10px] text-muted-foreground space-y-0.5">
+            <p className="font-medium text-foreground">Shortcuts</p>
+            <p>Space play · S split · B blade · V select</p>
+            <p>M marker · J/K/L scrub · ←/→ frame</p>
+            <p>Shift+Del ripple · ⌘D duplicate · ⌘Z undo</p>
           </div>
         </div>
       ) : (
@@ -230,6 +368,10 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
 
                 <NumPair label="Border Radius" value={clip.borderRadius} min={0} max={64} step={1} suffix="px" onChange={(v) => update({ borderRadius: v })} />
               </Section>
+
+              <Separator />
+
+              <SplitSection clip={clip} dispatch={dispatch} />
             </TabsContent>
 
             <TabsContent value="effects" className="m-0">
@@ -283,14 +425,20 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
 
               <Separator />
 
-              <Section title="Crop">
-                <div className="grid grid-cols-2 gap-1.5">
-                  {(["cropX", "cropY", "cropWidth", "cropHeight"] as const).map((k) => (
-                    <div key={k}>
-                      <Label className="text-[10px] text-muted-foreground capitalize">{k.replace("crop", "")}</Label>
-                      <Input type="number" step={0.01} value={(clip as any)[k].toFixed(2)} onChange={(e) => update({ [k]: parseFloat(e.target.value) } as any)} className="h-7 text-xs" />
-                    </div>
-                  ))}
+              <Section title="Crop" action={
+                <Button variant="ghost" size="icon" className="w-5 h-5" onClick={() => update({ cropX: 0, cropY: 0, cropWidth: 1, cropHeight: 1 })} title="Reset crop">
+                  <RotateCcw className="w-3 h-3" />
+                </Button>
+              }>
+                <p className="text-[10px] text-muted-foreground flex items-center gap-1"><Crop className="w-3 h-3" /> Zoom into a region (0–1 fractions of source).</p>
+                <NumPair label="Crop X" value={clip.cropX} min={0} max={0.95} step={0.01} onChange={(v) => update({ cropX: Math.min(v, 1 - clip.cropWidth) })} />
+                <NumPair label="Crop Y" value={clip.cropY} min={0} max={0.95} step={0.01} onChange={(v) => update({ cropY: Math.min(v, 1 - clip.cropHeight) })} />
+                <NumPair label="Crop W" value={clip.cropWidth} min={0.05} max={1} step={0.01} onChange={(v) => update({ cropWidth: Math.min(v, 1 - clip.cropX) })} />
+                <NumPair label="Crop H" value={clip.cropHeight} min={0.05} max={1} step={0.01} onChange={(v) => update({ cropHeight: Math.min(v, 1 - clip.cropY) })} />
+                <div className="grid grid-cols-3 gap-1">
+                  <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={() => update({ cropX: 0, cropY: 0, cropWidth: 1, cropHeight: 1 })}>Full</Button>
+                  <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={() => update({ cropX: 0.125, cropY: 0, cropWidth: 0.75, cropHeight: 1 })}>Center 3:4</Button>
+                  <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={() => update({ cropX: 0.21, cropY: 0, cropWidth: 0.5625, cropHeight: 1 })}>9:16</Button>
                 </div>
               </Section>
             </TabsContent>

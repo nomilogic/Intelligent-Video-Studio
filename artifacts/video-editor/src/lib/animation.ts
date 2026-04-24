@@ -210,8 +210,10 @@ export function resolveClip(
 
   const anim = getEntryExitState(clip, time);
 
-  const videoTime =
-    (localTime(clip, time) + clip.trimStart) * (clip.speed || 1);
+  // videoTime maps timeline time -> source media time.
+  // trimStart is already in SOURCE seconds (offset into the file).
+  // localTime is in TIMELINE seconds; multiply by speed to convert to source seconds.
+  const videoTime = clip.trimStart + localTime(clip, time) * (clip.speed || 1);
 
   return {
     x,

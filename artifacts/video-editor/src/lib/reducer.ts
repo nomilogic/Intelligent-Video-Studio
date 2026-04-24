@@ -3,6 +3,7 @@ import {
   EditorAction,
   Clip,
   Track,
+  Marker,
   DEFAULT_FILTERS,
   DEFAULT_TEXT_STYLE,
 } from "./types";
@@ -18,6 +19,7 @@ const HISTORY_IGNORED_ACTIONS = new Set([
   "TOGGLE_CLIP_SELECTION",
   "SET_ZOOM",
   "TOGGLE_SNAP",
+  "SET_TOOL",
   "ADD_AI_MESSAGE",
   "UNDO",
   "REDO",
@@ -141,6 +143,7 @@ export const initialState: EditorState = {
     makeTrack({ id: "track-overlay2", name: "Overlay 2", type: "overlay" }),
   ],
   assets: [],
+  markers: [],
   canvasWidth: 1920,
   canvasHeight: 1080,
   duration: 30,
@@ -149,6 +152,7 @@ export const initialState: EditorState = {
   isPlaying: false,
   zoom: 1,
   snapEnabled: true,
+  tool: "select",
   aiHistory: [],
   background: "#000000",
 };
@@ -189,9 +193,15 @@ function splitClipAt(state: EditorState, clipId: string, time: number): EditorSt
   const idx = state.clips.findIndex((c) => c.id === clipId);
   if (idx < 0) return state;
   const orig = state.clips[idx];
-  if (time <= orig.startTime + 0.05 || time >= orig.startTime + orig.duration - 0.05) return state;
+  const EPS = 0.02;
+  if (time <= orig.startTime + EPS || time >= orig.startTime + orig.duration - EPS) return state;
   const firstDur = time - orig.startTime;
-  const first: Clip = { ...orig, duration: firstDur };
+  const first: Clip = {
+    ...orig,
+    duration: firstDur,
+    animationOut: "none",
+    animationOutDuration: 0,
+  };
   const second: Clip = {
     ...orig,
     id: uid("clip"),
@@ -201,11 +211,77 @@ function splitClipAt(state: EditorState, clipId: string, time: number): EditorSt
     animationIn: "none",
     animationInDuration: 0,
   };
-  first.animationOut = "none";
-  first.animationOutDuration = 0;
   return {
     ...state,
     clips: [...state.clips.slice(0, idx), first, second, ...state.clips.slice(idx + 1)],
+  };
+}
+
+function splitIntoParts(state: EditorState, clipId: string, parts: number): EditorState {
+  if (parts < 2) return state;
+  const orig = state.clips.find((c) => c.id === clipId);
+  if (!orig) return state;
+  const partDuration = orig.duration / parts;
+  let s = state;
+  for (let i = 1; i < parts; i++) {
+    const cuts = s.clips.filter((c) => c.id === clipId || c.label === orig.label);
+    // find the rightmost piece that contains the cut point
+    const cutTime = orig.startTime + i * partDuration;
+    const target = s.clips
+      .filter(
+        (c) =>
+          c.startTime <= cutTime &&
+          c.startTime + c.duration > cutTime &&
+          (c.id === clipId || c.src === orig.src) &&
+          c.trackIndex === orig.trackIndex,
+      )
+      .sort((a, b) => b.startTime - a.startTime)[0];
+    if (target) s = splitClipAt(s, target.id, cutTime);
+    void cuts;
+  }
+  return s;
+}
+
+function splitEvery(state: EditorState, clipId: string, seconds: number): EditorState {
+  if (seconds <= 0.1) return state;
+  const orig = state.clips.find((c) => c.id === clipId);
+  if (!orig) return state;
+  let s = state;
+  let cutTime = orig.startTime + seconds;
+  const end = orig.startTime + orig.duration;
+  while (cutTime < end - 0.05) {
+    const target = s.clips
+      .filter(
+        (c) =>
+          c.startTime <= cutTime &&
+          c.startTime + c.duration > cutTime &&
+          (c.id === clipId || c.src === orig.src) &&
+          c.trackIndex === orig.trackIndex,
+      )
+      .sort((a, b) => b.startTime - a.startTime)[0];
+    if (!target) break;
+    s = splitClipAt(s, target.id, cutTime);
+    cutTime += seconds;
+  }
+  return s;
+}
+
+function rippleDelete(state: EditorState, clipId: string): EditorState {
+  const target = state.clips.find((c) => c.id === clipId);
+  if (!target) return state;
+  const removedDur = target.duration;
+  const removedEnd = target.startTime + removedDur;
+  return {
+    ...state,
+    clips: state.clips
+      .filter((c) => c.id !== clipId)
+      .map((c) => {
+        if (c.trackIndex === target.trackIndex && c.startTime >= removedEnd - 0.001) {
+          return { ...c, startTime: Math.max(0, c.startTime - removedDur) };
+        }
+        return c;
+      }),
+    selectedClipIds: state.selectedClipIds.filter((id) => id !== clipId),
   };
 }
 
@@ -399,6 +475,29 @@ function applyOps(state: EditorState, ops: any[]): EditorState {
         }
         break;
       }
+      case "splitIntoParts":
+        s = splitIntoParts(s, p.clipId, p.parts || 2);
+        break;
+      case "splitEvery":
+        s = splitEvery(s, p.clipId, p.seconds || 2);
+        break;
+      case "rippleDelete":
+        s = rippleDelete(s, p.clipId);
+        break;
+      case "addMarker":
+        s = {
+          ...s,
+          markers: [
+            ...(s.markers || []),
+            {
+              id: uid("mk"),
+              time: p.time ?? s.currentTime,
+              label: p.label,
+              color: p.color || "#fb923c",
+            },
+          ],
+        };
+        break;
     }
   }
   return s;
@@ -539,6 +638,27 @@ function presentReducer(state: EditorState, action: EditorAction): EditorState {
       return { ...state, assets: state.assets.filter((a) => a.id !== action.payload) };
     case "ADD_AI_MESSAGE":
       return { ...state, aiHistory: [...state.aiHistory, action.payload].slice(-20) };
+    case "SET_TOOL":
+      return { ...state, tool: action.payload };
+    case "ADD_MARKER": {
+      const m: Marker = {
+        id: uid("mk"),
+        time: action.payload.time,
+        label: action.payload.label,
+        color: action.payload.color || "#fb923c",
+      };
+      return { ...state, markers: [...(state.markers || []), m] };
+    }
+    case "DELETE_MARKER":
+      return { ...state, markers: (state.markers || []).filter((m) => m.id !== action.payload) };
+    case "CLEAR_MARKERS":
+      return { ...state, markers: [] };
+    case "SPLIT_INTO_PARTS":
+      return splitIntoParts(state, action.payload.clipId, action.payload.parts);
+    case "SPLIT_EVERY":
+      return splitEvery(state, action.payload.clipId, action.payload.seconds);
+    case "RIPPLE_DELETE":
+      return rippleDelete(state, action.payload);
     case "APPLY_OPERATIONS":
       return applyOps(state, action.payload);
     case "REPLACE_STATE":
