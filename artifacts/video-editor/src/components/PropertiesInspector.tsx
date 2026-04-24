@@ -1,11 +1,15 @@
-import { EditorState, EditorAction, Clip } from "../lib/types";
+import { EditorState, EditorAction, Clip, DEFAULT_FILTERS } from "../lib/types";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Trash2, Diamond } from "lucide-react";
+import {
+  Trash2, Diamond, Copy, FlipHorizontal2, FlipVertical2, Eye, EyeOff,
+  Lock, Unlock, RotateCcw, Volume2, VolumeX, Wand2,
+} from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 interface PropertiesInspectorProps {
   state: EditorState;
@@ -14,58 +18,61 @@ interface PropertiesInspectorProps {
 
 const ANIMATIONS = [
   "none", "fade", "slideLeft", "slideRight", "slideUp", "slideDown",
-  "zoomIn", "zoomOut", "spin", "bounce"
+  "zoomIn", "zoomOut", "spin", "bounce",
 ];
 
 const BLEND_MODES = [
   "normal", "multiply", "screen", "overlay", "darken",
-  "lighten", "hard-light", "soft-light"
+  "lighten", "hard-light", "soft-light", "color-dodge", "color-burn", "difference", "exclusion",
 ];
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+const FILTER_PRESETS = [
+  { name: "None", key: "reset" },
+  { name: "Cinematic", key: "cinematic" },
+  { name: "Vivid", key: "vivid" },
+  { name: "Vintage", key: "vintage" },
+  { name: "B&W", key: "bw" },
+  { name: "Dreamy", key: "dreamy" },
+];
+
+function Section({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-xs uppercase tracking-widest text-muted-foreground font-medium px-3 py-2 bg-muted/10">
-        {title}
-      </p>
-      <div className="px-3 pb-3 space-y-3">{children}</div>
+      <div className="flex items-center justify-between px-3 py-1.5 bg-muted/10">
+        <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-medium">{title}</p>
+        {action}
+      </div>
+      <div className="px-3 pb-3 pt-2 space-y-2.5">{children}</div>
     </div>
   );
 }
 
-function NumInput({
-  label,
-  value,
-  min = 0,
-  max = 1,
-  step = 0.01,
-  onChange,
+function NumPair({
+  label, value, min, max, step, onChange, onKeyframe, suffix = "",
 }: {
-  label: string;
-  value: number;
-  min?: number;
-  max?: number;
-  step?: number;
-  onChange: (v: number) => void;
+  label: string; value: number; min: number; max: number; step: number;
+  onChange: (v: number) => void; onKeyframe?: () => void; suffix?: string;
 }) {
   return (
-    <div className="flex items-center gap-2">
-      <Label className="text-xs text-muted-foreground w-16 shrink-0">{label}</Label>
-      <Input
-        type="number"
-        value={Number(value.toFixed(3))}
-        min={min}
-        max={max}
-        step={step}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="h-7 text-xs tabular-nums bg-muted/20 border-border"
-      />
+    <div className="space-y-1">
+      <div className="flex justify-between text-xs">
+        <Label className="text-muted-foreground flex items-center gap-1">
+          {label}
+          {onKeyframe && (
+            <button onClick={onKeyframe} title="Add keyframe at playhead">
+              <Diamond className="w-2.5 h-2.5 text-yellow-400 hover:text-yellow-300 fill-current" />
+            </button>
+          )}
+        </Label>
+        <span className="tabular-nums text-foreground">{value.toFixed(value < 1 && value > -1 ? 2 : 1)}{suffix}</span>
+      </div>
+      <Slider value={[value]} min={min} max={max} step={step} onValueChange={([v]) => onChange(v)} />
     </div>
   );
 }
 
 export default function PropertiesInspector({ state, dispatch }: PropertiesInspectorProps) {
-  const clip = state.clips.find((c) => c.id === state.selectedClipId);
+  const clip = state.clips.find((c) => state.selectedClipIds.includes(c.id));
 
   const update = (updates: Partial<Clip>) => {
     if (!clip) return;
@@ -74,265 +81,358 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
 
   const addKeyframe = (property: string) => {
     if (!clip) return;
-    const kfId = `kf-${Date.now()}`;
     const value = (clip as any)[property] ?? 0;
     dispatch({
-      type: "APPLY_OPERATIONS",
-      payload: [{
-        type: "setKeyframe",
-        payload: { clipId: clip.id, time: state.currentTime, property, value, id: kfId }
-      }]
+      type: "ADD_KEYFRAME",
+      payload: { clipId: clip.id, time: state.currentTime, property, value, easing: "easeInOut" },
     });
+  };
+
+  const setFilter = (key: keyof typeof DEFAULT_FILTERS, value: number) => {
+    if (!clip) return;
+    update({ filters: { ...clip.filters, [key]: value } as any });
   };
 
   return (
     <div
       data-testid="properties-inspector"
-      className="w-60 flex flex-col border-l border-border bg-card shrink-0 overflow-y-auto"
+      className="w-72 flex flex-col border-l border-border bg-card shrink-0 overflow-hidden"
     >
-      <div className="px-3 py-2 border-b border-border">
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Properties</p>
+      <div className="px-3 py-2 border-b border-border flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+          {clip ? "Inspector" : "Properties"}
+        </p>
+        {clip && (
+          <div className="flex gap-0.5">
+            <Button variant="ghost" size="icon" className="w-6 h-6" onClick={() => dispatch({ type: "DUPLICATE_CLIP", payload: clip.id })} title="Duplicate">
+              <Copy className="w-3 h-3" />
+            </Button>
+            <Button variant="ghost" size="icon" className="w-6 h-6" onClick={() => update({ hidden: !clip.hidden })} title={clip.hidden ? "Show" : "Hide"}>
+              {clip.hidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+            </Button>
+            <Button variant="ghost" size="icon" className="w-6 h-6" onClick={() => update({ locked: !clip.locked })} title={clip.locked ? "Unlock" : "Lock"}>
+              {clip.locked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+            </Button>
+            <Button variant="ghost" size="icon" className="w-6 h-6" onClick={() => dispatch({ type: "DELETE_CLIP", payload: clip.id })} title="Delete">
+              <Trash2 className="w-3 h-3 text-destructive" />
+            </Button>
+          </div>
+        )}
       </div>
 
       {!clip ? (
-        <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
-          Select a clip on the canvas or timeline to inspect its properties
+        <div className="flex-1 overflow-y-auto">
+          <Section title="Project">
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center gap-2">
+                <Label className="w-16 text-muted-foreground">Width</Label>
+                <Input type="number" value={state.canvasWidth} onChange={(e) => dispatch({ type: "SET_CANVAS_SIZE", payload: { width: parseInt(e.target.value) || 1920, height: state.canvasHeight } })} className="h-7 text-xs" />
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="w-16 text-muted-foreground">Height</Label>
+                <Input type="number" value={state.canvasHeight} onChange={(e) => dispatch({ type: "SET_CANVAS_SIZE", payload: { width: state.canvasWidth, height: parseInt(e.target.value) || 1080 } })} className="h-7 text-xs" />
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="w-16 text-muted-foreground">Duration</Label>
+                <Input type="number" step={0.5} value={state.duration} onChange={(e) => dispatch({ type: "SET_DURATION", payload: parseFloat(e.target.value) || 30 })} className="h-7 text-xs" />
+                <span className="text-muted-foreground">s</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="w-16 text-muted-foreground">BG</Label>
+                <input type="color" value={state.background} onChange={(e) => dispatch({ type: "SET_BACKGROUND", payload: e.target.value })} className="h-7 w-full bg-transparent border border-border rounded" />
+              </div>
+            </div>
+          </Section>
+          <Separator />
+          <Section title="Quick Aspect Ratio">
+            <div className="grid grid-cols-2 gap-1.5">
+              {[
+                { label: "16:9 HD", w: 1920, h: 1080 },
+                { label: "9:16 TikTok", w: 1080, h: 1920 },
+                { label: "1:1 Square", w: 1080, h: 1080 },
+                { label: "4:5 IG Post", w: 1080, h: 1350 },
+                { label: "21:9 Cinema", w: 2560, h: 1080 },
+                { label: "4:3 Classic", w: 1440, h: 1080 },
+              ].map((r) => (
+                <Button
+                  key={r.label}
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-[11px]"
+                  onClick={() => dispatch({ type: "SET_CANVAS_SIZE", payload: { width: r.w, height: r.h } })}
+                >
+                  {r.label}
+                </Button>
+              ))}
+            </div>
+          </Section>
+          <div className="px-3 py-6 text-xs text-muted-foreground text-center">
+            Select a clip to edit its properties
+          </div>
         </div>
       ) : (
-        <div className="flex-1">
-          {/* Clip Identity */}
-          <Section title="Clip">
-            <div className="flex items-center gap-2 mt-1">
-              <div className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: clip.color }} />
-              <Input
-                value={clip.label}
-                onChange={(e) => update({ label: e.target.value })}
-                className="h-7 text-xs bg-muted/20 border-border flex-1"
-                data-testid="input-clip-label"
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="w-6 h-6 shrink-0"
-                onClick={() => dispatch({ type: "DELETE_CLIP", payload: clip.id })}
-                data-testid="button-delete-clip"
-              >
-                <Trash2 className="w-3 h-3 text-destructive" />
-              </Button>
-            </div>
-            <div className="grid grid-cols-2 gap-1.5 text-xs">
-              <div>
-                <Label className="text-muted-foreground">Start</Label>
-                <Input
-                  type="number" step={0.1} value={clip.startTime.toFixed(1)}
-                  onChange={(e) => update({ startTime: parseFloat(e.target.value) })}
-                  className="h-7 text-xs bg-muted/20 border-border mt-0.5"
-                />
-              </div>
-              <div>
-                <Label className="text-muted-foreground">Duration</Label>
-                <Input
-                  type="number" step={0.1} value={clip.duration.toFixed(1)}
-                  onChange={(e) => update({ duration: parseFloat(e.target.value) })}
-                  className="h-7 text-xs bg-muted/20 border-border mt-0.5"
-                />
-              </div>
-            </div>
-          </Section>
+        <Tabs defaultValue="basic" className="flex-1 flex flex-col overflow-hidden">
+          <TabsList className="grid grid-cols-4 mx-2 mt-2 h-8">
+            <TabsTrigger value="basic" className="text-[10px]">Basic</TabsTrigger>
+            <TabsTrigger value="effects" className="text-[10px]">Effects</TabsTrigger>
+            <TabsTrigger value="anim" className="text-[10px]">Anim</TabsTrigger>
+            {clip.mediaType === "text" && <TabsTrigger value="text" className="text-[10px]">Text</TabsTrigger>}
+            {clip.mediaType !== "text" && <TabsTrigger value="audio" className="text-[10px]">Audio</TabsTrigger>}
+          </TabsList>
 
-          <Separator />
-
-          {/* Position & Size */}
-          <Section title="Transform">
-            <div className="grid grid-cols-2 gap-1.5">
-              <div>
-                <Label className="text-xs text-muted-foreground">X (%)</Label>
-                <Input
-                  type="number" step={0.01} min={0} max={1} value={clip.x.toFixed(2)}
-                  onChange={(e) => update({ x: parseFloat(e.target.value) })}
-                  className="h-7 text-xs bg-muted/20 border-border mt-0.5"
-                />
-              </div>
-              <div>
-                <Label className="text-xs text-muted-foreground">Y (%)</Label>
-                <Input
-                  type="number" step={0.01} min={0} max={1} value={clip.y.toFixed(2)}
-                  onChange={(e) => update({ y: parseFloat(e.target.value) })}
-                  className="h-7 text-xs bg-muted/20 border-border mt-0.5"
-                />
-              </div>
-              <div>
-                <Label className="text-xs text-muted-foreground">W (%)</Label>
-                <Input
-                  type="number" step={0.01} min={0.01} max={1} value={clip.width.toFixed(2)}
-                  onChange={(e) => update({ width: parseFloat(e.target.value) })}
-                  className="h-7 text-xs bg-muted/20 border-border mt-0.5"
-                />
-              </div>
-              <div>
-                <Label className="text-xs text-muted-foreground">H (%)</Label>
-                <Input
-                  type="number" step={0.01} min={0.01} max={1} value={clip.height.toFixed(2)}
-                  onChange={(e) => update({ height: parseFloat(e.target.value) })}
-                  className="h-7 text-xs bg-muted/20 border-border mt-0.5"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs">
-                <Label className="text-muted-foreground">Rotation</Label>
-                <span className="tabular-nums text-foreground">{clip.rotation.toFixed(0)}°</span>
-              </div>
-              <Slider
-                value={[clip.rotation]} min={-180} max={180} step={1}
-                onValueChange={([v]) => update({ rotation: v })}
-                data-testid="slider-rotation"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs">
-                <Label className="text-muted-foreground flex items-center gap-1">
-                  Opacity
-                  <button onClick={() => addKeyframe("opacity")} title="Add keyframe">
-                    <Diamond className="w-2.5 h-2.5 text-accent hover:text-primary" />
-                  </button>
-                </Label>
-                <span className="tabular-nums text-foreground">{(clip.opacity * 100).toFixed(0)}%</span>
-              </div>
-              <Slider
-                value={[clip.opacity]} min={0} max={1} step={0.01}
-                onValueChange={([v]) => update({ opacity: v })}
-                data-testid="slider-opacity"
-              />
-            </div>
-          </Section>
-
-          <Separator />
-
-          {/* Crop */}
-          <Section title="Crop">
-            <NumInput label="X" value={clip.cropX} onChange={(v) => update({ cropX: v })} />
-            <NumInput label="Y" value={clip.cropY} onChange={(v) => update({ cropY: v })} />
-            <NumInput label="Width" value={clip.cropWidth} onChange={(v) => update({ cropWidth: v })} />
-            <NumInput label="Height" value={clip.cropHeight} onChange={(v) => update({ cropHeight: v })} />
-          </Section>
-
-          <Separator />
-
-          {/* Appearance */}
-          <Section title="Appearance">
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Blend Mode</Label>
-              <Select value={clip.blendMode} onValueChange={(v) => update({ blendMode: v })}>
-                <SelectTrigger className="h-7 text-xs bg-muted/20 border-border" data-testid="select-blend-mode">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {BLEND_MODES.map((m) => (
-                    <SelectItem key={m} value={m}>{m}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs">
-                <Label className="text-muted-foreground">Volume</Label>
-                <span className="tabular-nums text-foreground">{(clip.volume * 100).toFixed(0)}%</span>
-              </div>
-              <Slider
-                value={[clip.volume]} min={0} max={1} step={0.01}
-                onValueChange={([v]) => update({ volume: v })}
-                data-testid="slider-volume"
-              />
-            </div>
-          </Section>
-
-          <Separator />
-
-          {/* Animations */}
-          <Section title="Animation In">
-            <div className="space-y-1.5">
-              <Select value={clip.animationIn} onValueChange={(v) => update({ animationIn: v })}>
-                <SelectTrigger className="h-7 text-xs bg-muted/20 border-border" data-testid="select-animation-in">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ANIMATIONS.map((a) => (
-                    <SelectItem key={a} value={a}>{a}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <div className="space-y-1">
-                <div className="flex justify-between text-xs">
-                  <Label className="text-muted-foreground">Duration</Label>
-                  <span className="tabular-nums text-foreground">{clip.animationInDuration.toFixed(1)}s</span>
+          <div className="flex-1 overflow-y-auto">
+            <TabsContent value="basic" className="m-0">
+              <Section title="Clip">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: clip.color }} />
+                  <Input value={clip.label} onChange={(e) => update({ label: e.target.value })} className="h-7 text-xs" data-testid="input-clip-label" />
                 </div>
-                <Slider
-                  value={[clip.animationInDuration]} min={0.1} max={5} step={0.1}
-                  onValueChange={([v]) => update({ animationInDuration: v })}
-                />
-              </div>
-            </div>
-          </Section>
-
-          <Section title="Animation Out">
-            <div className="space-y-1.5">
-              <Select value={clip.animationOut} onValueChange={(v) => update({ animationOut: v })}>
-                <SelectTrigger className="h-7 text-xs bg-muted/20 border-border" data-testid="select-animation-out">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ANIMATIONS.map((a) => (
-                    <SelectItem key={a} value={a}>{a}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <div className="space-y-1">
-                <div className="flex justify-between text-xs">
-                  <Label className="text-muted-foreground">Duration</Label>
-                  <span className="tabular-nums text-foreground">{clip.animationOutDuration.toFixed(1)}s</span>
-                </div>
-                <Slider
-                  value={[clip.animationOutDuration]} min={0.1} max={5} step={0.1}
-                  onValueChange={([v]) => update({ animationOutDuration: v })}
-                />
-              </div>
-            </div>
-          </Section>
-
-          {/* Keyframes */}
-          {state.keyframes.filter((k) => k.clipId === clip.id).length > 0 && (
-            <>
-              <Separator />
-              <Section title="Keyframes">
-                <div className="space-y-1">
-                  {state.keyframes
-                    .filter((k) => k.clipId === clip.id)
-                    .map((kf) => (
-                      <div
-                        key={kf.id}
-                        className="flex items-center justify-between text-xs text-muted-foreground bg-muted/20 px-2 py-1 rounded"
-                      >
-                        <span className="text-accent">{kf.property}</span>
-                        <span className="tabular-nums">{formatTime(kf.time)}</span>
-                        <span>{typeof kf.value === "number" ? kf.value.toFixed(2) : kf.value}</span>
-                      </div>
-                    ))}
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">Start</Label>
+                    <Input type="number" step={0.1} value={clip.startTime.toFixed(1)} onChange={(e) => update({ startTime: parseFloat(e.target.value) })} className="h-7 text-xs" />
+                  </div>
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">Duration</Label>
+                    <Input type="number" step={0.1} value={clip.duration.toFixed(1)} onChange={(e) => update({ duration: parseFloat(e.target.value) })} className="h-7 text-xs" />
+                  </div>
                 </div>
               </Section>
-            </>
-          )}
-        </div>
+
+              <Separator />
+
+              <Section title="Transform" action={
+                <Button variant="ghost" size="icon" className="w-5 h-5" onClick={() => update({ x: 0, y: 0, width: 1, height: 1, rotation: 0, scale: 1 })} title="Reset transform">
+                  <RotateCcw className="w-3 h-3" />
+                </Button>
+              }>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(["x", "y", "width", "height"] as const).map((k) => (
+                    <div key={k}>
+                      <Label className="text-[10px] text-muted-foreground uppercase">{k}</Label>
+                      <Input type="number" step={0.01} value={(clip as any)[k].toFixed(2)} onChange={(e) => update({ [k]: parseFloat(e.target.value) } as any)} className="h-7 text-xs" />
+                    </div>
+                  ))}
+                </div>
+
+                <NumPair label="Rotation" value={clip.rotation} min={-180} max={180} step={1} suffix="°" onChange={(v) => update({ rotation: v })} onKeyframe={() => addKeyframe("rotation")} />
+                <NumPair label="Scale" value={clip.scale} min={0.1} max={3} step={0.05} suffix="x" onChange={(v) => update({ scale: v })} onKeyframe={() => addKeyframe("scale")} />
+                <NumPair label="Opacity" value={clip.opacity} min={0} max={1} step={0.01} onChange={(v) => update({ opacity: v })} onKeyframe={() => addKeyframe("opacity")} />
+
+                <div className="flex gap-1.5">
+                  <Button variant={clip.flipH ? "secondary" : "outline"} size="sm" className="h-7 text-xs flex-1" onClick={() => update({ flipH: !clip.flipH })}>
+                    <FlipHorizontal2 className="w-3 h-3 mr-1" /> Flip H
+                  </Button>
+                  <Button variant={clip.flipV ? "secondary" : "outline"} size="sm" className="h-7 text-xs flex-1" onClick={() => update({ flipV: !clip.flipV })}>
+                    <FlipVertical2 className="w-3 h-3 mr-1" /> Flip V
+                  </Button>
+                </div>
+
+                <NumPair label="Border Radius" value={clip.borderRadius} min={0} max={64} step={1} suffix="px" onChange={(v) => update({ borderRadius: v })} />
+              </Section>
+            </TabsContent>
+
+            <TabsContent value="effects" className="m-0">
+              <Section title="Filter Presets">
+                <div className="grid grid-cols-3 gap-1.5">
+                  {FILTER_PRESETS.map((p) => (
+                    <Button
+                      key={p.key}
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[10px]"
+                      onClick={() => dispatch({ type: "APPLY_OPERATIONS", payload: [{ type: "applyPreset", payload: { clipId: clip.id, preset: p.key } }] })}
+                    >
+                      {p.name}
+                    </Button>
+                  ))}
+                </div>
+              </Section>
+
+              <Separator />
+
+              <Section title="Color & Filters" action={
+                <Button variant="ghost" size="icon" className="w-5 h-5" onClick={() => update({ filters: { ...DEFAULT_FILTERS } })} title="Reset">
+                  <RotateCcw className="w-3 h-3" />
+                </Button>
+              }>
+                <NumPair label="Brightness" value={clip.filters.brightness} min={0} max={200} step={1} suffix="%" onChange={(v) => setFilter("brightness", v)} />
+                <NumPair label="Contrast" value={clip.filters.contrast} min={0} max={200} step={1} suffix="%" onChange={(v) => setFilter("contrast", v)} />
+                <NumPair label="Saturation" value={clip.filters.saturation} min={0} max={200} step={1} suffix="%" onChange={(v) => setFilter("saturation", v)} />
+                <NumPair label="Hue" value={clip.filters.hue} min={-180} max={180} step={1} suffix="°" onChange={(v) => setFilter("hue", v)} />
+                <NumPair label="Blur" value={clip.filters.blur} min={0} max={20} step={0.5} suffix="px" onChange={(v) => setFilter("blur", v)} />
+                <NumPair label="Grayscale" value={clip.filters.grayscale} min={0} max={100} step={1} suffix="%" onChange={(v) => setFilter("grayscale", v)} />
+                <NumPair label="Sepia" value={clip.filters.sepia} min={0} max={100} step={1} suffix="%" onChange={(v) => setFilter("sepia", v)} />
+                <NumPair label="Invert" value={clip.filters.invert} min={0} max={100} step={1} suffix="%" onChange={(v) => setFilter("invert", v)} />
+              </Section>
+
+              <Separator />
+
+              <Section title="Blend">
+                <Select value={clip.blendMode} onValueChange={(v) => update({ blendMode: v })}>
+                  <SelectTrigger className="h-7 text-xs" data-testid="select-blend-mode">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {BLEND_MODES.map((m) => (
+                      <SelectItem key={m} value={m} className="text-xs">{m}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Section>
+
+              <Separator />
+
+              <Section title="Crop">
+                <div className="grid grid-cols-2 gap-1.5">
+                  {(["cropX", "cropY", "cropWidth", "cropHeight"] as const).map((k) => (
+                    <div key={k}>
+                      <Label className="text-[10px] text-muted-foreground capitalize">{k.replace("crop", "")}</Label>
+                      <Input type="number" step={0.01} value={(clip as any)[k].toFixed(2)} onChange={(e) => update({ [k]: parseFloat(e.target.value) } as any)} className="h-7 text-xs" />
+                    </div>
+                  ))}
+                </div>
+              </Section>
+            </TabsContent>
+
+            <TabsContent value="anim" className="m-0">
+              <Section title="Animation In">
+                <Select value={clip.animationIn} onValueChange={(v) => update({ animationIn: v })}>
+                  <SelectTrigger className="h-7 text-xs" data-testid="select-animation-in">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ANIMATIONS.map((a) => <SelectItem key={a} value={a} className="text-xs">{a}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <NumPair label="Duration" value={clip.animationInDuration} min={0.1} max={5} step={0.1} suffix="s" onChange={(v) => update({ animationInDuration: v })} />
+              </Section>
+
+              <Separator />
+
+              <Section title="Animation Out">
+                <Select value={clip.animationOut} onValueChange={(v) => update({ animationOut: v })}>
+                  <SelectTrigger className="h-7 text-xs" data-testid="select-animation-out">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ANIMATIONS.map((a) => <SelectItem key={a} value={a} className="text-xs">{a}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <NumPair label="Duration" value={clip.animationOutDuration} min={0.1} max={5} step={0.1} suffix="s" onChange={(v) => update({ animationOutDuration: v })} />
+              </Section>
+
+              <Separator />
+
+              <Section title="Speed">
+                <NumPair label="Playback" value={clip.speed} min={0.25} max={4} step={0.05} suffix="x" onChange={(v) => update({ speed: v })} />
+                <div className="grid grid-cols-4 gap-1">
+                  {[0.5, 1, 1.5, 2].map((s) => (
+                    <Button key={s} variant="outline" size="sm" className="h-6 text-[10px]" onClick={() => update({ speed: s })}>{s}x</Button>
+                  ))}
+                </div>
+              </Section>
+
+              {state.keyframes.filter((k) => k.clipId === clip.id).length > 0 && (
+                <>
+                  <Separator />
+                  <Section title="Keyframes">
+                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                      {state.keyframes
+                        .filter((k) => k.clipId === clip.id)
+                        .sort((a, b) => a.time - b.time)
+                        .map((kf) => (
+                          <div key={kf.id} className="flex items-center justify-between text-[10px] bg-muted/30 px-2 py-1 rounded group">
+                            <Diamond className="w-2.5 h-2.5 text-yellow-400 fill-current" />
+                            <span className="text-yellow-300">{kf.property}</span>
+                            <span className="tabular-nums text-muted-foreground">{kf.time.toFixed(1)}s</span>
+                            <span className="tabular-nums">{typeof kf.value === "number" ? kf.value.toFixed(2) : kf.value}</span>
+                            <button
+                              className="opacity-0 group-hover:opacity-100"
+                              onClick={() => dispatch({ type: "DELETE_KEYFRAME", payload: kf.id })}
+                            >
+                              <Trash2 className="w-2.5 h-2.5 text-destructive" />
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  </Section>
+                </>
+              )}
+            </TabsContent>
+
+            <TabsContent value="audio" className="m-0">
+              <Section title="Volume">
+                <NumPair label="Volume" value={clip.volume} min={0} max={1} step={0.01} onChange={(v) => update({ volume: v })} onKeyframe={() => addKeyframe("volume")} />
+                <Button
+                  variant={clip.muted ? "secondary" : "outline"}
+                  size="sm"
+                  className="w-full h-7 text-xs"
+                  onClick={() => update({ muted: !clip.muted })}
+                >
+                  {clip.muted ? <VolumeX className="w-3 h-3 mr-1" /> : <Volume2 className="w-3 h-3 mr-1" />}
+                  {clip.muted ? "Unmute" : "Mute"}
+                </Button>
+              </Section>
+            </TabsContent>
+
+            {clip.mediaType === "text" && (
+              <TabsContent value="text" className="m-0">
+                <Section title="Text">
+                  <textarea
+                    value={clip.text || ""}
+                    onChange={(e) => update({ text: e.target.value })}
+                    className="w-full text-xs p-2 bg-muted/20 border border-border rounded resize-none"
+                    rows={3}
+                    placeholder="Enter text..."
+                  />
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <div>
+                      <Label className="text-[10px] text-muted-foreground">Font Size</Label>
+                      <Input type="number" value={clip.textStyle?.fontSize || 64} onChange={(e) => update({ textStyle: { ...clip.textStyle!, fontSize: parseInt(e.target.value) || 64 } })} className="h-7 text-xs" />
+                    </div>
+                    <div>
+                      <Label className="text-[10px] text-muted-foreground">Weight</Label>
+                      <Select value={String(clip.textStyle?.fontWeight || 700)} onValueChange={(v) => update({ textStyle: { ...clip.textStyle!, fontWeight: parseInt(v) } })}>
+                        <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {[300, 400, 500, 600, 700, 800, 900].map((w) => (
+                            <SelectItem key={w} value={String(w)} className="text-xs">{w}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-[10px] text-muted-foreground">Color</Label>
+                      <input type="color" value={clip.textStyle?.color || "#ffffff"} onChange={(e) => update({ textStyle: { ...clip.textStyle!, color: e.target.value } })} className="h-7 w-full rounded border border-border" />
+                    </div>
+                    <div>
+                      <Label className="text-[10px] text-muted-foreground">BG</Label>
+                      <input type="color" value={clip.textStyle?.background === "transparent" ? "#000000" : clip.textStyle?.background || "#000000"} onChange={(e) => update({ textStyle: { ...clip.textStyle!, background: e.target.value } })} className="h-7 w-full rounded border border-border" />
+                    </div>
+                  </div>
+                  <Select value={clip.textStyle?.align || "center"} onValueChange={(v: any) => update({ textStyle: { ...clip.textStyle!, align: v } })}>
+                    <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {["left", "center", "right"].map((a) => <SelectItem key={a} value={a} className="text-xs">{a}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <div className="flex gap-1.5">
+                    <Button variant={clip.textStyle?.italic ? "secondary" : "outline"} size="sm" className="h-7 text-xs flex-1 italic" onClick={() => update({ textStyle: { ...clip.textStyle!, italic: !clip.textStyle?.italic } })}>I</Button>
+                    <Button variant={clip.textStyle?.underline ? "secondary" : "outline"} size="sm" className="h-7 text-xs flex-1 underline" onClick={() => update({ textStyle: { ...clip.textStyle!, underline: !clip.textStyle?.underline } })}>U</Button>
+                    <Button variant={clip.textStyle?.shadow ? "secondary" : "outline"} size="sm" className="h-7 text-xs flex-1" onClick={() => update({ textStyle: { ...clip.textStyle!, shadow: !clip.textStyle?.shadow } })}>
+                      <Wand2 className="w-3 h-3 mr-1" /> Shadow
+                    </Button>
+                  </div>
+                  <Button variant="outline" size="sm" className="w-full h-7 text-xs" onClick={() => update({ textStyle: { ...clip.textStyle!, background: "transparent" } })}>Transparent BG</Button>
+                </Section>
+              </TabsContent>
+            )}
+          </div>
+        </Tabs>
       )}
     </div>
   );
-}
-
-function formatTime(s: number): string {
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${m}:${String(sec).padStart(2, "0")}`;
 }

@@ -15,7 +15,7 @@ A professional browser-based video editor with AI instruction processing, multi-
 - **Database**: PostgreSQL + Drizzle ORM (lib/db)
 - **Validation**: Zod (zod/v4), drizzle-zod
 - **API codegen**: Orval (from OpenAPI spec)
-- **AI Integration**: OpenAI via Replit AI Integrations (gpt-5.1)
+- **AI Integration**: Gemini 2.5 Flash via Replit AI Integrations
 - **Build**: esbuild (CJS bundle for API), Vite (for frontend)
 
 ## Architecture
@@ -64,6 +64,6 @@ A professional browser-based video editor with AI instruction processing, multi-
 ## Environment Variables Required
 
 - `DATABASE_URL` — PostgreSQL connection string
-- `AI_INTEGRATIONS_OPENAI_BASE_URL` — Replit AI proxy base URL
-- `AI_INTEGRATIONS_OPENAI_API_KEY` — Replit AI proxy key
+- `AI_INTEGRATIONS_GEMINI_BASE_URL` — Replit AI proxy base URL
+- `AI_INTEGRATIONS_GEMINI_API_KEY` — Replit AI proxy key
 - `SESSION_SECRET` — Session secret
