@@ -1,4 +1,4 @@
-import { Undo2, Redo2, Save, Download, ZoomIn, ZoomOut, Film, Loader2, Keyboard, Settings2 } from "lucide-react";
+import { Undo2, Redo2, Save, ZoomIn, ZoomOut, Film, Loader2, Keyboard, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { EditorState, EditorAction } from "../lib/types";
@@ -8,6 +8,9 @@ import { useState } from "react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import ExportDialog from "./ExportDialog";
 
 interface ToolbarProps {
   state: EditorState;
@@ -29,7 +32,12 @@ const SHORTCUTS: [string, string][] = [
   ["Home / End", "Jump to start / end"],
   ["Shift + drag", "Resize keeping ratio"],
   ["Shift + click clip", "Multi-select"],
+  ["M", "Add marker at playhead"],
+  ["B", "Blade / cut tool"],
+  ["V", "Select tool"],
 ];
+
+const FPS_OPTIONS = [24, 25, 30, 50, 60];
 
 export default function Toolbar({ state, dispatch, projectId, canUndo, canRedo }: ToolbarProps) {
   const { toast } = useToast();
@@ -56,13 +64,6 @@ export default function Toolbar({ state, dispatch, projectId, canUndo, canRedo }
     } else {
       toast({ title: "Project exported", description: "Saved as JSON to your downloads." });
     }
-  };
-
-  const handleExport = () => {
-    toast({
-      title: "Render started",
-      description: `Composing ${state.clips.length} clips at ${state.canvasWidth}×${state.canvasHeight}. Export rendering happens in the browser — for production-quality MP4 export, connect a render service.`,
-    });
   };
 
   return (
@@ -142,6 +143,7 @@ export default function Toolbar({ state, dispatch, projectId, canUndo, canRedo }
 
       <div className="flex-1" />
 
+      {/* Keyboard Shortcuts */}
       <Dialog>
         <DialogTrigger asChild>
           <Button variant="ghost" size="icon" className="w-8 h-8" title="Keyboard shortcuts">
@@ -163,6 +165,114 @@ export default function Toolbar({ state, dispatch, projectId, canUndo, canRedo }
         </DialogContent>
       </Dialog>
 
+      {/* Project Settings */}
+      <Dialog>
+        <DialogTrigger asChild>
+          <Button variant="ghost" size="icon" className="w-8 h-8" title="Project settings">
+            <Settings2 className="w-4 h-4" />
+          </Button>
+        </DialogTrigger>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Project Settings</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground uppercase tracking-wider">Project Name</Label>
+              <Input
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                className="h-8 text-sm"
+                placeholder="Untitled Project"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground uppercase tracking-wider">Canvas Resolution</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label className="text-[10px] text-muted-foreground">Width</Label>
+                  <Input
+                    type="number"
+                    value={state.canvasWidth}
+                    onChange={(e) =>
+                      dispatch({
+                        type: "SET_CANVAS_SIZE",
+                        payload: { width: parseInt(e.target.value) || 1920, height: state.canvasHeight },
+                      })
+                    }
+                    className="h-7 text-xs"
+                  />
+                </div>
+                <div>
+                  <Label className="text-[10px] text-muted-foreground">Height</Label>
+                  <Input
+                    type="number"
+                    value={state.canvasHeight}
+                    onChange={(e) =>
+                      dispatch({
+                        type: "SET_CANVAS_SIZE",
+                        payload: { width: state.canvasWidth, height: parseInt(e.target.value) || 1080 },
+                      })
+                    }
+                    className="h-7 text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground uppercase tracking-wider">Frame Rate</Label>
+              <div className="flex gap-1.5 flex-wrap">
+                {FPS_OPTIONS.map((fps) => {
+                  const active = (state as any).fps === fps || (!((state as any).fps) && fps === 30);
+                  return (
+                    <Button
+                      key={fps}
+                      variant={active ? "secondary" : "outline"}
+                      size="sm"
+                      className="h-7 text-xs px-3"
+                      onClick={() => dispatch({ type: "SET_FPS" as any, payload: fps })}
+                    >
+                      {fps} fps
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground uppercase tracking-wider">Duration</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  step={0.5}
+                  value={state.duration}
+                  onChange={(e) =>
+                    dispatch({ type: "SET_DURATION", payload: parseFloat(e.target.value) || 30 })
+                  }
+                  className="h-7 text-xs"
+                />
+                <span className="text-xs text-muted-foreground">seconds</span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground uppercase tracking-wider">Background Color</Label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={state.background}
+                  onChange={(e) => dispatch({ type: "SET_BACKGROUND", payload: e.target.value })}
+                  className="h-8 w-12 bg-transparent border border-border rounded cursor-pointer"
+                />
+                <span className="text-xs font-mono text-muted-foreground">{state.background}</span>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Button
         variant="outline"
         size="sm"
@@ -175,16 +285,7 @@ export default function Toolbar({ state, dispatch, projectId, canUndo, canRedo }
         Save
       </Button>
 
-      <Button
-        variant="default"
-        size="sm"
-        className="h-8 gap-1.5 text-xs bg-primary"
-        data-testid="button-export"
-        onClick={handleExport}
-      >
-        <Download className="w-3 h-3" />
-        Export
-      </Button>
+      <ExportDialog state={state} />
     </div>
   );
 }
