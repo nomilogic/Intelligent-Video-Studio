@@ -4,6 +4,17 @@ import { Muxer as WebMMuxer, ArrayBufferTarget as WebMTarget } from "webm-muxer"
 import { EditorState, Clip } from "../lib/types";
 import { resolveClip, clipVisibleAt } from "../lib/animation";
 
+// Sample rate used for offline audio rendering and encoding.
+const AUDIO_SAMPLE_RATE = 48000;
+const AUDIO_CHANNELS = 2;
+const AUDIO_BITRATE = 192_000;
+
+function audibleClipsOf(s: EditorState): Clip[] {
+  return s.clips.filter(
+    (c) => !c.hidden && !c.muted && (c.mediaType === "audio" || c.mediaType === "video") && !!c.src,
+  );
+}
+
 export const DEFAULT_FPS = 30;
 export const FPS_OPTIONS = [24, 30, 60] as const;
 export type FpsOption = (typeof FPS_OPTIONS)[number];
@@ -268,6 +279,241 @@ async function renderFrame(
   }
 }
 
+/**
+ * Render the timeline's audio (all audible clips with correct startTime,
+ * trimStart, speed and volume) into a single AudioBuffer. Used by the
+ * optimized exporter where rendering is decoupled from real time.
+ */
+async function renderAudioOffline(s: EditorState): Promise<AudioBuffer | null> {
+  const audible = audibleClipsOf(s);
+  if (audible.length === 0) return null;
+
+  const totalSamples = Math.max(1, Math.ceil(s.duration * AUDIO_SAMPLE_RATE));
+
+  // Decode all clip audio sources up-front using a temporary AudioContext.
+  // OfflineAudioContext.decodeAudioData also works, but using a regular
+  // context first is broadly compatible.
+  const tempCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  const decoded = new Map<string, AudioBuffer>();
+  await Promise.all(
+    audible.map(async (clip) => {
+      try {
+        const res = await fetch(clip.src!);
+        const arr = await res.arrayBuffer();
+        const buf = await tempCtx.decodeAudioData(arr.slice(0));
+        decoded.set(clip.id, buf);
+      } catch (e) {
+        console.warn("Failed to decode audio for clip", clip.id, e);
+      }
+    }),
+  );
+  try { await tempCtx.close(); } catch {}
+
+  if (decoded.size === 0) return null;
+
+  const offline = new OfflineAudioContext(AUDIO_CHANNELS, totalSamples, AUDIO_SAMPLE_RATE);
+
+  for (const clip of audible) {
+    const buf = decoded.get(clip.id);
+    if (!buf) continue;
+
+    const src = offline.createBufferSource();
+    src.buffer = buf;
+    const speed = clip.speed && clip.speed > 0 ? clip.speed : 1;
+    src.playbackRate.value = speed;
+
+    const gain = offline.createGain();
+    gain.gain.value = Math.max(0, clip.volume ?? 1);
+
+    src.connect(gain);
+    gain.connect(offline.destination);
+
+    const startWhen = Math.max(0, clip.startTime);
+    const offsetIntoSource = Math.max(0, clip.trimStart ?? 0);
+    // Source seconds consumed = timeline seconds * speed.
+    const sourceDuration = Math.max(0, clip.duration * speed);
+    try {
+      src.start(startWhen, offsetIntoSource, sourceDuration);
+    } catch (e) {
+      console.warn("Audio source.start failed for clip", clip.id, e);
+    }
+  }
+
+  return await offline.startRendering();
+}
+
+/**
+ * Encode an AudioBuffer with WebCodecs and append the chunks to the muxer's
+ * audio track. Must be called AFTER the muxer has been constructed with an
+ * audio config, but BEFORE muxer.finalize().
+ */
+async function encodeAudioToMuxer(
+  audioBuffer: AudioBuffer,
+  muxer: Mp4Muxer<Mp4Target> | WebMMuxer<WebMTarget>,
+  isMp4: boolean,
+): Promise<void> {
+  const AudioEncoderCtor = (globalThis as any).AudioEncoder;
+  const AudioDataCtor = (globalThis as any).AudioData;
+  if (!AudioEncoderCtor || !AudioDataCtor) {
+    throw new Error("WebCodecs AudioEncoder is not available in this browser.");
+  }
+
+  const sampleRate = audioBuffer.sampleRate;
+  const numberOfChannels = Math.min(AUDIO_CHANNELS, audioBuffer.numberOfChannels);
+
+  // mp4 -> AAC LC (mp4a.40.2). webm -> Opus.
+  const codec = isMp4 ? "mp4a.40.2" : "opus";
+  const supported = await AudioEncoderCtor.isConfigSupported({
+    codec,
+    sampleRate,
+    numberOfChannels,
+    bitrate: AUDIO_BITRATE,
+  });
+  if (!supported?.supported) {
+    throw new Error(`This browser cannot encode ${isMp4 ? "AAC" : "Opus"} audio via WebCodecs.`);
+  }
+
+  let encodeError: unknown = null;
+  const encoder = new AudioEncoderCtor({
+    output: (chunk: any, meta: any) => {
+      (muxer as any).addAudioChunk(chunk, meta);
+    },
+    error: (e: unknown) => { encodeError = e; },
+  });
+  encoder.configure({ codec, sampleRate, numberOfChannels, bitrate: AUDIO_BITRATE });
+
+  // Pre-fetch channel data so we can interleave per chunk.
+  const channelData: Float32Array[] = [];
+  for (let ch = 0; ch < numberOfChannels; ch++) {
+    channelData.push(audioBuffer.getChannelData(ch));
+  }
+
+  const FRAME_SIZE = 1024;
+  const totalFrames = audioBuffer.length;
+  for (let offset = 0; offset < totalFrames; offset += FRAME_SIZE) {
+    if (encodeError) break;
+    const frames = Math.min(FRAME_SIZE, totalFrames - offset);
+    // WebCodecs AudioData with planar f32 expects channels concatenated in
+    // sequence: [ch0_frame0..ch0_frameN, ch1_frame0..ch1_frameN].
+    const planar = new Float32Array(frames * numberOfChannels);
+    for (let ch = 0; ch < numberOfChannels; ch++) {
+      planar.set(channelData[ch].subarray(offset, offset + frames), ch * frames);
+    }
+
+    const timestamp = Math.round((offset / sampleRate) * 1_000_000);
+    const data = new AudioDataCtor({
+      format: "f32-planar",
+      sampleRate,
+      numberOfFrames: frames,
+      numberOfChannels,
+      timestamp,
+      data: planar,
+    });
+    encoder.encode(data);
+    data.close();
+
+    if (encoder.encodeQueueSize > 16) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+  }
+
+  await encoder.flush();
+  encoder.close();
+  if (encodeError) throw encodeError;
+}
+
+interface RealtimeAudioMix {
+  audioCtx: AudioContext;
+  destination: MediaStreamAudioDestinationNode;
+  start: () => void;
+  stop: () => void;
+}
+
+/**
+ * Set up a Web Audio graph that mixes every audible clip into a single
+ * MediaStreamAudioDestinationNode. The returned `start()` triggers playback
+ * of every <video>/<audio> element at its scheduled clip.startTime relative
+ * to "now". The audio tracks of `destination.stream` should be added to the
+ * canvas captureStream BEFORE constructing the MediaRecorder.
+ */
+async function setupRealtimeAudioMix(
+  s: EditorState,
+  cancelRef: React.MutableRefObject<boolean>,
+): Promise<RealtimeAudioMix | null> {
+  const audible = audibleClipsOf(s);
+  if (audible.length === 0) return null;
+
+  const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  const destination = audioCtx.createMediaStreamDestination();
+  const items: Array<{ el: HTMLMediaElement; clip: Clip; timers: ReturnType<typeof setTimeout>[] }> = [];
+
+  await Promise.all(
+    audible.map(async (clip) => {
+      const el =
+        clip.mediaType === "video"
+          ? document.createElement("video")
+          : document.createElement("audio");
+      el.src = clip.src!;
+      el.preload = "auto";
+      el.crossOrigin = "anonymous";
+      // For video clips we don't render to canvas from these elements, but
+      // the browser still needs a poster/visibility-friendly state.
+      (el as HTMLVideoElement).muted = false;
+      el.volume = Math.max(0, Math.min(1, clip.volume ?? 1));
+      await new Promise<void>((resolve) => {
+        el.onloadeddata = () => resolve();
+        el.onerror = () => resolve();
+        setTimeout(resolve, 8000);
+        el.load();
+      });
+      try {
+        const src = audioCtx.createMediaElementSource(el);
+        const gainNode = audioCtx.createGain();
+        gainNode.gain.value = Math.max(0, clip.volume ?? 1);
+        src.connect(gainNode);
+        gainNode.connect(destination);
+      } catch (e) {
+        console.warn("Failed to attach audio for clip", clip.id, e);
+      }
+      items.push({ el, clip, timers: [] });
+    }),
+  );
+
+  function start() {
+    for (const item of items) {
+      const { el, clip } = item;
+      try {
+        el.currentTime = Math.max(0, clip.trimStart ?? 0);
+        el.playbackRate = clip.speed ?? 1;
+        el.muted = false;
+      } catch {}
+      const startMs = Math.max(0, clip.startTime) * 1000;
+      const stopMs = Math.max(0, clip.startTime + clip.duration) * 1000;
+      if (startMs <= 0) {
+        el.play().catch(() => {});
+      } else {
+        item.timers.push(setTimeout(() => {
+          if (cancelRef.current) return;
+          el.play().catch(() => {});
+        }, startMs));
+      }
+      item.timers.push(setTimeout(() => {
+        try { el.pause(); } catch {}
+      }, stopMs));
+    }
+  }
+
+  function stop() {
+    for (const item of items) {
+      for (const t of item.timers) clearTimeout(t);
+      try { item.el.pause(); } catch {}
+    }
+    try { audioCtx.close(); } catch {}
+  }
+
+  return { audioCtx, destination, start, stop };
+}
+
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -318,11 +564,31 @@ async function exportQuick(
   }
 
   const stream = canvas.captureStream(0);
+
+  // Mix audio (if any audible clips) into the same MediaStream as the canvas
+  // video so the recorded file contains sound. Tracks must be added BEFORE
+  // constructing the MediaRecorder.
+  const audioMix = await setupRealtimeAudioMix(s, cancelRef);
+  if (audioMix) {
+    for (const t of audioMix.destination.stream.getAudioTracks()) {
+      stream.addTrack(t);
+    }
+  }
+
   const videoTrack = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack & { requestFrame?: () => void };
-  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
+  const recorder = new MediaRecorder(stream, {
+    mimeType,
+    videoBitsPerSecond: 8_000_000,
+    audioBitsPerSecond: AUDIO_BITRATE,
+  });
   const chunks: Blob[] = [];
   recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
   recorder.start(200);
+
+  // Start audio playback as close to recorder.start as possible so audio &
+  // video timelines line up. Slight desync (<50ms) is acceptable for a real-
+  // time export; users wanting frame-perfect sync should use Optimized Save.
+  audioMix?.start();
 
   const sortedClips = [...s.clips].sort((a, b) => b.trackIndex - a.trackIndex);
   const startMs = performance.now();
@@ -346,6 +612,7 @@ async function exportQuick(
   }
 
   for (const v of media.videoEls.values()) v.pause();
+  audioMix?.stop();
   recorder.stop();
   await new Promise<void>((resolve) => { recorder.onstop = () => resolve(); });
 
@@ -394,6 +661,18 @@ async function exportOptimized(
 
   const isMp4 = config.format === "mp4";
 
+  // Render the audio mix offline first so we know whether to add an audio
+  // track to the muxer (and what its sample rate / channel count are). This
+  // also lets the audio render run while the user waits for the video phase.
+  let audioBuffer: AudioBuffer | null = null;
+  try {
+    audioBuffer = await renderAudioOffline(s);
+  } catch (e) {
+    console.warn("Audio rendering failed; exporting silent video.", e);
+    audioBuffer = null;
+  }
+  if (cancelRef.current) throw new Error("Cancelled");
+
   let muxer: Mp4Muxer<Mp4Target> | WebMMuxer<WebMTarget>;
   let target: Mp4Target | WebMTarget;
   let codec: string;
@@ -406,6 +685,13 @@ async function exportOptimized(
     muxer = new Mp4Muxer({
       target,
       video: { codec: "avc", width: codedW, height: codedH, frameRate: fps },
+      audio: audioBuffer
+        ? {
+            codec: "aac",
+            numberOfChannels: Math.min(AUDIO_CHANNELS, audioBuffer.numberOfChannels),
+            sampleRate: audioBuffer.sampleRate,
+          }
+        : undefined,
       fastStart: "in-memory",
     });
     mimeBase = "video/mp4";
@@ -416,6 +702,13 @@ async function exportOptimized(
     muxer = new WebMMuxer({
       target,
       video: { codec: "V_VP9", width: codedW, height: codedH, frameRate: fps },
+      audio: audioBuffer
+        ? {
+            codec: "A_OPUS",
+            numberOfChannels: Math.min(AUDIO_CHANNELS, audioBuffer.numberOfChannels),
+            sampleRate: audioBuffer.sampleRate,
+          }
+        : undefined,
     });
     mimeBase = "video/webm";
     ext = "webm";
@@ -477,6 +770,15 @@ async function exportOptimized(
   await encoder.flush();
   encoder.close();
   if (encodeError) throw encodeError;
+
+  // Encode and mux the pre-rendered audio buffer (if any).
+  if (audioBuffer) {
+    try {
+      await encodeAudioToMuxer(audioBuffer, muxer, isMp4);
+    } catch (e) {
+      console.warn("Audio encoding failed; finalizing without sound.", e);
+    }
+  }
 
   muxer.finalize();
   const buffer = (target as Mp4Target | WebMTarget).buffer;

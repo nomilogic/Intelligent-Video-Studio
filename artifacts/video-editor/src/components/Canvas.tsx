@@ -276,18 +276,24 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
 
+      // Capture the RESOLVED (interpolated) rect position at the current
+      // playhead, not the clip's base values. When keyframes shift the clip,
+      // the on-screen rectangle is at the resolved position — so the drag
+      // delta must accumulate from there to avoid a snap/jump on first move.
+      const r = resolveClip(clip, state.keyframes, state.currentTime);
+
       if (mode === "move") {
         setDrag({
           kind: "move",
           clipId: clip.id,
           startX: e.clientX,
           startY: e.clientY,
-          origX: clip.x,
-          origY: clip.y,
+          origX: r.x,
+          origY: r.y,
         });
       } else if (mode === "rotate") {
-        const cx = rect.left + (clip.x + clip.width / 2) * rect.width;
-        const cy = rect.top + (clip.y + clip.height / 2) * rect.height;
+        const cx = rect.left + (r.x + r.width / 2) * rect.width;
+        const cy = rect.top + (r.y + r.height / 2) * rect.height;
         const startAngle = (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI;
         setDrag({
           kind: "rotate",
@@ -295,7 +301,7 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
           centerX: cx,
           centerY: cy,
           startAngle,
-          origRotation: clip.rotation,
+          origRotation: r.rotation,
         });
       } else if (mode === "cropMove") {
         setDrag({
@@ -325,14 +331,14 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
           handle: mode,
           startX: e.clientX,
           startY: e.clientY,
-          origX: clip.x,
-          origY: clip.y,
-          origW: clip.width,
-          origH: clip.height,
+          origX: r.x,
+          origY: r.y,
+          origW: r.width,
+          origH: r.height,
         });
       }
     },
-    [dispatch, state.selectedClipIds],
+    [dispatch, state.selectedClipIds, state.keyframes, state.currentTime],
   );
 
   useEffect(() => {
@@ -340,22 +346,40 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
 
-    // When the playhead sits on a keyframe for a given property, the displayed
-    // value is driven by keyframe interpolation — updating the clip's base
-    // value would have no visible effect. Route each property change to the
-    // matching keyframe instead, so the on-canvas transform handles act as
-    // keyframe editors. Falls back to UPDATE_CLIP when no keyframe is present.
+    // Route property changes to the right destination so the on-canvas
+    // transform always has a visible effect at the current playhead:
+    //   1. Keyframe AT current time → update that keyframe.
+    //   2. Other keyframes exist for this property (but not at this time) →
+    //      add a new keyframe at the playhead. Writing the base would do
+    //      nothing visible because interpolation between siblings overrides it.
+    //   3. No keyframes for this property → update the clip's base value.
     const dispatchAnimatable = (clipId: string, updates: Record<string, number>) => {
       const baseUpdates: Record<string, number> = {};
       for (const [prop, value] of Object.entries(updates)) {
-        const kf = state.keyframes.find(
+        const exactKf = state.keyframes.find(
           (k) =>
             k.clipId === clipId &&
             k.property === prop &&
             Math.abs(k.time - state.currentTime) < 0.02,
         );
-        if (kf) {
-          dispatch({ type: "UPDATE_KEYFRAME", payload: { id: kf.id, value } });
+        if (exactKf) {
+          dispatch({ type: "UPDATE_KEYFRAME", payload: { id: exactKf.id, value } });
+          continue;
+        }
+        const hasOtherKfs = state.keyframes.some(
+          (k) => k.clipId === clipId && k.property === prop,
+        );
+        if (hasOtherKfs) {
+          dispatch({
+            type: "ADD_KEYFRAME",
+            payload: {
+              clipId,
+              property: prop,
+              time: state.currentTime,
+              value,
+              easing: "linear",
+            },
+          });
         } else {
           baseUpdates[prop] = value;
         }
@@ -376,8 +400,9 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
 
         const guides: { x?: number; y?: number } = {};
         if (state.snapEnabled) {
-          const cw = clip.width;
-          const ch = clip.height;
+          const r = resolveClip(clip, state.keyframes, state.currentTime);
+          const cw = r.width;
+          const ch = r.height;
           const centerX = nx + cw / 2;
           const centerY = ny + ch / 2;
           const SNAP = 0.02;
@@ -538,7 +563,7 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [drag, dispatch, state.snapEnabled, state.clips]);
+  }, [drag, dispatch, state.snapEnabled, state.clips, state.keyframes, state.currentTime]);
 
   const selectedClip = state.clips.find((c) => state.selectedClipIds.includes(c.id));
 
