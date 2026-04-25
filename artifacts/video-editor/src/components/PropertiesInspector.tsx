@@ -536,9 +536,9 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
                 return (
                   <Button
                     key={r.label}
-                    variant={active ? "secondary" : "outline"}
+                    variant="ghost"
                     size="sm"
-                    className="h-14 flex flex-col items-center justify-center gap-1 px-1.5"
+                    className={`h-14 flex flex-col items-center justify-center gap-1 px-1.5 border ${active ? "border-foreground" : "border-transparent"}`}
                     onClick={() => dispatch({ type: "SET_CANVAS_SIZE", payload: { width: r.w, height: r.h } })}
                     title={`${r.label} (${r.w}×${r.h})`}
                   >
