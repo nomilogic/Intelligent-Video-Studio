@@ -1,4 +1,4 @@
-import { EditorState, EditorAction, Clip, ClipMask, DEFAULT_FILTERS, EasingType, Effect, EffectType, TransitionType } from "../lib/types";
+import { EditorState, EditorAction, Clip, ClipMask, DEFAULT_FILTERS, EasingType, Effect, EffectType, TransitionType, FONT_OPTIONS, type TextStyle, type TextGradient, type TextStroke, type TextGlow, type TextShadow, type TextBackground } from "../lib/types";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
@@ -833,7 +833,41 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
               </div>
               <div className="flex items-center gap-2">
                 <Label className="w-16 text-muted-foreground">BG</Label>
-                <input type="color" value={state.background} onChange={(e) => dispatch({ type: "SET_BACKGROUND", payload: e.target.value })} className="h-7 w-full bg-transparent border border-border rounded" />
+                <input
+                  type="color"
+                  value={state.background.startsWith("#") ? state.background : "#000000"}
+                  onChange={(e) => dispatch({ type: "SET_BACKGROUND", payload: e.target.value })}
+                  className="h-7 w-12 bg-transparent border border-border rounded shrink-0"
+                />
+                <Input
+                  value={state.background}
+                  onChange={(e) => dispatch({ type: "SET_BACKGROUND", payload: e.target.value })}
+                  className="h-7 text-[10px] font-mono"
+                  placeholder="#000 or linear-gradient(...)"
+                />
+              </div>
+              <div>
+                <Label className="text-[10px] text-muted-foreground">Gradient Presets</Label>
+                <div className="grid grid-cols-4 gap-1 mt-1">
+                  {[
+                    "linear-gradient(135deg, #0f172a, #1e3a8a)",
+                    "linear-gradient(135deg, #7c3aed, #ec4899)",
+                    "linear-gradient(135deg, #f59e0b, #ef4444)",
+                    "linear-gradient(135deg, #10b981, #06b6d4)",
+                    "linear-gradient(180deg, #fde68a, #f59e0b)",
+                    "linear-gradient(180deg, #1e293b, #0ea5e9)",
+                    "radial-gradient(circle at 30% 20%, #6366f1, #0f172a)",
+                    "radial-gradient(circle at 50% 50%, #ec4899, #1e1b4b)",
+                  ].map((g) => (
+                    <button
+                      key={g}
+                      onClick={() => dispatch({ type: "SET_BACKGROUND", payload: g })}
+                      className="aspect-square rounded border border-border hover:scale-105 transition-transform"
+                      style={{ background: g }}
+                      title={g}
+                    />
+                  ))}
+                </div>
               </div>
             </div>
           </Section>
@@ -1396,81 +1430,554 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
 
             {clip.mediaType === "text" && (
               <TabsContent value="text" className="m-0">
-                <Section title="Text">
-                  <textarea
-                    key={clip.id}
-                    value={clip.text || ""}
-                    onChange={(e) => update({ text: e.target.value })}
-                    className="w-full text-xs p-2 bg-muted/20 border border-border rounded resize-none"
-                    rows={3}
-                    placeholder="Enter text..."
-                    data-testid="text-content-input"
-                  />
-                  <div className="flex items-center gap-2 rounded border border-white/10 bg-black/20 px-2 py-1.5">
-                    <input
-                      id="text-auto-scale"
-                      type="checkbox"
-                      className="w-3.5 h-3.5 accent-primary"
-                      checked={clip.textAutoScale !== false}
-                      onChange={(e) => update({ textAutoScale: e.target.checked })}
-                      data-testid="text-auto-scale-toggle"
-                    />
-                    <label htmlFor="text-auto-scale" className="text-[10px] flex-1 cursor-pointer">
-                      <span className="font-medium">Resize scales text</span>
-                      <span className="block text-muted-foreground">
-                        {clip.textAutoScale !== false
-                          ? "Text grows/shrinks with the box."
-                          : "Only the box resizes; text stays the same size."}
-                      </span>
-                    </label>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground">Font Size</Label>
-                      <Input type="number" value={clip.textStyle?.fontSize || 64} onChange={(e) => update({ textStyle: { ...clip.textStyle!, fontSize: parseInt(e.target.value) || 64 } })} className="h-7 text-xs" />
-                    </div>
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground">Weight</Label>
-                      <Select value={String(clip.textStyle?.fontWeight || 700)} onValueChange={(v) => update({ textStyle: { ...clip.textStyle!, fontWeight: parseInt(v) } })}>
-                        <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {[300, 400, 500, 600, 700, 800, 900].map((w) => (
-                            <SelectItem key={w} value={String(w)} className="text-xs">{w}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground">Color</Label>
-                      <input type="color" value={clip.textStyle?.color || "#ffffff"} onChange={(e) => update({ textStyle: { ...clip.textStyle!, color: e.target.value } })} className="h-7 w-full rounded border border-border" />
-                    </div>
-                    <div>
-                      <Label className="text-[10px] text-muted-foreground">BG</Label>
-                      <input type="color" value={clip.textStyle?.background === "transparent" ? "#000000" : clip.textStyle?.background || "#000000"} onChange={(e) => update({ textStyle: { ...clip.textStyle!, background: e.target.value } })} className="h-7 w-full rounded border border-border" />
-                    </div>
-                  </div>
-                  <Select value={clip.textStyle?.align || "center"} onValueChange={(v: any) => update({ textStyle: { ...clip.textStyle!, align: v } })}>
-                    <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {["left", "center", "right"].map((a) => <SelectItem key={a} value={a} className="text-xs">{a}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <div className="flex gap-1.5">
-                    <Button variant={clip.textStyle?.italic ? "secondary" : "outline"} size="sm" className="h-7 text-xs flex-1 italic" onClick={() => update({ textStyle: { ...clip.textStyle!, italic: !clip.textStyle?.italic } })}>I</Button>
-                    <Button variant={clip.textStyle?.underline ? "secondary" : "outline"} size="sm" className="h-7 text-xs flex-1 underline" onClick={() => update({ textStyle: { ...clip.textStyle!, underline: !clip.textStyle?.underline } })}>U</Button>
-                    <Button variant={clip.textStyle?.shadow ? "secondary" : "outline"} size="sm" className="h-7 text-xs flex-1" onClick={() => update({ textStyle: { ...clip.textStyle!, shadow: !clip.textStyle?.shadow } })}>
-                      <Wand2 className="w-3 h-3 mr-1" /> Shadow
-                    </Button>
-                  </div>
-                  <Button variant="outline" size="sm" className="w-full h-7 text-xs" onClick={() => update({ textStyle: { ...clip.textStyle!, background: "transparent" } })}>Transparent BG</Button>
-                </Section>
+                <TextStylePanel clip={clip} update={update} />
               </TabsContent>
             )}
           </div>
         </Tabs>
       )}
     </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Text styling panel — fonts, gradients, stroke, glow, shadow, curve, bg
+// ────────────────────────────────────────────────────────────────────────────
+
+const DEFAULT_GRADIENT: TextGradient = {
+  enabled: true,
+  color1: "#ff7a59",
+  color2: "#7c3aed",
+  angle: 90,
+};
+const DEFAULT_BG_GRADIENT: TextGradient = {
+  enabled: true,
+  color1: "#0f172a",
+  color2: "#1e3a8a",
+  angle: 135,
+};
+const DEFAULT_STROKE: TextStroke = { enabled: true, color: "#000000", width: 2 };
+const DEFAULT_GLOW: TextGlow = { enabled: true, color: "#22d3ee", blur: 8, intensity: 3 };
+const DEFAULT_SHADOW: TextShadow = {
+  enabled: true,
+  color: "#000000cc",
+  offsetX: 0,
+  offsetY: 4,
+  blur: 12,
+};
+const DEFAULT_BG: TextBackground = {
+  color: "transparent",
+  gradient: { enabled: false, color1: "#0f172a", color2: "#1e3a8a", angle: 135 },
+  borderColor: "#ffffff",
+  borderWidth: 0,
+  borderRadius: 12,
+  padding: 12,
+};
+
+function TextStylePanel({
+  clip,
+  update,
+}: {
+  clip: Clip;
+  update: (updates: Partial<Clip>) => void;
+}) {
+  const ts = clip.textStyle!;
+  const setTs = (patch: Partial<TextStyle>) =>
+    update({ textStyle: { ...ts, ...patch } });
+  const grad = ts.gradient || { ...DEFAULT_GRADIENT, enabled: false };
+  const stroke = ts.stroke || { ...DEFAULT_STROKE, enabled: false };
+  const glow = ts.glow || { ...DEFAULT_GLOW, enabled: false };
+  const shadow = ts.textShadow || { ...DEFAULT_SHADOW, enabled: false };
+  const bg = ts.bg || DEFAULT_BG;
+
+  return (
+    <>
+      <Section title="Content">
+        <textarea
+          key={clip.id}
+          value={clip.text || ""}
+          onChange={(e) => update({ text: e.target.value })}
+          className="w-full text-xs p-2 bg-muted/20 border border-border rounded resize-none"
+          rows={3}
+          placeholder="Enter text..."
+          data-testid="text-content-input"
+        />
+        <div className="flex items-center gap-2 rounded border border-white/10 bg-black/20 px-2 py-1.5">
+          <input
+            id="text-auto-scale"
+            type="checkbox"
+            className="w-3.5 h-3.5 accent-primary"
+            checked={clip.textAutoScale !== false}
+            onChange={(e) => update({ textAutoScale: e.target.checked })}
+            data-testid="text-auto-scale-toggle"
+          />
+          <label htmlFor="text-auto-scale" className="text-[10px] flex-1 cursor-pointer">
+            <span className="font-medium">Resize scales text</span>
+            <span className="block text-muted-foreground">
+              {clip.textAutoScale !== false
+                ? "Text grows/shrinks with the box."
+                : "Only the box resizes; text stays the same size."}
+            </span>
+          </label>
+        </div>
+      </Section>
+
+      <Section title="Font">
+        <Select value={ts.fontFamily} onValueChange={(v) => setTs({ fontFamily: v })}>
+          <SelectTrigger className="h-7 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="max-h-72">
+            {(["Sans", "Serif", "Display", "Handwriting", "Mono"] as const).map((cat) => (
+              <div key={cat}>
+                <div className="px-2 py-1 text-[9px] uppercase tracking-widest text-muted-foreground sticky top-0 bg-popover">
+                  {cat}
+                </div>
+                {FONT_OPTIONS.filter((f) => f.category === cat).map((f) => (
+                  <SelectItem key={f.value} value={f.value} className="text-xs">
+                    <span style={{ fontFamily: f.value }}>{f.label}</span>
+                  </SelectItem>
+                ))}
+              </div>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="grid grid-cols-2 gap-1.5">
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Size</Label>
+            <Input
+              type="number"
+              value={ts.fontSize || 64}
+              onChange={(e) => setTs({ fontSize: parseInt(e.target.value) || 64 })}
+              className="h-7 text-xs"
+            />
+          </div>
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Weight</Label>
+            <Select
+              value={String(ts.fontWeight || 700)}
+              onValueChange={(v) => setTs({ fontWeight: parseInt(v) })}
+            >
+              <SelectTrigger className="h-7 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[300, 400, 500, 600, 700, 800, 900].map((w) => (
+                  <SelectItem key={w} value={String(w)} className="text-xs">
+                    {w}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Letter Spacing</Label>
+            <Input
+              type="number"
+              value={ts.letterSpacing ?? 0}
+              step={0.5}
+              onChange={(e) => setTs({ letterSpacing: parseFloat(e.target.value) || 0 })}
+              className="h-7 text-xs"
+            />
+          </div>
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Line Height</Label>
+            <Input
+              type="number"
+              value={ts.lineHeight ?? 1.1}
+              step={0.05}
+              onChange={(e) => setTs({ lineHeight: parseFloat(e.target.value) || 1.1 })}
+              className="h-7 text-xs"
+            />
+          </div>
+        </div>
+        <Select value={ts.align || "center"} onValueChange={(v: any) => setTs({ align: v })}>
+          <SelectTrigger className="h-7 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {["left", "center", "right"].map((a) => (
+              <SelectItem key={a} value={a} className="text-xs">
+                {a}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="flex gap-1.5">
+          <Button
+            variant={ts.italic ? "secondary" : "outline"}
+            size="sm"
+            className="h-7 text-xs flex-1 italic"
+            onClick={() => setTs({ italic: !ts.italic })}
+          >
+            I
+          </Button>
+          <Button
+            variant={ts.underline ? "secondary" : "outline"}
+            size="sm"
+            className="h-7 text-xs flex-1 underline"
+            onClick={() => setTs({ underline: !ts.underline })}
+          >
+            U
+          </Button>
+        </div>
+      </Section>
+
+      <Section title="Fill">
+        <div className="flex items-center gap-2">
+          <Label className="text-[10px] text-muted-foreground w-12">Color</Label>
+          <input
+            type="color"
+            value={ts.color || "#ffffff"}
+            onChange={(e) => setTs({ color: e.target.value })}
+            className="h-7 w-10 rounded border border-border"
+          />
+          <Input
+            type="text"
+            value={ts.color || "#ffffff"}
+            onChange={(e) => setTs({ color: e.target.value })}
+            className="h-7 text-[10px] flex-1 font-mono"
+          />
+        </div>
+        <ToggleHeader
+          label="Gradient Fill"
+          enabled={!!grad.enabled}
+          onToggle={(v) =>
+            setTs({ gradient: v ? { ...DEFAULT_GRADIENT, ...grad, enabled: true } : { ...grad, enabled: false } })
+          }
+        />
+        {grad.enabled && (
+          <GradientControls
+            grad={grad}
+            onChange={(g) => setTs({ gradient: g })}
+          />
+        )}
+      </Section>
+
+      <Section title="Stroke">
+        <ToggleHeader
+          label="Outline"
+          enabled={!!stroke.enabled}
+          onToggle={(v) =>
+            setTs({ stroke: v ? { ...DEFAULT_STROKE, ...stroke, enabled: true } : { ...stroke, enabled: false } })
+          }
+        />
+        {stroke.enabled && (
+          <>
+            <div className="flex items-center gap-2">
+              <Label className="text-[10px] text-muted-foreground w-12">Color</Label>
+              <input
+                type="color"
+                value={stroke.color}
+                onChange={(e) => setTs({ stroke: { ...stroke, color: e.target.value } })}
+                className="h-7 w-10 rounded border border-border"
+              />
+              <Input
+                type="text"
+                value={stroke.color}
+                onChange={(e) => setTs({ stroke: { ...stroke, color: e.target.value } })}
+                className="h-7 text-[10px] flex-1 font-mono"
+              />
+            </div>
+            <div>
+              <Label className="text-[10px] text-muted-foreground">Width: {stroke.width}px</Label>
+              <Slider
+                value={[stroke.width]}
+                min={0}
+                max={20}
+                step={0.5}
+                onValueChange={([v]) => setTs({ stroke: { ...stroke, width: v } })}
+                className="mt-1"
+              />
+            </div>
+          </>
+        )}
+      </Section>
+
+      <Section title="Glow">
+        <ToggleHeader
+          label="Neon Glow"
+          enabled={!!glow.enabled}
+          onToggle={(v) =>
+            setTs({ glow: v ? { ...DEFAULT_GLOW, ...glow, enabled: true } : { ...glow, enabled: false } })
+          }
+        />
+        {glow.enabled && (
+          <>
+            <div className="flex items-center gap-2">
+              <Label className="text-[10px] text-muted-foreground w-12">Color</Label>
+              <input
+                type="color"
+                value={glow.color}
+                onChange={(e) => setTs({ glow: { ...glow, color: e.target.value } })}
+                className="h-7 w-10 rounded border border-border"
+              />
+              <Input
+                type="text"
+                value={glow.color}
+                onChange={(e) => setTs({ glow: { ...glow, color: e.target.value } })}
+                className="h-7 text-[10px] flex-1 font-mono"
+              />
+            </div>
+            <div>
+              <Label className="text-[10px] text-muted-foreground">Blur: {glow.blur}px</Label>
+              <Slider
+                value={[glow.blur]}
+                min={1}
+                max={40}
+                step={1}
+                onValueChange={([v]) => setTs({ glow: { ...glow, blur: v } })}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label className="text-[10px] text-muted-foreground">Intensity: {glow.intensity}</Label>
+              <Slider
+                value={[glow.intensity]}
+                min={1}
+                max={6}
+                step={1}
+                onValueChange={([v]) => setTs({ glow: { ...glow, intensity: v } })}
+                className="mt-1"
+              />
+            </div>
+          </>
+        )}
+      </Section>
+
+      <Section title="Drop Shadow">
+        <ToggleHeader
+          label="Shadow"
+          enabled={!!shadow.enabled}
+          onToggle={(v) =>
+            setTs({ textShadow: v ? { ...DEFAULT_SHADOW, ...shadow, enabled: true } : { ...shadow, enabled: false } })
+          }
+        />
+        {shadow.enabled && (
+          <>
+            <div className="flex items-center gap-2">
+              <Label className="text-[10px] text-muted-foreground w-12">Color</Label>
+              <input
+                type="color"
+                value={shadow.color.length > 7 ? shadow.color.slice(0, 7) : shadow.color}
+                onChange={(e) => setTs({ textShadow: { ...shadow, color: e.target.value } })}
+                className="h-7 w-10 rounded border border-border"
+              />
+              <Input
+                type="text"
+                value={shadow.color}
+                onChange={(e) => setTs({ textShadow: { ...shadow, color: e.target.value } })}
+                className="h-7 text-[10px] flex-1 font-mono"
+              />
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              <div>
+                <Label className="text-[10px] text-muted-foreground">X</Label>
+                <Input
+                  type="number"
+                  value={shadow.offsetX}
+                  onChange={(e) =>
+                    setTs({ textShadow: { ...shadow, offsetX: parseInt(e.target.value) || 0 } })
+                  }
+                  className="h-7 text-xs"
+                />
+              </div>
+              <div>
+                <Label className="text-[10px] text-muted-foreground">Y</Label>
+                <Input
+                  type="number"
+                  value={shadow.offsetY}
+                  onChange={(e) =>
+                    setTs({ textShadow: { ...shadow, offsetY: parseInt(e.target.value) || 0 } })
+                  }
+                  className="h-7 text-xs"
+                />
+              </div>
+              <div>
+                <Label className="text-[10px] text-muted-foreground">Blur</Label>
+                <Input
+                  type="number"
+                  value={shadow.blur}
+                  onChange={(e) =>
+                    setTs({ textShadow: { ...shadow, blur: parseInt(e.target.value) || 0 } })
+                  }
+                  className="h-7 text-xs"
+                />
+              </div>
+            </div>
+          </>
+        )}
+      </Section>
+
+      <Section title="Curve">
+        <Label className="text-[10px] text-muted-foreground">Bend: {ts.curve ?? 0}°</Label>
+        <Slider
+          value={[ts.curve ?? 0]}
+          min={-180}
+          max={180}
+          step={1}
+          onValueChange={([v]) => setTs({ curve: v })}
+          className="mt-1"
+        />
+        <p className="text-[10px] text-muted-foreground leading-snug">
+          0° = straight. Positive bends down (smile), negative bends up (frown). At ±180° text wraps half a circle.
+        </p>
+      </Section>
+
+      <Section title="Background">
+        <div className="flex items-center gap-2">
+          <Label className="text-[10px] text-muted-foreground w-12">Fill</Label>
+          <input
+            type="color"
+            value={bg.color === "transparent" ? "#000000" : bg.color}
+            onChange={(e) => setTs({ bg: { ...bg, color: e.target.value } })}
+            className="h-7 w-10 rounded border border-border"
+            disabled={bg.gradient.enabled}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[10px] flex-1"
+            onClick={() => setTs({ bg: { ...bg, color: "transparent" } })}
+          >
+            None
+          </Button>
+        </div>
+        <ToggleHeader
+          label="Gradient BG"
+          enabled={bg.gradient.enabled}
+          onToggle={(v) =>
+            setTs({
+              bg: {
+                ...bg,
+                gradient: v ? { ...DEFAULT_BG_GRADIENT, ...bg.gradient, enabled: true } : { ...bg.gradient, enabled: false },
+              },
+            })
+          }
+        />
+        {bg.gradient.enabled && (
+          <GradientControls
+            grad={bg.gradient}
+            onChange={(g) => setTs({ bg: { ...bg, gradient: g } })}
+          />
+        )}
+        <div className="grid grid-cols-2 gap-1.5">
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Padding</Label>
+            <Input
+              type="number"
+              value={bg.padding}
+              onChange={(e) => setTs({ bg: { ...bg, padding: parseInt(e.target.value) || 0 } })}
+              className="h-7 text-xs"
+            />
+          </div>
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Radius</Label>
+            <Input
+              type="number"
+              value={bg.borderRadius}
+              onChange={(e) => setTs({ bg: { ...bg, borderRadius: parseInt(e.target.value) || 0 } })}
+              className="h-7 text-xs"
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5 items-end">
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Border</Label>
+            <input
+              type="color"
+              value={bg.borderColor}
+              onChange={(e) => setTs({ bg: { ...bg, borderColor: e.target.value } })}
+              className="h-7 w-full rounded border border-border"
+            />
+          </div>
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Width</Label>
+            <Input
+              type="number"
+              value={bg.borderWidth}
+              onChange={(e) => setTs({ bg: { ...bg, borderWidth: parseInt(e.target.value) || 0 } })}
+              className="h-7 text-xs"
+            />
+          </div>
+        </div>
+      </Section>
+    </>
+  );
+}
+
+function ToggleHeader({
+  label,
+  enabled,
+  onToggle,
+}: {
+  label: string;
+  enabled: boolean;
+  onToggle: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      <Label className="text-[11px] font-medium">{label}</Label>
+      <Button
+        size="sm"
+        variant={enabled ? "secondary" : "outline"}
+        className="h-6 px-2 text-[10px]"
+        onClick={() => onToggle(!enabled)}
+      >
+        {enabled ? "On" : "Off"}
+      </Button>
+    </div>
+  );
+}
+
+function GradientControls({
+  grad,
+  onChange,
+}: {
+  grad: TextGradient;
+  onChange: (g: TextGradient) => void;
+}) {
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-1.5">
+        <div>
+          <Label className="text-[10px] text-muted-foreground">Color 1</Label>
+          <input
+            type="color"
+            value={grad.color1}
+            onChange={(e) => onChange({ ...grad, color1: e.target.value })}
+            className="h-7 w-full rounded border border-border"
+          />
+        </div>
+        <div>
+          <Label className="text-[10px] text-muted-foreground">Color 2</Label>
+          <input
+            type="color"
+            value={grad.color2}
+            onChange={(e) => onChange({ ...grad, color2: e.target.value })}
+            className="h-7 w-full rounded border border-border"
+          />
+        </div>
+      </div>
+      <div>
+        <Label className="text-[10px] text-muted-foreground">Angle: {grad.angle}°</Label>
+        <Slider
+          value={[grad.angle]}
+          min={0}
+          max={360}
+          step={5}
+          onValueChange={([v]) => onChange({ ...grad, angle: v })}
+          className="mt-1"
+        />
+      </div>
+      <div
+        className="h-6 rounded border border-border"
+        style={{
+          background: `linear-gradient(${grad.angle}deg, ${grad.color1}, ${grad.color2})`,
+        }}
+      />
+    </>
   );
 }

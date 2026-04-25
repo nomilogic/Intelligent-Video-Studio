@@ -10,6 +10,7 @@ import {
   type TransitionMod,
   NO_TRANSITION,
 } from "../lib/animation";
+import { textContainerStyle, textElementStyle } from "../lib/text-style";
 import { cn } from "@/lib/utils";
 
 interface CanvasProps {
@@ -364,34 +365,46 @@ function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false }
     const fontSizeStyle = autoScale
       ? `${ts.fontSize / 10}cqw`
       : `calc(var(--canvas-w, 100cqw) * ${ts.fontSize / 1000})`;
+    const containerStyle = textContainerStyle(ts);
+    const elStyle = textElementStyle(ts, fontSizeStyle);
+    const curve = ts.curve || 0;
+
+    // Curved text — render via SVG textPath along an arc. The arc's chord
+    // spans the clip width, and the sagitta scales with the curve angle so
+    // 0° is a flat line and ±180° is a half-circle.
+    if (Math.abs(curve) >= 1 && (clip.text || "").trim().length > 0) {
+      return (
+        <div
+          className="w-full h-full flex pointer-events-none"
+          style={{
+            ...containerStyle,
+            alignItems: "center",
+            justifyContent: "center",
+            overflow: "hidden",
+          }}
+        >
+          <CurvedText
+            text={clip.text || ""}
+            style={ts}
+            curveDeg={curve}
+            elementStyle={elStyle}
+          />
+        </div>
+      );
+    }
+
     return (
       <div
-        className="w-full h-full flex pointer-events-none px-2 py-1"
+        className="w-full h-full flex pointer-events-none"
         style={{
-          background: ts.background === "transparent" ? "transparent" : ts.background,
+          ...containerStyle,
           alignItems: "center",
           justifyContent:
             ts.align === "left" ? "flex-start" : ts.align === "right" ? "flex-end" : "center",
           overflow: "hidden",
         }}
       >
-        <span
-          style={{
-            fontFamily: ts.fontFamily,
-            fontSize: fontSizeStyle,
-            fontWeight: ts.fontWeight,
-            color: ts.color,
-            textAlign: ts.align,
-            fontStyle: ts.italic ? "italic" : "normal",
-            textDecoration: ts.underline ? "underline" : "none",
-            textShadow: ts.shadow ? "0 2px 12px rgba(0,0,0,0.6), 0 0 4px rgba(0,0,0,0.4)" : "none",
-            lineHeight: 1.1,
-            wordBreak: "break-word",
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          {clip.text || ""}
-        </span>
+        <span style={elStyle}>{clip.text || ""}</span>
       </div>
     );
   }
@@ -488,6 +501,107 @@ const MediaContent = memo(MediaContentBase, (prev, next) => {
 });
 
 /**
+ * Renders text along a circular arc using SVG <textPath>. The arc spans the
+ * width of the container; the curve angle (degrees) controls how much the
+ * arc bows. Positive curve bows downward (smile), negative bows upward
+ * (frown). At ±180° the text wraps a half-circle.
+ */
+function CurvedText({
+  text,
+  style,
+  curveDeg,
+  elementStyle,
+}: {
+  text: string;
+  style: import("../lib/types").TextStyle;
+  curveDeg: number;
+  elementStyle: React.CSSProperties;
+}) {
+  // Use a fixed viewBox so the SVG scales with the container; consumers set
+  // the SVG's CSS width/height to 100%. The arc is drawn with a normalized
+  // chord of `width` pixels and a sagitta proportional to curveDeg/180.
+  const W = 1000;
+  const H = 1000;
+  const clamped = Math.max(-180, Math.min(180, curveDeg));
+  const direction = clamped >= 0 ? 1 : -1;
+  const absDeg = Math.abs(clamped);
+  // Sagitta: from 0 (flat) to W/2 (half-circle).
+  const sagitta = (absDeg / 180) * (W / 2);
+  // Compute arc radius from chord & sagitta: r = (chord^2/4 + sagitta^2)/(2*sagitta)
+  const chord = W * 0.9;
+  const r = sagitta < 0.5 ? 1e6 : (Math.pow(chord, 2) / 4 + Math.pow(sagitta, 2)) / (2 * sagitta);
+  const cyBase = H / 2;
+  // Path starts on the left of the chord and arcs to the right.
+  const startX = (W - chord) / 2;
+  const endX = startX + chord;
+  // For a "smile" (direction=1) the arc bows downward → use sweep flag 1 and
+  // the path Y starts at midline. For "frown" the arc bows upward → sweep 0.
+  // Use baseline Y at middle of viewBox; large-arc flag is 0 because the
+  // arc never exceeds 180° here.
+  const sweep = direction === 1 ? 1 : 0;
+  const y = cyBase;
+  const pathD = `M ${startX} ${y} A ${r.toFixed(2)} ${r.toFixed(2)} 0 0 ${sweep} ${endX} ${y}`;
+  const pathId = useMemo(() => `text-curve-${Math.random().toString(36).slice(2, 9)}`, []);
+  // For an SVG textPath we can't use background-clip text gradients; instead
+  // render the gradient as a real SVG <linearGradient> when enabled. Stroke
+  // and shadow translate to SVG attributes.
+  const grad = style.gradient;
+  const stroke = style.stroke;
+  const fillId = `${pathId}-grad`;
+  const useGrad = grad && grad.enabled;
+  // Translate elementStyle font properties for the SVG <text>.
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="xMidYMid meet"
+      style={{ width: "100%", height: "100%", overflow: "visible" }}
+    >
+      <defs>
+        <path id={pathId} d={pathD} fill="none" />
+        {useGrad && (
+          <linearGradient
+            id={fillId}
+            x1="0%"
+            y1="0%"
+            x2={`${Math.cos((grad!.angle * Math.PI) / 180) * 100}%`}
+            y2={`${Math.sin((grad!.angle * Math.PI) / 180) * 100}%`}
+          >
+            <stop offset="0%" stopColor={grad!.color1} />
+            <stop offset="100%" stopColor={grad!.color2} />
+          </linearGradient>
+        )}
+      </defs>
+      <text
+        fontFamily={style.fontFamily}
+        fontWeight={style.fontWeight}
+        fontStyle={style.italic ? "italic" : "normal"}
+        textDecoration={style.underline ? "underline" : undefined}
+        fill={useGrad ? `url(#${fillId})` : style.color}
+        stroke={stroke && stroke.enabled && stroke.width > 0 ? stroke.color : undefined}
+        strokeWidth={stroke && stroke.enabled ? stroke.width * 2 : undefined}
+        paintOrder="stroke"
+        style={{
+          fontSize: `${(style.fontSize / 64) * 120}px`,
+          letterSpacing:
+            style.letterSpacing != null ? `${style.letterSpacing}px` : undefined,
+          filter: elementStyle.textShadow
+            ? `drop-shadow(0 2px 6px rgba(0,0,0,0.4))`
+            : undefined,
+        }}
+      >
+        <textPath
+          href={`#${pathId}`}
+          startOffset="50%"
+          textAnchor="middle"
+        >
+          {text}
+        </textPath>
+      </text>
+    </svg>
+  );
+}
+
+/**
  * Inline text editor for text clips on the canvas. Activated by double-clicking
  * a text clip. Mirrors the visual style of the rendered text so the editor is
  * "in place" rather than a separate overlay. Commits on blur or Enter (without
@@ -533,11 +647,16 @@ function TextEditor({
     autosize();
   }, [value, autosize]);
 
+  const containerStyle = textContainerStyle(ts);
+  const elStyle = textElementStyle(ts, fontSizeStyle);
+  // While editing, we drop the SVG-curved view and the gradient-clip styling
+  // (which would make the caret invisible). The text editor mirrors basic
+  // typography only — full effects re-apply when editing finishes.
   return (
     <div
-      className="w-full h-full flex px-2 py-1"
+      className="w-full h-full flex"
       style={{
-        background: ts.background === "transparent" ? "transparent" : ts.background,
+        ...containerStyle,
         alignItems: "center",
         justifyContent:
           ts.align === "left" ? "flex-start" : ts.align === "right" ? "flex-end" : "center",
@@ -563,15 +682,13 @@ function TextEditor({
         rows={1}
         className="bg-transparent border-none outline-none resize-none p-0 m-0 w-full block"
         style={{
-          fontFamily: ts.fontFamily,
-          fontSize: fontSizeStyle,
-          fontWeight: ts.fontWeight,
+          ...elStyle,
+          // Drop gradient-clip so the caret stays visible during editing.
+          background: "transparent",
+          backgroundImage: undefined,
+          WebkitBackgroundClip: undefined,
+          WebkitTextFillColor: ts.color,
           color: ts.color,
-          textAlign: ts.align,
-          fontStyle: ts.italic ? "italic" : "normal",
-          textDecoration: ts.underline ? "underline" : "none",
-          textShadow: ts.shadow ? "0 2px 12px rgba(0,0,0,0.6), 0 0 4px rgba(0,0,0,0.4)" : "none",
-          lineHeight: 1.1,
           caretColor: ts.color,
           overflow: "hidden",
           height: "auto",

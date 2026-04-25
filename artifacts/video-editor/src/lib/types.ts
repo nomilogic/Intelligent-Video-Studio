@@ -46,16 +46,76 @@ export interface ClipFilters {
   invert: number;
 }
 
+export interface TextGradient {
+  enabled: boolean;
+  color1: string;
+  color2: string;
+  /** Angle in degrees, 0 = horizontal left→right, 90 = vertical top→bottom. */
+  angle: number;
+}
+
+export interface TextStroke {
+  enabled: boolean;
+  color: string;
+  /** Stroke width in px (relative to canvas-rendered font size). */
+  width: number;
+}
+
+export interface TextGlow {
+  enabled: boolean;
+  color: string;
+  /** Glow blur radius in px. */
+  blur: number;
+  /** Stacked-shadow intensity 1..6 — higher = stronger neon. */
+  intensity: number;
+}
+
+export interface TextShadow {
+  enabled: boolean;
+  color: string;
+  offsetX: number;
+  offsetY: number;
+  blur: number;
+}
+
+export interface TextBackground {
+  /** Solid color, "transparent", or ignored when gradient.enabled is true. */
+  color: string;
+  gradient: TextGradient;
+  borderColor: string;
+  borderWidth: number;
+  borderRadius: number;
+  padding: number;
+}
+
 export interface TextStyle {
   fontFamily: string;
   fontSize: number;
   fontWeight: number;
   color: string;
+  /** Legacy — solid background color or "transparent". Kept for migration. */
   background: string;
   align: "left" | "center" | "right";
+  /** Legacy boolean — when true, fall back to a default soft drop shadow. */
   shadow: boolean;
   italic: boolean;
   underline: boolean;
+  /** New (optional) — gradient fill applied via background-clip:text. */
+  gradient?: TextGradient;
+  /** New (optional) — text outline via -webkit-text-stroke. */
+  stroke?: TextStroke;
+  /** New (optional) — colored glow via stacked shadows. */
+  glow?: TextGlow;
+  /** New (optional) — fully customizable drop shadow. */
+  textShadow?: TextShadow;
+  /** Letter spacing in px. */
+  letterSpacing?: number;
+  /** Line height multiplier. */
+  lineHeight?: number;
+  /** Curve angle in degrees (-180..180). 0 = straight text. */
+  curve?: number;
+  /** New (optional) — background panel with gradient + border + radius. */
+  bg?: TextBackground;
 }
 
 export type EffectType =
@@ -299,4 +359,51 @@ export const DEFAULT_TEXT_STYLE: TextStyle = {
   shadow: true,
   italic: false,
   underline: false,
+  letterSpacing: 0,
+  lineHeight: 1.1,
+  curve: 0,
 };
+
+/**
+ * Curated list of font families. Google Fonts are loaded via a stylesheet
+ * link in `index.html`; system fonts fall back to platform defaults.
+ */
+export interface FontOption {
+  label: string;
+  /** CSS font-family value (with appropriate fallbacks). */
+  value: string;
+  /** "google" → loaded from Google Fonts; "system" → already available. */
+  source: "google" | "system";
+  /** Display category for grouping in the picker. */
+  category: "Sans" | "Serif" | "Display" | "Mono" | "Handwriting";
+}
+
+export const FONT_OPTIONS: FontOption[] = [
+  // Sans
+  { label: "Inter", value: "Inter, system-ui, sans-serif", source: "google", category: "Sans" },
+  { label: "Poppins", value: "Poppins, sans-serif", source: "google", category: "Sans" },
+  { label: "Montserrat", value: "Montserrat, sans-serif", source: "google", category: "Sans" },
+  { label: "Bebas Neue", value: "'Bebas Neue', sans-serif", source: "google", category: "Sans" },
+  { label: "Oswald", value: "Oswald, sans-serif", source: "google", category: "Sans" },
+  { label: "Anton", value: "Anton, sans-serif", source: "google", category: "Sans" },
+  { label: "Archivo Black", value: "'Archivo Black', sans-serif", source: "google", category: "Sans" },
+  // Serif
+  { label: "Playfair Display", value: "'Playfair Display', serif", source: "google", category: "Serif" },
+  { label: "Merriweather", value: "Merriweather, serif", source: "google", category: "Serif" },
+  { label: "Lora", value: "Lora, serif", source: "google", category: "Serif" },
+  // Display
+  { label: "Bungee", value: "Bungee, cursive", source: "google", category: "Display" },
+  { label: "Press Start 2P", value: "'Press Start 2P', cursive", source: "google", category: "Display" },
+  { label: "Monoton", value: "Monoton, cursive", source: "google", category: "Display" },
+  { label: "Black Ops One", value: "'Black Ops One', cursive", source: "google", category: "Display" },
+  { label: "Faster One", value: "'Faster One', cursive", source: "google", category: "Display" },
+  { label: "Rubik Mono One", value: "'Rubik Mono One', sans-serif", source: "google", category: "Display" },
+  // Handwriting
+  { label: "Pacifico", value: "Pacifico, cursive", source: "google", category: "Handwriting" },
+  { label: "Dancing Script", value: "'Dancing Script', cursive", source: "google", category: "Handwriting" },
+  { label: "Caveat", value: "Caveat, cursive", source: "google", category: "Handwriting" },
+  { label: "Permanent Marker", value: "'Permanent Marker', cursive", source: "google", category: "Handwriting" },
+  // Mono
+  { label: "JetBrains Mono", value: "'JetBrains Mono', monospace", source: "google", category: "Mono" },
+  { label: "Fira Code", value: "'Fira Code', monospace", source: "google", category: "Mono" },
+];

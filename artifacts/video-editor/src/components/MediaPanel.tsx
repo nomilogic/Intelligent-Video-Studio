@@ -3,7 +3,8 @@ import { Plus, Trash2, Film, Music, Image as ImageIcon, Type, Square, Sparkles, 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
-import { EditorState, EditorAction, MediaAsset, DEFAULT_TEXT_STYLE } from "../lib/types";
+import { EditorState, EditorAction, MediaAsset, DEFAULT_TEXT_STYLE, type TextStyle } from "../lib/types";
+import { textContainerStyle, textElementStyle } from "../lib/text-style";
 import { makeClip } from "../lib/reducer";
 import { TEMPLATES } from "../lib/templates";
 import { cn } from "@/lib/utils";
@@ -122,11 +123,143 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
     });
   };
 
-  const TEXT_PRESETS = [
-    { label: "Title", text: "BIG TITLE", style: { fontSize: 120, fontWeight: 900, color: "#ffffff" } },
-    { label: "Subtitle", text: "Subtitle text", style: { fontSize: 56, fontWeight: 500, color: "#e2e8f0" } },
-    { label: "Caption", text: "Caption goes here", style: { fontSize: 36, fontWeight: 600, color: "#ffffff", background: "#000000aa" } },
-    { label: "Lower 3rd", text: "John Doe / Founder", style: { fontSize: 42, fontWeight: 700, color: "#ffffff", background: "#0f172aee" } },
+  const TEXT_PRESETS: Array<{ label: string; text: string; style: Partial<TextStyle> }> = [
+    {
+      label: "Title",
+      text: "BIG TITLE",
+      style: { fontFamily: "Inter", fontSize: 120, fontWeight: 900, color: "#ffffff" },
+    },
+    {
+      label: "Subtitle",
+      text: "Subtitle text",
+      style: { fontFamily: "Inter", fontSize: 56, fontWeight: 500, color: "#e2e8f0" },
+    },
+    {
+      label: "Caption",
+      text: "Caption goes here",
+      style: {
+        fontFamily: "Inter",
+        fontSize: 36,
+        fontWeight: 600,
+        color: "#ffffff",
+        bg: { color: "#000000aa", gradient: { enabled: false, color1: "#000", color2: "#000", angle: 0 }, borderColor: "#fff", borderWidth: 0, borderRadius: 8, padding: 10 },
+      },
+    },
+    {
+      label: "Lower 3rd",
+      text: "John Doe / Founder",
+      style: {
+        fontFamily: "Inter",
+        fontSize: 42,
+        fontWeight: 700,
+        color: "#ffffff",
+        bg: { color: "#0f172aee", gradient: { enabled: false, color1: "#000", color2: "#000", angle: 0 }, borderColor: "#fff", borderWidth: 0, borderRadius: 4, padding: 12 },
+      },
+    },
+    {
+      label: "Sunset Gradient",
+      text: "SUNSET",
+      style: {
+        fontFamily: "Bebas Neue",
+        fontSize: 140,
+        fontWeight: 900,
+        color: "#ff7a59",
+        letterSpacing: 4,
+        gradient: { enabled: true, color1: "#fde68a", color2: "#ec4899", angle: 90 },
+      },
+    },
+    {
+      label: "Neon Glow",
+      text: "NEON",
+      style: {
+        fontFamily: "Bebas Neue",
+        fontSize: 130,
+        fontWeight: 900,
+        color: "#22d3ee",
+        letterSpacing: 6,
+        glow: { enabled: true, color: "#22d3ee", blur: 12, intensity: 4 },
+      },
+    },
+    {
+      label: "Outlined",
+      text: "OUTLINE",
+      style: {
+        fontFamily: "Anton",
+        fontSize: 130,
+        fontWeight: 900,
+        color: "transparent",
+        letterSpacing: 2,
+        stroke: { enabled: true, color: "#ffffff", width: 3 },
+      },
+    },
+    {
+      label: "Retro",
+      text: "RETRO",
+      style: {
+        fontFamily: "Bungee",
+        fontSize: 120,
+        fontWeight: 900,
+        color: "#fde68a",
+        letterSpacing: 4,
+        textShadow: { enabled: true, color: "#7c3aed", offsetX: 6, offsetY: 6, blur: 0 },
+      },
+    },
+    {
+      label: "Chrome",
+      text: "CHROME",
+      style: {
+        fontFamily: "Oswald",
+        fontSize: 130,
+        fontWeight: 900,
+        color: "#cbd5e1",
+        letterSpacing: 3,
+        gradient: { enabled: true, color1: "#f8fafc", color2: "#475569", angle: 180 },
+        stroke: { enabled: true, color: "#0f172a", width: 1.5 },
+        textShadow: { enabled: true, color: "#000000aa", offsetX: 0, offsetY: 4, blur: 6 },
+      },
+    },
+    {
+      label: "Curved Smile",
+      text: "ARCHED TEXT",
+      style: {
+        fontFamily: "Pacifico",
+        fontSize: 90,
+        fontWeight: 700,
+        color: "#fde68a",
+        curve: 60,
+      },
+    },
+    {
+      label: "Handwritten",
+      text: "Handwritten Note",
+      style: {
+        fontFamily: "Caveat",
+        fontSize: 80,
+        fontWeight: 600,
+        color: "#fff7ed",
+        letterSpacing: 1,
+        textShadow: { enabled: true, color: "#000000aa", offsetX: 0, offsetY: 2, blur: 6 },
+      },
+    },
+    {
+      label: "Badge",
+      text: "BADGE",
+      style: {
+        fontFamily: "Inter",
+        fontSize: 56,
+        fontWeight: 800,
+        color: "#0f172a",
+        letterSpacing: 2,
+        bg: {
+          color: "#fde68a",
+          gradient: { enabled: true, color1: "#fde68a", color2: "#f59e0b", angle: 135 },
+          borderColor: "#0f172a",
+          borderWidth: 3,
+          borderRadius: 999,
+          padding: 18,
+        },
+      },
+    },
   ];
 
   return (
@@ -250,47 +383,55 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
           <Separator />
 
           <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Presets</p>
-          <div className="space-y-1.5">
-            {TEXT_PRESETS.map((p) => (
-              <button
-                key={p.label}
-                className="w-full p-2 rounded border border-border hover:border-primary/50 bg-muted/20 hover:bg-muted/40 transition-colors text-left"
-                onClick={() => {
-                  dispatch({
-                    type: "ADD_CLIP",
-                    payload: makeClip({
-                      label: p.label,
-                      mediaType: "text",
-                      text: p.text,
-                      textStyle: { ...DEFAULT_TEXT_STYLE, ...p.style } as any,
-                      trackIndex: Math.min(state.clips.length, state.tracks.length - 1),
-                      startTime: state.currentTime,
-                      duration: 4,
-                      x: 0.05, y: 0.4, width: 0.9, height: 0.2,
-                      animationIn: "fade",
-                      animationOut: "fade",
-                      color: "#8b5cf6",
-                    }),
-                  });
-                }}
-              >
-                <p
-                  className="truncate"
-                  style={{
-                    fontSize: Math.min((p.style.fontSize || 40) / 4, 16),
-                    fontWeight: p.style.fontWeight,
-                    color: p.style.color,
-                    background: (p.style as any).background,
-                    padding: (p.style as any).background ? "2px 6px" : 0,
-                    borderRadius: 4,
-                    display: "inline-block",
+          <div className="grid grid-cols-1 gap-1.5">
+            {TEXT_PRESETS.map((p) => {
+              const merged = { ...DEFAULT_TEXT_STYLE, ...p.style } as TextStyle;
+              const previewSize = Math.min((merged.fontSize || 40) / 4, 22);
+              const containerStyle = textContainerStyle(merged);
+              const elStyle = textElementStyle(merged, `${previewSize}px`);
+              return (
+                <button
+                  key={p.label}
+                  className="w-full p-2 rounded border border-border hover:border-primary/50 bg-black/30 hover:bg-black/40 transition-colors text-left overflow-hidden"
+                  onClick={() => {
+                    dispatch({
+                      type: "ADD_CLIP",
+                      payload: makeClip({
+                        label: p.label,
+                        mediaType: "text",
+                        text: p.text,
+                        textStyle: merged,
+                        trackIndex: Math.min(state.clips.length, state.tracks.length - 1),
+                        startTime: state.currentTime,
+                        duration: 4,
+                        x: 0.05, y: 0.4, width: 0.9, height: 0.2,
+                        animationIn: "fade",
+                        animationOut: "fade",
+                        color: "#8b5cf6",
+                      }),
+                    });
                   }}
+                  data-testid={`text-preset-${p.label.replace(/\s+/g, "-").toLowerCase()}`}
                 >
-                  {p.text}
-                </p>
-                <p className="text-[10px] text-muted-foreground mt-1">{p.label}</p>
-              </button>
-            ))}
+                  <div
+                    className="flex items-center justify-center min-h-[40px] px-1"
+                    style={containerStyle}
+                  >
+                    <span
+                      className="truncate inline-block"
+                      style={{
+                        ...elStyle,
+                        lineHeight: 1.1,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {p.text}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1">{p.label}</p>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
