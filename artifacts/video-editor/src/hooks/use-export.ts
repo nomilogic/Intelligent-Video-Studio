@@ -1,23 +1,30 @@
 import { useState, useRef, useCallback } from "react";
+import { Muxer as Mp4Muxer, ArrayBufferTarget as Mp4Target } from "mp4-muxer";
+import { Muxer as WebMMuxer, ArrayBufferTarget as WebMTarget } from "webm-muxer";
 import { EditorState, Clip } from "../lib/types";
 import { resolveClip, clipVisibleAt } from "../lib/animation";
 
-export const FPS = 30;
-export const FRAME_MS = 1000 / FPS;
+export const DEFAULT_FPS = 30;
+export const FPS_OPTIONS = [24, 30, 60] as const;
+export type FpsOption = (typeof FPS_OPTIONS)[number];
 
 export type Resolution = "full" | "720p" | "480p" | "half";
 export type ExportFormat = "webm" | "mp4" | "audio";
+export type ExportMode = "quick" | "optimized";
 
 export interface ExportConfig {
   resolution: Resolution;
   format: ExportFormat;
+  fps: FpsOption;
+  mode: ExportMode;
 }
 
 export interface ExportStatus {
-  phase: "idle" | "loading" | "rendering" | "done" | "error";
+  phase: "idle" | "loading" | "rendering" | "encoding" | "done" | "error";
   progress: number;
   errorMsg?: string;
   downloadedFile?: string;
+  mode?: ExportMode;
 }
 
 export function computeScale(resolution: Resolution, canvasW: number, canvasH: number): number {
@@ -60,10 +67,6 @@ async function seekVideo(vid: HTMLVideoElement, time: number) {
   });
 }
 
-// Compute an aspect-ratio-preserving source rectangle so drawImage() reproduces
-// the CSS `object-cover` behavior used by the preview. Without this the export
-// stretches the source to the destination box, breaking parity for any clip
-// whose intrinsic aspect ratio differs from its on-canvas box.
 function objectCoverSourceRect(
   srcW: number, srcH: number,
   cropX: number, cropY: number, cropW: number, cropH: number,
@@ -76,11 +79,9 @@ function objectCoverSourceRect(
   const srcAspect = cSW / cSH;
   const destAspect = destW / destH;
   if (srcAspect > destAspect) {
-    // cropped source is wider than dest → trim sides
     const newSW = cSH * destAspect;
     return { sx: cSX + (cSW - newSW) / 2, sy: cSY, sw: newSW, sh: cSH };
   } else {
-    // cropped source is taller than dest → trim top/bottom
     const newSH = cSW / destAspect;
     return { sx: cSX, sy: cSY + (cSH - newSH) / 2, sw: cSW, sh: newSH };
   }
@@ -117,8 +118,6 @@ function drawClipToCanvas(
   ctx.scale(sx, sy);
 
   if (clip.borderRadius > 0) {
-    // Border radius is authored in canvas-native pixels — scale down so a 720p
-    // export looks proportionally identical to a full-res export.
     roundRectPath(ctx, -pw / 2, -ph / 2, pw, ph, clip.borderRadius * resScale);
     ctx.clip();
   }
@@ -152,14 +151,10 @@ function drawClipToCanvas(
     }
   } else if (clip.mediaType === "text") {
     const ts = clip.textStyle!;
-    // Preview uses `${ts.fontSize / 10}cqw` (% of clip box width). Match that
-    // in export so the rendered text size scales with the clip's box.
     const fontSize = Math.max(1, (pw * (ts.fontSize || 64)) / 1000);
     const fontStyle = ts.italic ? "italic " : "";
     const fontStr = `${fontStyle}${ts.fontWeight || 700} ${fontSize}px ${ts.fontFamily || "sans-serif"}`;
 
-    // Preview fills the entire clip box with the background, not just the
-    // text bounds — replicate that here.
     if (ts.background && ts.background !== "transparent") {
       ctx.save();
       ctx.fillStyle = ts.background;
@@ -173,13 +168,11 @@ function drawClipToCanvas(
     ctx.fillStyle = ts.color || "#ffffff";
     if (ts.shadow) { ctx.shadowBlur = 12 * resScale; ctx.shadowColor = "rgba(0,0,0,0.6)"; }
 
-    // Preview uses px-2 (8px horizontal) padding and align via flexbox.
-    // Anchor the text at the matching edge of the box so alignment matches.
     const padX = 8 * resScale;
     const align = ts.align || "center";
     const anchorX = align === "left" ? -pw / 2 + padX : align === "right" ? pw / 2 - padX : 0;
     const lines = (clip.text || "").split("\n");
-    const lineH = fontSize * 1.1; // matches preview lineHeight: 1.1
+    const lineH = fontSize * 1.1;
     lines.forEach((line, i) => {
       const lineY = (i - (lines.length - 1) / 2) * lineH;
       ctx.fillText(line, anchorX, lineY);
@@ -197,6 +190,300 @@ function drawClipToCanvas(
   ctx.restore();
 }
 
+interface PreloadedMedia {
+  videoEls: Map<string, HTMLVideoElement>;
+  imageEls: Map<string, HTMLImageElement>;
+}
+
+async function preloadMedia(s: EditorState): Promise<PreloadedMedia> {
+  const videoEls = new Map<string, HTMLVideoElement>();
+  const imageEls = new Map<string, HTMLImageElement>();
+  await Promise.all(
+    s.clips.map(async (clip) => {
+      if (!clip.src) return;
+      if (clip.mediaType === "video") {
+        const v = document.createElement("video");
+        v.src = clip.src;
+        v.crossOrigin = "anonymous";
+        v.preload = "auto";
+        v.muted = true;
+        await new Promise<void>((resolve) => {
+          v.onloadeddata = () => resolve();
+          v.onerror = () => resolve();
+          setTimeout(resolve, 8000);
+          v.load();
+        });
+        videoEls.set(clip.id, v);
+      } else if (clip.mediaType === "image") {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        await new Promise<void>((resolve) => {
+          img.onload = () => resolve();
+          img.onerror = () => resolve();
+          img.src = clip.src!;
+        });
+        imageEls.set(clip.id, img);
+      }
+    }),
+  );
+  return { videoEls, imageEls };
+}
+
+async function renderFrame(
+  ctx: CanvasRenderingContext2D,
+  s: EditorState,
+  sortedClips: Clip[],
+  media: PreloadedMedia,
+  W: number,
+  H: number,
+  scale: number,
+  time: number,
+) {
+  // 1. Seek visible video clips to their exact frame positions.
+  for (const clip of sortedClips) {
+    if (clip.mediaType !== "video" || clip.hidden) continue;
+    const vid = media.videoEls.get(clip.id);
+    if (!vid) continue;
+    if (clipVisibleAt(clip, time)) {
+      const resolved = resolveClip(clip, s.keyframes, time);
+      await seekVideo(vid, resolved.videoTime);
+    }
+  }
+
+  // 2. Clear and draw everything onto the offscreen canvas.
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = s.background || "#000000";
+  ctx.fillRect(0, 0, W, H);
+
+  for (const clip of sortedClips) {
+    if (clip.hidden) continue;
+    const resolved = resolveClip(clip, s.keyframes, time);
+    if (!resolved.visible) continue;
+    const mediaEl = clip.mediaType === "video"
+      ? (media.videoEls.get(clip.id) ?? null)
+      : clip.mediaType === "image"
+        ? (media.imageEls.get(clip.id) ?? null)
+        : null;
+    drawClipToCanvas(ctx, clip, resolved, mediaEl, W, H, scale);
+  }
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+
+/**
+ * Quick Save: Uses MediaRecorder to capture the canvas in real time.
+ * Faster to start and has wide browser support, but pacing depends on render
+ * speed — long renders can produce slightly uneven motion.
+ */
+async function exportQuick(
+  s: EditorState,
+  config: ExportConfig,
+  cancelRef: React.MutableRefObject<boolean>,
+  onProgress: (progress: number) => void,
+): Promise<{ blob: Blob; ext: string }> {
+  const fps = config.fps;
+  const frameMs = 1000 / fps;
+  const scale = computeScale(config.resolution, s.canvasWidth, s.canvasHeight);
+  const W = Math.round(s.canvasWidth * scale);
+  const H = Math.round(s.canvasHeight * scale);
+  const TOTAL_FRAMES = Math.ceil(s.duration * fps);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d")!;
+
+  const media = await preloadMedia(s);
+  if (cancelRef.current) throw new Error("Cancelled");
+
+  let mimeType: string;
+  if (config.format === "mp4") {
+    const mp4Types = ["video/mp4;codecs=avc1", "video/mp4;codecs=h264", "video/mp4"];
+    const supported = mp4Types.find((m) => MediaRecorder.isTypeSupported(m));
+    if (!supported) throw new Error("MP4 not supported by this browser. Use WebM instead.");
+    mimeType = supported;
+  } else {
+    mimeType = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find(
+      (m) => MediaRecorder.isTypeSupported(m),
+    ) ?? "video/webm";
+  }
+
+  const stream = canvas.captureStream(0);
+  const videoTrack = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack & { requestFrame?: () => void };
+  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
+  const chunks: Blob[] = [];
+  recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+  recorder.start(200);
+
+  const sortedClips = [...s.clips].sort((a, b) => b.trackIndex - a.trackIndex);
+  const startMs = performance.now();
+
+  for (let frame = 0; frame <= TOTAL_FRAMES; frame++) {
+    if (cancelRef.current) break;
+    const time = frame / fps;
+
+    await renderFrame(ctx, s, sortedClips, media, W, H, scale, time);
+    if (cancelRef.current) break;
+
+    const targetMs = frame * frameMs;
+    const elapsedMs = performance.now() - startMs;
+    if (elapsedMs < targetMs) {
+      await new Promise<void>((resolve) => setTimeout(resolve, targetMs - elapsedMs));
+    }
+
+    if (typeof videoTrack.requestFrame === "function") videoTrack.requestFrame();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    onProgress(frame / TOTAL_FRAMES);
+  }
+
+  for (const v of media.videoEls.values()) v.pause();
+  recorder.stop();
+  await new Promise<void>((resolve) => { recorder.onstop = () => resolve(); });
+
+  const ext = config.format === "mp4" ? "mp4" : "webm";
+  const blob = new Blob(chunks, { type: mimeType.split(";")[0] });
+  return { blob, ext };
+}
+
+/**
+ * Optimized Save: Uses WebCodecs VideoEncoder + a muxer (mp4-muxer / webm-muxer).
+ * Each frame is encoded with an explicit timestamp, completely decoupled from
+ * real-time render speed. This produces a perfectly-paced video at the chosen
+ * frame rate with the highest quality for the given bitrate.
+ */
+async function exportOptimized(
+  s: EditorState,
+  config: ExportConfig,
+  cancelRef: React.MutableRefObject<boolean>,
+  onProgress: (phase: "rendering" | "encoding", progress: number) => void,
+): Promise<{ blob: Blob; ext: string }> {
+  if (typeof (globalThis as any).VideoEncoder === "undefined" || typeof (globalThis as any).VideoFrame === "undefined") {
+    throw new Error("Optimized save needs WebCodecs (Chrome/Edge). Try Quick Save instead.");
+  }
+
+  const fps = config.fps;
+  const scale = computeScale(config.resolution, s.canvasWidth, s.canvasHeight);
+  const W = Math.round(s.canvasWidth * scale);
+  const H = Math.round(s.canvasHeight * scale);
+  const TOTAL_FRAMES = Math.ceil(s.duration * fps);
+
+  // WebCodecs requires even dimensions for most codecs.
+  const codedW = W % 2 === 0 ? W : W - 1;
+  const codedH = H % 2 === 0 ? H : H - 1;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = codedW;
+  canvas.height = codedH;
+  const ctx = canvas.getContext("2d")!;
+
+  const media = await preloadMedia(s);
+  if (cancelRef.current) throw new Error("Cancelled");
+
+  // Pixel-count based bitrate target, capped to a sensible range.
+  const pixels = codedW * codedH * fps;
+  const bitrate = Math.min(40_000_000, Math.max(2_000_000, Math.round(pixels * 0.15)));
+
+  const isMp4 = config.format === "mp4";
+
+  let muxer: Mp4Muxer<Mp4Target> | WebMMuxer<WebMTarget>;
+  let target: Mp4Target | WebMTarget;
+  let codec: string;
+  let mimeBase: string;
+  let ext: string;
+
+  if (isMp4) {
+    target = new Mp4Target();
+    codec = "avc1.640028"; // H.264 High Profile, level 4.0
+    muxer = new Mp4Muxer({
+      target,
+      video: { codec: "avc", width: codedW, height: codedH, frameRate: fps },
+      fastStart: "in-memory",
+    });
+    mimeBase = "video/mp4";
+    ext = "mp4";
+  } else {
+    target = new WebMTarget();
+    codec = "vp09.00.10.08";
+    muxer = new WebMMuxer({
+      target,
+      video: { codec: "V_VP9", width: codedW, height: codedH, frameRate: fps },
+    });
+    mimeBase = "video/webm";
+    ext = "webm";
+  }
+
+  // Validate codec support and fall back if needed.
+  const VideoEncoderCtor = (globalThis as any).VideoEncoder;
+  let supported = await VideoEncoderCtor.isConfigSupported({ codec, width: codedW, height: codedH, bitrate, framerate: fps });
+  if (!supported?.supported && isMp4) {
+    codec = "avc1.42E01F"; // H.264 baseline fallback
+    supported = await VideoEncoderCtor.isConfigSupported({ codec, width: codedW, height: codedH, bitrate, framerate: fps });
+  }
+  if (!supported?.supported && !isMp4) {
+    codec = "vp8";
+    supported = await VideoEncoderCtor.isConfigSupported({ codec, width: codedW, height: codedH, bitrate, framerate: fps });
+  }
+  if (!supported?.supported) {
+    throw new Error(`This browser cannot encode ${ext.toUpperCase()} via WebCodecs. Try Quick Save.`);
+  }
+
+  let encodeError: unknown = null;
+  const encoder = new VideoEncoderCtor({
+    output: (chunk: any, meta: any) => {
+      muxer.addVideoChunk(chunk, meta);
+    },
+    error: (e: unknown) => { encodeError = e; },
+  });
+  encoder.configure({ codec, width: codedW, height: codedH, bitrate, framerate: fps });
+
+  const sortedClips = [...s.clips].sort((a, b) => b.trackIndex - a.trackIndex);
+  const VideoFrameCtor = (globalThis as any).VideoFrame;
+
+  for (let frame = 0; frame <= TOTAL_FRAMES; frame++) {
+    if (cancelRef.current) break;
+    if (encodeError) throw encodeError;
+    const time = frame / fps;
+
+    await renderFrame(ctx, s, sortedClips, media, codedW, codedH, scale, time);
+    if (cancelRef.current) break;
+
+    const timestamp = Math.round((frame * 1_000_000) / fps);
+    const vf = new VideoFrameCtor(canvas, { timestamp });
+    // Force a keyframe every ~2 seconds for seekability.
+    const keyFrame = frame % Math.max(1, Math.round(fps * 2)) === 0;
+    encoder.encode(vf, { keyFrame });
+    vf.close();
+
+    // Backpressure: don't let the queue grow without bound.
+    if (encoder.encodeQueueSize > 8) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+
+    onProgress("rendering", frame / TOTAL_FRAMES);
+  }
+
+  for (const v of media.videoEls.values()) v.pause();
+  onProgress("encoding", 1);
+
+  await encoder.flush();
+  encoder.close();
+  if (encodeError) throw encodeError;
+
+  muxer.finalize();
+  const buffer = (target as Mp4Target | WebMTarget).buffer;
+  const blob = new Blob([buffer], { type: mimeBase });
+  return { blob, ext };
+}
+
 export function useExport(state: EditorState) {
   const [exportStatus, setExportStatus] = useState<ExportStatus>({ phase: "idle", progress: 0 });
   const cancelRef = useRef(false);
@@ -206,158 +493,30 @@ export function useExport(state: EditorState) {
   const startVideoExport = useCallback(async (config: ExportConfig) => {
     const s = stateRef.current;
     cancelRef.current = false;
-    setExportStatus({ phase: "loading", progress: 0 });
+    setExportStatus({ phase: "loading", progress: 0, mode: config.mode });
 
     try {
-      const scale = computeScale(config.resolution, s.canvasWidth, s.canvasHeight);
-      const W = Math.round(s.canvasWidth * scale);
-      const H = Math.round(s.canvasHeight * scale);
-      const TOTAL = s.duration;
-      const TOTAL_FRAMES = Math.ceil(TOTAL * FPS);
+      setExportStatus({ phase: "rendering", progress: 0, mode: config.mode });
 
-      const canvas = document.createElement("canvas");
-      canvas.width = W;
-      canvas.height = H;
-      const ctx = canvas.getContext("2d")!;
-
-      const videoEls = new Map<string, HTMLVideoElement>();
-      const imageEls = new Map<string, HTMLImageElement>();
-
-      await Promise.all(
-        s.clips.map(async (clip) => {
-          if (!clip.src) return;
-          if (clip.mediaType === "video") {
-            const v = document.createElement("video");
-            v.src = clip.src;
-            v.crossOrigin = "anonymous";
-            v.preload = "auto";
-            v.muted = true;
-            await new Promise<void>((resolve) => {
-              v.onloadeddata = () => resolve();
-              v.onerror = () => resolve();
-              setTimeout(resolve, 8000);
-              v.load();
-            });
-            videoEls.set(clip.id, v);
-          } else if (clip.mediaType === "image") {
-            const img = new Image();
-            img.crossOrigin = "anonymous";
-            await new Promise<void>((resolve) => {
-              img.onload = () => resolve();
-              img.onerror = () => resolve();
-              img.src = clip.src!;
-            });
-            imageEls.set(clip.id, img);
-          }
-        }),
-      );
+      const { blob, ext } = config.mode === "optimized"
+        ? await exportOptimized(s, config, cancelRef, (phase, progress) => {
+            setExportStatus({ phase, progress, mode: config.mode });
+          })
+        : await exportQuick(s, config, cancelRef, (progress) => {
+            setExportStatus({ phase: "rendering", progress, mode: config.mode });
+          });
 
       if (cancelRef.current) { setExportStatus({ phase: "idle", progress: 0 }); return; }
 
-      let mimeType: string;
-      if (config.format === "mp4") {
-        const mp4Types = ["video/mp4;codecs=avc1", "video/mp4;codecs=h264", "video/mp4"];
-        const supported = mp4Types.find((m) => MediaRecorder.isTypeSupported(m));
-        if (!supported) throw new Error("MP4 is not supported by this browser. Please use WebM instead.");
-        mimeType = supported;
-      } else {
-        mimeType = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find(
-          (m) => MediaRecorder.isTypeSupported(m),
-        ) ?? "video/webm";
-      }
-
-      // captureStream(0) = demand mode — no automatic capture.
-      // We call videoTrack.requestFrame() explicitly AFTER each confirmed draw,
-      // so the recorder never captures mid-seek or stale frames.
-      const stream = canvas.captureStream(0);
-      const videoTrack = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack & { requestFrame?: () => void };
-      const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 });
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-      recorder.start(200);
-
-      setExportStatus({ phase: "rendering", progress: 0 });
-
-      const sortedClips = [...s.clips].sort((a, b) => b.trackIndex - a.trackIndex);
-
-      // Real-time reference point for pacing. Each frame is pushed at its target
-      // real-world time so the output plays back at exactly FPS.
-      const exportStartMs = performance.now();
-
-      for (let frame = 0; frame <= TOTAL_FRAMES; frame++) {
-        if (cancelRef.current) break;
-        const time = frame / FPS;
-
-        // 1. Seek all visible video clips to their exact frame positions.
-        //    Sequential per-clip to avoid browser decoder contention.
-        for (const clip of sortedClips) {
-          if (clip.mediaType !== "video" || clip.hidden) continue;
-          const vid = videoEls.get(clip.id);
-          if (!vid) continue;
-          if (clipVisibleAt(clip, time)) {
-            const resolved = resolveClip(clip, s.keyframes, time);
-            await seekVideo(vid, resolved.videoTime);
-          }
-        }
-
-        if (cancelRef.current) break;
-
-        // 2. Clear and draw everything onto the offscreen canvas.
-        ctx.clearRect(0, 0, W, H);
-        ctx.fillStyle = s.background || "#000000";
-        ctx.fillRect(0, 0, W, H);
-
-        for (const clip of sortedClips) {
-          if (clip.hidden) continue;
-          const resolved = resolveClip(clip, s.keyframes, time);
-          if (!resolved.visible) continue;
-          const mediaEl = clip.mediaType === "video"
-            ? (videoEls.get(clip.id) ?? null)
-            : clip.mediaType === "image"
-              ? (imageEls.get(clip.id) ?? null)
-              : null;
-          drawClipToCanvas(ctx, clip, resolved, mediaEl, W, H, scale);
-        }
-
-        // 3. Pace: wait until the frame's target real-world timestamp so the
-        //    resulting video plays at the correct speed.
-        const targetMs = frame * FRAME_MS;
-        const elapsedMs = performance.now() - exportStartMs;
-        if (elapsedMs < targetMs) {
-          await new Promise<void>((resolve) => setTimeout(resolve, targetMs - elapsedMs));
-        }
-
-        // 4. Push the fully-drawn frame into the MediaRecorder stream.
-        if (typeof videoTrack.requestFrame === "function") {
-          videoTrack.requestFrame();
-        }
-
-        // Yield to the event loop so the frame is flushed before we proceed.
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
-
-        setExportStatus({ phase: "rendering", progress: frame / TOTAL_FRAMES });
-      }
-
-      for (const vid of videoEls.values()) vid.pause();
-      recorder.stop();
-      await new Promise<void>((resolve) => { recorder.onstop = () => resolve(); });
-
-      if (cancelRef.current) { setExportStatus({ phase: "idle", progress: 0 }); return; }
-
-      const ext = config.format === "mp4" ? "mp4" : "webm";
-      const blob = new Blob(chunks, { type: mimeType.split(";")[0] });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
       const filename = `export-${Date.now()}.${ext}`;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 30_000);
-      setExportStatus({ phase: "done", progress: 1, downloadedFile: filename });
+      downloadBlob(blob, filename);
+      setExportStatus({ phase: "done", progress: 1, downloadedFile: filename, mode: config.mode });
     } catch (err: any) {
       console.error("Export error:", err);
+      if (err?.message === "Cancelled") {
+        setExportStatus({ phase: "idle", progress: 0 });
+        return;
+      }
       setExportStatus({ phase: "error", progress: 0, errorMsg: err?.message ?? String(err) });
     }
   }, []);
@@ -445,15 +604,8 @@ export function useExport(state: EditorState) {
 
       const ext = audioMime.includes("ogg") ? "ogg" : "webm";
       const blob = new Blob(chunks, { type: audioMime.split(";")[0] });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
       const filename = `audio-export-${Date.now()}.${ext}`;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+      downloadBlob(blob, filename);
       audioCtx.close();
       setExportStatus({ phase: "done", progress: 1, downloadedFile: filename });
     } catch (err: any) {

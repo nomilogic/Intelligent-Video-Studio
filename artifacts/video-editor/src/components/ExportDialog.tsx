@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Download, X, Loader2, Music, Video, EyeOff } from "lucide-react";
+import { Download, X, Loader2, Music, Video, EyeOff, Zap, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -7,7 +7,9 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { EditorState } from "../lib/types";
 import {
-  Resolution, ExportFormat, ExportConfig, ExportStatus, computeScale, FPS,
+  Resolution, ExportFormat, ExportConfig, ExportStatus,
+  ExportMode, FpsOption, FPS_OPTIONS, DEFAULT_FPS,
+  computeScale,
 } from "../hooks/use-export";
 
 interface ExportDialogProps {
@@ -26,9 +28,11 @@ export default function ExportDialog({
   exportStatus, onStart, onAudioExport, onCancel, onReset,
 }: ExportDialogProps) {
   const [resolution, setResolution] = useState<Resolution>("full");
-  const [format, setFormat] = useState<ExportFormat>("webm");
+  const [format, setFormat] = useState<ExportFormat>("mp4");
+  const [fps, setFps] = useState<FpsOption>(DEFAULT_FPS);
+  const [mode, setMode] = useState<ExportMode>("optimized");
 
-  const isRunning = exportStatus.phase === "loading" || exportStatus.phase === "rendering";
+  const isRunning = exportStatus.phase === "loading" || exportStatus.phase === "rendering" || exportStatus.phase === "encoding";
 
   const W_out = Math.round(state.canvasWidth * computeScale(resolution, state.canvasWidth, state.canvasHeight));
   const H_out = Math.round(state.canvasHeight * computeScale(resolution, state.canvasWidth, state.canvasHeight));
@@ -47,18 +51,25 @@ export default function ExportDialog({
   ];
 
   const videoFormatOptions: { value: ExportFormat; label: string; desc: string }[] = [
-    { value: "webm", label: "WebM", desc: "Best compatibility" },
-    { value: "mp4", label: "MP4", desc: "If browser supports" },
+    { value: "mp4", label: "MP4", desc: "Universal" },
+    { value: "webm", label: "WebM", desc: "Compact" },
+  ];
+
+  const modeOptions: { value: ExportMode; label: string; desc: string; icon: typeof Zap }[] = [
+    { value: "quick", label: "Quick", desc: "Faster, real-time capture", icon: Zap },
+    { value: "optimized", label: "Optimized", desc: "Frame-accurate, best quality", icon: Sparkles },
   ];
 
   const handleOpenChange = (v: boolean) => {
-    if (!v && isRunning) return; // Prevent closing during export via backdrop/Esc — use Hide button
+    if (!v && isRunning) return;
     onOpenChange(v);
     if (!v) onReset();
   };
 
-  const totalFrames = Math.ceil(state.duration * FPS);
+  const totalFrames = Math.ceil(state.duration * fps);
   const currentFrame = Math.round(exportStatus.progress * totalFrames);
+
+  const isAudio = format === "audio";
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -79,20 +90,26 @@ export default function ExportDialog({
                 <span>Clips</span>
                 <span className="tabular-nums font-medium text-foreground">{state.clips.length}</span>
               </div>
+              {!isAudio && (
+                <div className="flex justify-between">
+                  <span>Frames</span>
+                  <span className="tabular-nums font-medium text-foreground">{totalFrames}</span>
+                </div>
+              )}
             </div>
 
             <div>
               <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Export Type</p>
               <div className="grid grid-cols-2 gap-1.5">
                 <button
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md border text-xs transition-colors ${format !== "audio" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}
-                  onClick={() => setFormat(format === "mp4" ? "mp4" : "webm")}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md border text-xs transition-colors ${!isAudio ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}
+                  onClick={() => setFormat(format === "audio" ? "mp4" : format)}
                 >
                   <Video className="w-3.5 h-3.5 shrink-0" />
                   <span>Video</span>
                 </button>
                 <button
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md border text-xs transition-colors ${format === "audio" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-md border text-xs transition-colors ${isAudio ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}
                   onClick={() => setFormat("audio")}
                 >
                   <Music className="w-3.5 h-3.5 shrink-0" />
@@ -101,8 +118,45 @@ export default function ExportDialog({
               </div>
             </div>
 
-            {format !== "audio" && (
+            {!isAudio && (
               <>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Save Mode</p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {modeOptions.map((m) => {
+                      const Icon = m.icon;
+                      return (
+                        <button
+                          key={m.value}
+                          className={`flex flex-col items-start gap-0.5 px-2 py-2 rounded-md border text-left text-[10px] transition-colors ${mode === m.value ? "border-primary bg-primary/10" : "border-border hover:bg-muted/40"}`}
+                          onClick={() => setMode(m.value)}
+                        >
+                          <div className={`flex items-center gap-1 font-medium ${mode === m.value ? "text-primary" : "text-foreground"}`}>
+                            <Icon className="w-3 h-3" />
+                            {m.label}
+                          </div>
+                          <div className="text-muted-foreground leading-tight">{m.desc}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Frame Rate</p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {FPS_OPTIONS.map((f) => (
+                      <button
+                        key={f}
+                        className={`px-2 py-1.5 rounded-md border text-center text-[11px] transition-colors ${fps === f ? "border-primary bg-primary/10 text-primary font-medium" : "border-border text-foreground hover:bg-muted/40"}`}
+                        onClick={() => setFps(f)}
+                      >
+                        {f} fps
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div>
                   <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Resolution</p>
                   <div className="grid grid-cols-2 gap-1.5">
@@ -135,14 +189,20 @@ export default function ExportDialog({
                   </div>
                 </div>
 
-                <Button className="w-full gap-2" onClick={() => onStart({ resolution, format })}>
+                <Button className="w-full gap-2" onClick={() => onStart({ resolution, format, fps, mode })}>
                   <Download className="w-3.5 h-3.5" />
-                  Export {W_out}×{H_out} · {format.toUpperCase()}
+                  {mode === "optimized" ? "Optimized Save" : "Quick Save"} · {W_out}×{H_out} · {fps}fps
                 </Button>
+
+                <p className="text-[10px] text-muted-foreground leading-relaxed">
+                  {mode === "optimized"
+                    ? "Encodes each frame with an exact timestamp for true frame-rate playback. Needs Chrome or Edge."
+                    : "Records the canvas in real time. Wide browser support, but very long videos may pace unevenly."}
+                </p>
               </>
             )}
 
-            {format === "audio" && (
+            {isAudio && (
               <>
                 <div className="text-xs text-muted-foreground bg-muted/20 rounded-md p-2.5 leading-relaxed">
                   Exports all audio and video tracks mixed together as a WebM/Opus audio file.
@@ -154,15 +214,11 @@ export default function ExportDialog({
                 </Button>
               </>
             )}
-
-            <p className="text-[10px] text-muted-foreground leading-relaxed">
-              Video export renders frame-by-frame. The file downloads automatically when done.
-            </p>
           </div>
         )}
 
-        {/* Loading / Rendering */}
-        {(exportStatus.phase === "loading" || exportStatus.phase === "rendering") && (
+        {/* Loading / Rendering / Encoding */}
+        {(exportStatus.phase === "loading" || exportStatus.phase === "rendering" || exportStatus.phase === "encoding") && (
           <div className="space-y-4">
             <div className="flex items-center gap-3">
               <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
@@ -170,14 +226,18 @@ export default function ExportDialog({
                 <p className="text-sm font-medium">
                   {exportStatus.phase === "loading"
                     ? "Loading media assets…"
-                    : format === "audio" ? "Recording audio…" : "Rendering frames…"}
+                    : exportStatus.phase === "encoding"
+                      ? "Finalizing video file…"
+                      : isAudio ? "Recording audio…" : "Rendering frames…"}
                 </p>
                 <p className="text-xs text-muted-foreground tabular-nums">
-                  {exportStatus.phase === "rendering" && format !== "audio"
+                  {exportStatus.phase === "rendering" && !isAudio
                     ? `${Math.round(exportStatus.progress * 100)}% · Frame ${currentFrame} / ${totalFrames}`
-                    : exportStatus.phase === "rendering" && format === "audio"
+                    : exportStatus.phase === "rendering" && isAudio
                       ? `${Math.round(exportStatus.progress * 100)}% · ${(exportStatus.progress * state.duration).toFixed(1)}s / ${state.duration.toFixed(1)}s`
-                      : "Preloading video & image clips…"}
+                      : exportStatus.phase === "encoding"
+                        ? "Writing the muxed output…"
+                        : "Preloading video & image clips…"}
                 </p>
               </div>
             </div>

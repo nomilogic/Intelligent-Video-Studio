@@ -75,6 +75,8 @@
     "zod": "catalog:"
   },
   "dependencies": {
-    "@tweenjs/tween.js": "^25.0.0"
+    "@tweenjs/tween.js": "^25.0.0",
+    "mp4-muxer": "^5.2.2",
+    "webm-muxer": "^5.1.4"
   }
 }
