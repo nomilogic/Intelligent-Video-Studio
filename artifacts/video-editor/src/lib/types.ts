@@ -1,4 +1,24 @@
-export type MediaType = "video" | "audio" | "image" | "text" | "blank";
+export type MediaType =
+  | "video"
+  | "audio"
+  | "image"
+  | "text"
+  | "blank"
+  // Adjustment-layer clip types — they don't carry source media but instead
+  // affect the visual composite within their rectangle. Both fully support
+  // x/y/width/height/rotation/scale/opacity keyframing like normal clips.
+  | "logoBlur"     // pixel-blurs whatever sits beneath this rectangle
+  | "maskLayer";   // contributes an alpha mask to the visible composite
+
+export interface ChromaKey {
+  // Enable toggle so users can adjust controls without immediately seeing the
+  // result while picking a color.
+  enabled: boolean;
+  color: string;       // hex string e.g. "#00ff00"
+  threshold: number;   // 0..1 — how close a pixel must be to `color` to drop
+  smoothness: number;  // 0..1 — soft edge falloff range past the threshold
+  spill: number;       // 0..1 — desaturate residual color cast on edges
+}
 
 export type EasingType =
   | "step"
@@ -129,6 +149,11 @@ export interface Clip {
   // Text-only: when true (default), font scales with the clip box (current behavior).
   // When false, font stays at a fixed size relative to the canvas — only the box scales.
   textAutoScale?: boolean;
+  // Video/image: per-clip green-screen / chroma key.
+  chromaKey?: ChromaKey;
+  // logoBlur clip type: blur radius in canvas-relative pixels (relative to a
+  // 1080-px-wide canvas, scales with output size on export).
+  blurAmount?: number;
 }
 
 export interface Transition {

@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { Muxer as Mp4Muxer, ArrayBufferTarget as Mp4Target } from "mp4-muxer";
 import { Muxer as WebMMuxer, ArrayBufferTarget as WebMTarget } from "webm-muxer";
-import { EditorState, Clip, ClipMask } from "../lib/types";
+import { EditorState, Clip, ClipMask, ChromaKey } from "../lib/types";
 import {
   resolveClip,
   clipVisibleAt,
@@ -87,6 +87,83 @@ async function seekVideo(vid: HTMLVideoElement, time: number) {
     vid.addEventListener("seeked", onSeeked);
     setTimeout(resolve, 800);
   });
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const v = parseInt(full || "00ff00", 16);
+  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+}
+
+// Per-pixel chroma key — same algorithm as the live preview in Canvas.tsx.
+// Mutates `data` in place.
+function applyChromaKeyData(
+  data: Uint8ClampedArray,
+  key: [number, number, number],
+  threshold: number,
+  smoothness: number,
+  spill: number,
+) {
+  const [kr, kg, kb] = key;
+  const MAX = 441.673;
+  const t = threshold * MAX;
+  const s = Math.max(0.0001, smoothness * MAX);
+  const tMax = t + s;
+  const greenKey = kg > kr && kg > kb;
+  const blueKey = kb > kr && kb > kg;
+  const redKey = kr > kg && kr > kb;
+  for (let i = 0; i < data.length; i += 4) {
+    const dr = data[i] - kr;
+    const dg = data[i + 1] - kg;
+    const db = data[i + 2] - kb;
+    const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+    if (dist <= t) {
+      data[i + 3] = 0;
+    } else if (dist < tMax) {
+      const k = (dist - t) / s;
+      data[i + 3] = data[i + 3] * k;
+    }
+    if (spill > 0 && data[i + 3] > 0) {
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      if (greenKey && g > Math.max(r, b)) {
+        data[i + 1] = Math.max(r, b) + (g - Math.max(r, b)) * (1 - spill);
+      } else if (blueKey && b > Math.max(r, g)) {
+        data[i + 2] = Math.max(r, g) + (b - Math.max(r, g)) * (1 - spill);
+      } else if (redKey && r > Math.max(g, b)) {
+        data[i] = Math.max(g, b) + (r - Math.max(g, b)) * (1 - spill);
+      }
+    }
+  }
+}
+
+// Render a video/image frame at native resolution into an offscreen canvas
+// with the chroma key applied. The returned canvas has transparent pixels
+// where the key matched, and is suitable as a drawImage source for the
+// per-clip transform pipeline.
+function chromaKeyFrame(
+  src: HTMLVideoElement | HTMLImageElement,
+  ck: ChromaKey,
+): HTMLCanvasElement | null {
+  const sw =
+    src instanceof HTMLVideoElement ? src.videoWidth : (src as HTMLImageElement).naturalWidth;
+  const sh =
+    src instanceof HTMLVideoElement ? src.videoHeight : (src as HTMLImageElement).naturalHeight;
+  if (!sw || !sh) return null;
+  const c = document.createElement("canvas");
+  c.width = sw;
+  c.height = sh;
+  const cx = c.getContext("2d", { willReadFrequently: true });
+  if (!cx) return null;
+  try {
+    cx.drawImage(src, 0, 0);
+    const img = cx.getImageData(0, 0, sw, sh);
+    applyChromaKeyData(img.data, hexToRgb(ck.color), ck.threshold, ck.smoothness, ck.spill);
+    cx.putImageData(img, 0, 0);
+  } catch {
+    return null;
+  }
+  return c;
 }
 
 function objectCoverSourceRect(
@@ -204,24 +281,24 @@ function drawClipToCanvas(
   if (clip.mediaType === "video" && mediaEl instanceof HTMLVideoElement) {
     const vid = mediaEl;
     if (vid.readyState >= 2 && vid.videoWidth > 0 && vid.videoHeight > 0 && pw > 0 && ph > 0) {
-      const r = objectCoverSourceRect(
-        vid.videoWidth, vid.videoHeight,
-        cropX, cropY, cropW, cropH,
-        pw, ph,
-      );
-      ctx.drawImage(vid, r.sx, r.sy, r.sw, r.sh, -pw / 2, -ph / 2, pw, ph);
+      const ck = clip.chromaKey?.enabled ? chromaKeyFrame(vid, clip.chromaKey) : null;
+      const drawSrc: CanvasImageSource = ck ?? vid;
+      const srcW = ck?.width ?? vid.videoWidth;
+      const srcH = ck?.height ?? vid.videoHeight;
+      const r = objectCoverSourceRect(srcW, srcH, cropX, cropY, cropW, cropH, pw, ph);
+      ctx.drawImage(drawSrc, r.sx, r.sy, r.sw, r.sh, -pw / 2, -ph / 2, pw, ph);
     } else {
       ctx.fillStyle = clip.color || "#1a1a2e";
       ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
     }
   } else if (clip.mediaType === "image" && mediaEl instanceof HTMLImageElement) {
     if (mediaEl.naturalWidth > 0 && mediaEl.naturalHeight > 0 && pw > 0 && ph > 0) {
-      const r = objectCoverSourceRect(
-        mediaEl.naturalWidth, mediaEl.naturalHeight,
-        cropX, cropY, cropW, cropH,
-        pw, ph,
-      );
-      ctx.drawImage(mediaEl, r.sx, r.sy, r.sw, r.sh, -pw / 2, -ph / 2, pw, ph);
+      const ck = clip.chromaKey?.enabled ? chromaKeyFrame(mediaEl, clip.chromaKey) : null;
+      const drawSrc: CanvasImageSource = ck ?? mediaEl;
+      const srcW = ck?.width ?? mediaEl.naturalWidth;
+      const srcH = ck?.height ?? mediaEl.naturalHeight;
+      const r = objectCoverSourceRect(srcW, srcH, cropX, cropY, cropW, cropH, pw, ph);
+      ctx.drawImage(drawSrc, r.sx, r.sy, r.sw, r.sh, -pw / 2, -ph / 2, pw, ph);
     }
   } else if (clip.mediaType === "text") {
     const ts = clip.textStyle!;
@@ -472,13 +549,43 @@ async function renderFrame(
     await seekVideo(vid, pr.videoTime);
   }
 
-  // 2. Clear and draw everything onto the offscreen canvas.
+  // 2. Clear and fill the canvas background.
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = s.background || "#000000";
   ctx.fillRect(0, 0, W, H);
 
+  // Pre-resolve mask-layer and logo-blur clips so we know whether to detour
+  // through an offscreen media composite for masking.
+  const maskLayerEntries: { clip: Clip; resolved: ReturnType<typeof resolveClip> }[] = [];
+  const logoBlurEntries: { clip: Clip; resolved: ReturnType<typeof resolveClip> }[] = [];
   for (const clip of sortedClips) {
     if (clip.hidden) continue;
+    if (clip.mediaType !== "maskLayer" && clip.mediaType !== "logoBlur") continue;
+    const r = resolveClip(clip, s.keyframes, time);
+    if (!r.visible) continue;
+    if (clip.mediaType === "maskLayer") maskLayerEntries.push({ clip, resolved: r });
+    else logoBlurEntries.push({ clip, resolved: r });
+  }
+  const hasMaskLayers = maskLayerEntries.length > 0;
+
+  // 3. Draw media clips. When mask layers are present we render media into an
+  //    offscreen canvas first, apply the composed mask alpha via
+  //    destination-in, then drawImage the result onto the main canvas. This
+  //    keeps the page background visible in masked-out areas instead of
+  //    cutting it as well.
+  let mediaCanvas: HTMLCanvasElement | null = null;
+  let mediaCtx: CanvasRenderingContext2D = ctx;
+  if (hasMaskLayers) {
+    mediaCanvas = document.createElement("canvas");
+    mediaCanvas.width = W;
+    mediaCanvas.height = H;
+    const mc = mediaCanvas.getContext("2d");
+    if (mc) mediaCtx = mc;
+  }
+
+  for (const clip of sortedClips) {
+    if (clip.hidden) continue;
+    if (clip.mediaType === "maskLayer" || clip.mediaType === "logoBlur") continue;
     const resolved = resolveClip(clip, s.keyframes, time);
     if (!resolved.visible) continue;
 
@@ -500,7 +607,7 @@ async function renderFrame(
           : null;
       const pFx = getEffectImpact(prev, time);
       const prevMask = media.maskEls.get(prev.id) ?? null;
-      drawClipWithMask(ctx, prev, pr, prevMediaEl, prevMask, W, H, scale, trans.outgoing, pFx);
+      drawClipWithMask(mediaCtx, prev, pr, prevMediaEl, prevMask, W, H, scale, trans.outgoing, pFx);
     }
 
     const mediaEl = clip.mediaType === "video"
@@ -509,7 +616,79 @@ async function renderFrame(
         ? (media.imageEls.get(clip.id) ?? null)
         : null;
     const clipMask = media.maskEls.get(clip.id) ?? null;
-    drawClipWithMask(ctx, clip, resolved, mediaEl, clipMask, W, H, scale, incomingMod, fxImpact);
+    drawClipWithMask(mediaCtx, clip, resolved, mediaEl, clipMask, W, H, scale, incomingMod, fxImpact);
+  }
+
+  // 4. Apply mask-layer composite (destination-in) to the media offscreen,
+  //    then layer the masked media onto the main canvas (which already has
+  //    the page background filled).
+  if (hasMaskLayers && mediaCanvas) {
+    mediaCtx.save();
+    mediaCtx.globalCompositeOperation = "destination-in";
+    for (const { clip, resolved } of maskLayerEntries) {
+      const maskCanvas = media.maskEls.get(clip.id);
+      if (!maskCanvas) continue;
+      const px = resolved.x * W;
+      const py = resolved.y * H;
+      const pw = resolved.width * W;
+      const ph = resolved.height * H;
+      const cx = px + pw / 2 + (resolved.translateX * pw) / 100;
+      const cy = py + ph / 2 + (resolved.translateY * ph) / 100;
+      const baseScale = resolved.scale || 1;
+      mediaCtx.save();
+      mediaCtx.globalAlpha = Math.max(0, Math.min(1, resolved.opacity));
+      mediaCtx.translate(cx, cy);
+      mediaCtx.rotate(((resolved.rotation || 0) * Math.PI) / 180);
+      mediaCtx.scale(baseScale, baseScale);
+      const r = computeMaskTargetRect(clip.mask!, maskCanvas.width, maskCanvas.height, pw, ph);
+      mediaCtx.drawImage(maskCanvas, r.dx, r.dy, r.dw, r.dh);
+      mediaCtx.restore();
+    }
+    mediaCtx.restore();
+    ctx.drawImage(mediaCanvas, 0, 0);
+  }
+
+  // 5. Apply logo-blur regions on top of the composite. Snapshot the current
+  //    canvas, then for each logo-blur clip clip to its rotated rect and
+  //    re-draw the snapshot through a CSS blur filter.
+  if (logoBlurEntries.length > 0) {
+    const snap = document.createElement("canvas");
+    snap.width = W;
+    snap.height = H;
+    const sx = snap.getContext("2d");
+    if (sx) {
+      sx.drawImage(ctx.canvas, 0, 0);
+      for (const { clip, resolved } of logoBlurEntries) {
+        const px = resolved.x * W;
+        const py = resolved.y * H;
+        const pw = resolved.width * W;
+        const ph = resolved.height * H;
+        const cx = px + pw / 2 + (resolved.translateX * pw) / 100;
+        const cy = py + ph / 2 + (resolved.translateY * ph) / 100;
+        const baseScale = resolved.scale || 1;
+        const blurPx = Math.max(0, ((clip.blurAmount ?? 16) * W) / 1080);
+        ctx.save();
+        ctx.beginPath();
+        ctx.translate(cx, cy);
+        ctx.rotate(((resolved.rotation || 0) * Math.PI) / 180);
+        ctx.scale(baseScale, baseScale);
+        const halfW = pw / 2;
+        const halfH = ph / 2;
+        if ((clip.borderRadius || 0) > 0) {
+          roundRectPath(ctx, -halfW, -halfH, pw, ph, clip.borderRadius * scale);
+        } else {
+          ctx.rect(-halfW, -halfH, pw, ph);
+        }
+        ctx.clip();
+        // Reset transform so the snapshot draws in canvas pixel space; the
+        // clip region was already committed in device space above.
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.filter = `blur(${blurPx}px)`;
+        ctx.globalAlpha = Math.max(0, Math.min(1, resolved.opacity));
+        ctx.drawImage(snap, 0, 0);
+        ctx.restore();
+      }
+    }
   }
 }
 

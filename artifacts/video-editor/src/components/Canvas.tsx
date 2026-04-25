@@ -49,6 +49,193 @@ function flipTransform(clip: Clip): string {
   return `scaleX(${clip.flipH ? -1 : 1}) scaleY(${clip.flipV ? -1 : 1})`;
 }
 
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const v = parseInt(full || "00ff00", 16);
+  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+}
+
+// Per-pixel chroma key. Modifies imageData in place. Distance is computed in
+// RGB; pixels within `threshold` of the key color get fully transparent;
+// pixels within `threshold + smoothness` get a soft alpha falloff. `spill`
+// dampens residual color cast (e.g. green tint on hair) outside the key.
+function applyChromaKey(
+  data: Uint8ClampedArray,
+  key: [number, number, number],
+  threshold: number,    // 0..1 — fraction of max RGB distance (~441)
+  smoothness: number,   // 0..1
+  spill: number,        // 0..1
+) {
+  const [kr, kg, kb] = key;
+  const MAX = 441.673; // sqrt(255²·3)
+  const t = threshold * MAX;
+  const s = Math.max(0.0001, smoothness * MAX);
+  const tMax = t + s;
+  const greenKey = kg > kr && kg > kb;
+  const blueKey = kb > kr && kb > kg;
+  const redKey = kr > kg && kr > kb;
+  for (let i = 0; i < data.length; i += 4) {
+    const dr = data[i] - kr;
+    const dg = data[i + 1] - kg;
+    const db = data[i + 2] - kb;
+    const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+    if (dist <= t) {
+      data[i + 3] = 0;
+    } else if (dist < tMax) {
+      const k = (dist - t) / s;
+      data[i + 3] = data[i + 3] * k;
+    }
+    if (spill > 0 && data[i + 3] > 0) {
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      if (greenKey && g > Math.max(r, b)) {
+        data[i + 1] = Math.max(r, b) + (g - Math.max(r, b)) * (1 - spill);
+      } else if (blueKey && b > Math.max(r, g)) {
+        data[i + 2] = Math.max(r, g) + (b - Math.max(r, g)) * (1 - spill);
+      } else if (redKey && r > Math.max(g, b)) {
+        data[i] = Math.max(g, b) + (r - Math.max(g, b)) * (1 - spill);
+      }
+    }
+  }
+}
+
+// Compute a "cover"-style draw rect (source aspect preserved, fills dest).
+function coverDraw(dw: number, dh: number, sw: number, sh: number) {
+  const sr = sw / sh;
+  const dr = dw / dh;
+  if (sr > dr) {
+    const h = dh;
+    const w = h * sr;
+    return { dx: (dw - w) / 2, dy: 0, dw: w, dh: h };
+  }
+  const w = dw;
+  const h = w / sr;
+  return { dx: 0, dy: (dh - h) / 2, dw: w, dh: h };
+}
+
+function ChromaKeyMedia({ clip, videoTime, isPlaying }: { clip: Clip; videoTime: number; isPlaying: boolean }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const ck = clip.chromaKey!;
+  const [imgReady, setImgReady] = useState(0);
+
+  // Mirror the hidden <video> to the playhead, exactly like MediaContentBase.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const target = Math.max(0, videoTime);
+    const drift = Math.abs(v.currentTime - target);
+    if (!isPlaying) {
+      if (drift > 0.03) try { v.currentTime = target; } catch {}
+    } else if (drift > 0.25) {
+      try { v.currentTime = target; } catch {}
+    }
+  }, [videoTime, isPlaying]);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.playbackRate = clip.speed || 1;
+    v.muted = clip.muted;
+    v.volume = clip.muted ? 0 : clip.volume;
+    if (isPlaying) v.play().catch(() => {}); else v.pause();
+  }, [isPlaying, clip.muted, clip.volume, clip.speed]);
+
+  // Live processing loop. Resizes the canvas to its display dims (capped to
+  // keep per-frame work bounded), then draws the source with object-cover
+  // positioning and applies the chroma key to the visible pixels.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const wrapper = wrapperRef.current;
+    if (!canvas || !wrapper) return;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
+    let raf: number | null = null;
+    let cancelled = false;
+    const key = hexToRgb(ck.color);
+    const draw = () => {
+      if (cancelled) return;
+      const src: HTMLVideoElement | HTMLImageElement | null =
+        clip.mediaType === "video" ? videoRef.current : imgRef.current;
+      const sw = (src as HTMLVideoElement)?.videoWidth ?? (src as HTMLImageElement)?.naturalWidth ?? 0;
+      const sh = (src as HTMLVideoElement)?.videoHeight ?? (src as HTMLImageElement)?.naturalHeight ?? 0;
+      const ready =
+        clip.mediaType === "video"
+          ? (src as HTMLVideoElement | null)?.readyState !== undefined &&
+            (src as HTMLVideoElement).readyState >= 2
+          : sw > 0 && sh > 0;
+      if (src && ready && sw > 0 && sh > 0) {
+        // Cap preview backing dimensions for performance (≈540p).
+        const rect = wrapper.getBoundingClientRect();
+        const cap = 540;
+        const dispW = Math.max(2, rect.width || sw);
+        const dispH = Math.max(2, rect.height || sh);
+        const aspect = dispW / dispH;
+        let cw = Math.min(cap, dispW);
+        let ch = Math.round(cw / aspect);
+        if (ch > cap) { ch = cap; cw = Math.round(ch * aspect); }
+        if (canvas.width !== cw || canvas.height !== ch) {
+          canvas.width = cw;
+          canvas.height = ch;
+        }
+        const { dx, dy, dw, dh } = coverDraw(cw, ch, sw, sh);
+        try {
+          ctx.clearRect(0, 0, cw, ch);
+          ctx.drawImage(src as CanvasImageSource, 0, 0, sw, sh, dx, dy, dw, dh);
+          if (ck.enabled) {
+            const img = ctx.getImageData(0, 0, cw, ch);
+            applyChromaKey(img.data, key, ck.threshold, ck.smoothness, ck.spill);
+            ctx.putImageData(img, 0, 0);
+          }
+        } catch {
+          // Cross-origin or decoding failure — silently skip this frame.
+        }
+      }
+      if (clip.mediaType === "video") {
+        raf = requestAnimationFrame(draw);
+      }
+    };
+    if (clip.mediaType === "video") {
+      raf = requestAnimationFrame(draw);
+    } else {
+      // Image: render once when dependencies change (and again after load).
+      draw();
+    }
+    return () => {
+      cancelled = true;
+      if (raf != null) cancelAnimationFrame(raf);
+    };
+  }, [
+    clip.mediaType,
+    clip.src,
+    ck.enabled,
+    ck.color,
+    ck.threshold,
+    ck.smoothness,
+    ck.spill,
+    imgReady,
+  ]);
+
+  return (
+    <div ref={wrapperRef} className="w-full h-full overflow-hidden pointer-events-none" style={{ transform: flipTransform(clip) }}>
+      {clip.mediaType === "video" ? (
+        <video ref={videoRef} src={clip.src} muted={clip.muted} playsInline preload="auto" className="hidden" />
+      ) : (
+        <img
+          ref={imgRef}
+          src={clip.src}
+          alt={clip.label}
+          className="hidden"
+          onLoad={() => setImgReady((n) => n + 1)}
+        />
+      )}
+      <canvas ref={canvasRef} className="block w-full h-full" />
+    </div>
+  );
+}
+
 function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false }: { clip: Clip; videoTime: number; isPlaying: boolean; showFullSource?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -118,6 +305,11 @@ function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false }
     );
 
   if (clip.mediaType === "video" && clip.src) {
+    // Per-clip chroma key takes a different render path (canvas pipeline).
+    // Cropping is bypassed in the chroma path — the cover-fit is built in.
+    if (clip.chromaKey?.enabled) {
+      return <ChromaKeyMedia clip={clip} videoTime={videoTime} isPlaying={isPlaying} />;
+    }
     return (
       <div className="w-full h-full overflow-hidden pointer-events-none" style={{ transform: flipTransform(clip) }}>
         <video
@@ -148,6 +340,9 @@ function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false }
   }
 
   if (clip.mediaType === "image" && clip.src) {
+    if (clip.chromaKey?.enabled) {
+      return <ChromaKeyMedia clip={clip} videoTime={videoTime} isPlaying={isPlaying} />;
+    }
     return (
       <div className="w-full h-full overflow-hidden pointer-events-none" style={{ transform: flipTransform(clip) }}>
         <img
@@ -392,6 +587,59 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
         .sort((a, b) => b.trackIndex - a.trackIndex),
     [state.clips, state.currentTime],
   );
+
+  // Split visible clips by role: "media" clips (regular content), "maskLayer"
+  // clips (contribute alpha to a wrapper around the media composite), and
+  // "logoBlur" clips (overlay rectangles that blur the composite beneath
+  // them via backdrop-filter). Adjustment clips render OUTSIDE the masked
+  // composite so they aren't masked themselves.
+  const mediaClips = useMemo(
+    () => visibleClips.filter((c) => c.mediaType !== "maskLayer" && c.mediaType !== "logoBlur"),
+    [visibleClips],
+  );
+  const maskLayerClips = useMemo(
+    () => visibleClips.filter((c) => c.mediaType === "maskLayer"),
+    [visibleClips],
+  );
+  const logoBlurClips = useMemo(
+    () => visibleClips.filter((c) => c.mediaType === "logoBlur"),
+    [visibleClips],
+  );
+
+  // Build composed CSS mask for the media-clip wrapper from all visible
+  // mask-layer clips. Each contributes a layer; CSS additively composites
+  // the alpha of all layers (matching After Effects "add" mask mode).
+  const maskWrapperStyle = useMemo<React.CSSProperties>(() => {
+    if (maskLayerClips.length === 0) return {};
+    const images: string[] = [];
+    const sizes: string[] = [];
+    const positions: string[] = [];
+    const repeats: string[] = [];
+    const modes: string[] = [];
+    for (const c of maskLayerClips) {
+      const r = resolveClip(c, state.keyframes, state.currentTime);
+      if (!r.visible) continue;
+      const m = c.mask;
+      if (!m || !m.src) continue;
+      images.push(`url("${m.src}")`);
+      sizes.push(`${(r.width * 100).toFixed(3)}% ${(r.height * 100).toFixed(3)}%`);
+      positions.push(`${(r.x * 100).toFixed(3)}% ${(r.y * 100).toFixed(3)}%`);
+      repeats.push("no-repeat");
+      modes.push(m.mode === "luminance" ? "luminance" : "alpha");
+    }
+    if (images.length === 0) return {};
+    return {
+      WebkitMaskImage: images.join(", "),
+      maskImage: images.join(", "),
+      WebkitMaskSize: sizes.join(", "),
+      maskSize: sizes.join(", "),
+      WebkitMaskPosition: positions.join(", "),
+      maskPosition: positions.join(", "),
+      WebkitMaskRepeat: repeats.join(", "),
+      maskRepeat: repeats.join(", "),
+      maskMode: modes.join(", ") as any,
+    };
+  }, [maskLayerClips, state.keyframes, state.currentTime]);
 
   const onCanvasMouseDown = (e: React.MouseEvent) => {
     if (e.target === containerRef.current) {
@@ -748,7 +996,17 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
           }}
         />
 
-        {visibleClips.flatMap((clip) => {
+        {/*
+          Media-clip composite, wrapped in a div whose CSS mask is the union
+          of all visible mask-layer clips' alphas. When there are no mask
+          layers, the wrapper has no mask and behaves transparently.
+        */}
+        <div
+          className="absolute inset-0"
+          data-testid="canvas-media-composite"
+          style={maskWrapperStyle}
+        >
+        {mediaClips.flatMap((clip) => {
           const isSelected = state.selectedClipIds.includes(clip.id);
           const cropThis = isCropping && isSelected && (clip.mediaType === "video" || clip.mediaType === "image");
           const r = resolveClip(clip, state.keyframes, state.currentTime);
@@ -837,6 +1095,94 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
           );
 
           return nodes;
+        })}
+        </div>
+
+        {/*
+          Logo-blur clips. Rendered ABOVE the masked composite so their
+          backdrop-filter samples whatever is beneath. Each is selectable and
+          draggable just like a normal clip; transforms come from the same
+          keyframe pipeline as media clips.
+        */}
+        {logoBlurClips.map((clip) => {
+          const r = resolveClip(clip, state.keyframes, state.currentTime);
+          if (!r.visible) return null;
+          const isSelected = state.selectedClipIds.includes(clip.id);
+          const blurPx = clip.blurAmount ?? 16;
+          // Scale blur to canvas size so a value tuned at 1080-wide preview
+          // looks the same on smaller previews.
+          const scaledBlur = (blurPx * displayW) / 1080;
+          return (
+            <div
+              key={clip.id}
+              data-testid={`canvas-clip-${clip.id}`}
+              className={cn(
+                "absolute",
+                clip.locked ? "cursor-not-allowed" : "cursor-grab active:cursor-grabbing",
+                isSelected && "outline outline-2 outline-primary",
+                !isSelected && "outline outline-1 outline-dashed outline-orange-400/70",
+              )}
+              style={{
+                left: `${r.x * 100}%`,
+                top: `${r.y * 100}%`,
+                width: `${r.width * 100}%`,
+                height: `${r.height * 100}%`,
+                opacity: r.opacity,
+                transform: `translate(${r.translateX}%, ${r.translateY}%) rotate(${r.rotation}deg) scale(${r.scale})`,
+                transformOrigin: "center",
+                borderRadius: `${clip.borderRadius}px`,
+                backdropFilter: `blur(${scaledBlur.toFixed(2)}px)`,
+                WebkitBackdropFilter: `blur(${scaledBlur.toFixed(2)}px)`,
+              }}
+              onMouseDown={(e) => startDrag(e, clip, "move")}
+            >
+              {!isSelected && (
+                <div className="absolute top-0.5 left-1 text-[10px] text-orange-200/80 pointer-events-none select-none">
+                  Blur
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/*
+          Mask-layer clips render as faint outlines + label only — they do
+          not draw into the visible composite (their alpha is consumed by
+          the wrapper above). They remain selectable and draggable so users
+          can keyframe their position/size/rotation.
+        */}
+        {maskLayerClips.map((clip) => {
+          const r = resolveClip(clip, state.keyframes, state.currentTime);
+          if (!r.visible) return null;
+          const isSelected = state.selectedClipIds.includes(clip.id);
+          return (
+            <div
+              key={clip.id}
+              data-testid={`canvas-clip-${clip.id}`}
+              className={cn(
+                "absolute",
+                clip.locked ? "cursor-not-allowed" : "cursor-grab active:cursor-grabbing",
+                isSelected
+                  ? "outline outline-2 outline-primary"
+                  : "outline outline-1 outline-dashed outline-purple-400/70",
+              )}
+              style={{
+                left: `${r.x * 100}%`,
+                top: `${r.y * 100}%`,
+                width: `${r.width * 100}%`,
+                height: `${r.height * 100}%`,
+                transform: `translate(${r.translateX}%, ${r.translateY}%) rotate(${r.rotation}deg) scale(${r.scale})`,
+                transformOrigin: "center",
+              }}
+              onMouseDown={(e) => startDrag(e, clip, "move")}
+            >
+              {!isSelected && (
+                <div className="absolute top-0.5 left-1 text-[10px] text-purple-200/80 pointer-events-none select-none">
+                  Mask
+                </div>
+              )}
+            </div>
+          );
         })}
 
         {/* Selection overlay (drawn outside clip transform so handles aren't rotated) */}

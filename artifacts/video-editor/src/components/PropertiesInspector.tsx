@@ -444,6 +444,144 @@ function EffectsSection({
   );
 }
 
+function ChromaKeySection({
+  clip,
+  dispatch,
+}: {
+  clip: Clip;
+  dispatch: React.Dispatch<EditorAction>;
+}) {
+  const ck = clip.chromaKey ?? {
+    enabled: false,
+    color: "#00ff21",
+    threshold: 0.18,
+    smoothness: 0.12,
+    spill: 0.4,
+  };
+  const setCk = (patch: Partial<typeof ck>) => {
+    dispatch({
+      type: "UPDATE_CLIP",
+      payload: { id: clip.id, updates: { chromaKey: { ...ck, ...patch } } },
+    });
+  };
+  return (
+    <Section
+      title="Green Screen / Chroma Key"
+      action={
+        <Button
+          variant={ck.enabled ? "secondary" : "ghost"}
+          size="sm"
+          className="h-6 px-2 text-[10px]"
+          onClick={() => setCk({ enabled: !ck.enabled })}
+          data-testid="toggle-chromakey"
+        >
+          {ck.enabled ? "On" : "Off"}
+        </Button>
+      }
+    >
+      <div className="flex items-center gap-2">
+        <Label className="text-[10px] text-muted-foreground w-14">Key Color</Label>
+        <input
+          type="color"
+          value={ck.color}
+          onChange={(e) => setCk({ color: e.target.value })}
+          className="h-7 w-10 bg-transparent border border-border rounded cursor-pointer"
+          data-testid="chromakey-color"
+        />
+        <Input
+          type="text"
+          value={ck.color}
+          onChange={(e) => setCk({ color: e.target.value })}
+          className="h-7 text-[10px] flex-1 font-mono"
+        />
+      </div>
+      <div className="grid grid-cols-3 gap-1">
+        {[
+          { label: "Green", color: "#00ff21" },
+          { label: "Blue", color: "#0033ff" },
+          { label: "Black", color: "#000000" },
+        ].map((p) => (
+          <Button
+            key={p.label}
+            variant="outline"
+            size="sm"
+            className="h-6 text-[10px]"
+            onClick={() => setCk({ color: p.color })}
+          >
+            {p.label}
+          </Button>
+        ))}
+      </div>
+      <NumPair
+        label="Threshold"
+        value={ck.threshold}
+        min={0}
+        max={1}
+        step={0.01}
+        onChange={(v) => setCk({ threshold: v })}
+      />
+      <NumPair
+        label="Smoothness"
+        value={ck.smoothness}
+        min={0}
+        max={1}
+        step={0.01}
+        onChange={(v) => setCk({ smoothness: v })}
+      />
+      <NumPair
+        label="Spill Suppress"
+        value={ck.spill}
+        min={0}
+        max={1}
+        step={0.05}
+        onChange={(v) => setCk({ spill: v })}
+      />
+      <p className="text-[10px] text-muted-foreground leading-snug">
+        Pick the background color (or a swatch). Threshold sets which pixels become transparent; smoothness softens the edges; spill suppresses leftover color cast on the subject.
+      </p>
+    </Section>
+  );
+}
+
+function LogoBlurSection({
+  clip,
+  dispatch,
+}: {
+  clip: Clip;
+  dispatch: React.Dispatch<EditorAction>;
+}) {
+  const blur = clip.blurAmount ?? 16;
+  return (
+    <Section title="Blur Region">
+      <NumPair
+        label="Blur Amount"
+        value={blur}
+        min={0}
+        max={80}
+        step={1}
+        suffix="px"
+        onChange={(v) =>
+          dispatch({ type: "UPDATE_CLIP", payload: { id: clip.id, updates: { blurAmount: v } } })
+        }
+      />
+      <NumPair
+        label="Border Radius"
+        value={clip.borderRadius}
+        min={0}
+        max={64}
+        step={1}
+        suffix="px"
+        onChange={(v) =>
+          dispatch({ type: "UPDATE_CLIP", payload: { id: clip.id, updates: { borderRadius: v } } })
+        }
+      />
+      <p className="text-[10px] text-muted-foreground leading-snug">
+        Drops a blurred rectangle on top of the composite — handy for hiding logos, faces or text. Animate position and size with keyframes (Basic tab) to track moving objects.
+      </p>
+    </Section>
+  );
+}
+
 function SplitSection({
   clip, dispatch,
 }: {
@@ -804,10 +942,14 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
           )}
           <TabsList className="grid grid-cols-4 mx-2 mt-2 h-8">
             <TabsTrigger value="basic" className="text-[10px]">Basic</TabsTrigger>
-            <TabsTrigger value="effects" className="text-[10px]">Effects</TabsTrigger>
+            <TabsTrigger value="effects" className="text-[10px]">
+              {clip.mediaType === "maskLayer" ? "Mask" : clip.mediaType === "logoBlur" ? "Blur" : "Effects"}
+            </TabsTrigger>
             <TabsTrigger value="anim" className="text-[10px]">Anim</TabsTrigger>
             {clip.mediaType === "text" && <TabsTrigger value="text" className="text-[10px]">Text</TabsTrigger>}
-            {clip.mediaType !== "text" && <TabsTrigger value="audio" className="text-[10px]">Audio</TabsTrigger>}
+            {(clip.mediaType === "video" || clip.mediaType === "audio") && (
+              <TabsTrigger value="audio" className="text-[10px]">Audio</TabsTrigger>
+            )}
           </TabsList>
 
           <div className="flex-1 overflow-y-auto">
@@ -948,7 +1090,39 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
             </TabsContent>
 
             <TabsContent value="effects" className="m-0">
+              {/*
+                Adjustment-clip types replace the standard Effects panel with
+                their own focused editor (Mask Layer or Blur Region). Regular
+                media/text clips get the full Effects + Mask + Filters stack,
+                with Green Screen surfaced for video/image only.
+              */}
+              {clip.mediaType === "maskLayer" && (
+                <>
+                  <MaskSection clip={clip} dispatch={dispatch} />
+                  <Separator />
+                  <div className="px-3 py-3 text-[10px] text-muted-foreground leading-snug">
+                    This mask layer cuts out the visible composite of all media beneath it. Use the Basic tab to keyframe its position, size, rotation and scale; the cutout shape will animate along with the clip rectangle.
+                  </div>
+                </>
+              )}
+              {clip.mediaType === "logoBlur" && (
+                <>
+                  <LogoBlurSection clip={clip} dispatch={dispatch} />
+                  <Separator />
+                  <div className="px-3 py-3 text-[10px] text-muted-foreground leading-snug">
+                    Use the Basic tab to keyframe X / Y / W / H to track moving logos and faces.
+                  </div>
+                </>
+              )}
+              {clip.mediaType !== "maskLayer" && clip.mediaType !== "logoBlur" && (
+              <>
               <EffectsSection clip={clip} dispatch={dispatch} />
+              {(clip.mediaType === "video" || clip.mediaType === "image") && (
+                <>
+                  <Separator />
+                  <ChromaKeySection clip={clip} dispatch={dispatch} />
+                </>
+              )}
               <MaskSection clip={clip} dispatch={dispatch} />
 
               <Separator />
@@ -1031,6 +1205,8 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
                   <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={() => update({ cropX: 0.21, cropY: 0, cropWidth: 0.5625, cropHeight: 1 })}>9:16</Button>
                 </div>
               </Section>
+              </>
+              )}
             </TabsContent>
 
             <TabsContent value="anim" className="m-0">

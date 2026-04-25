@@ -774,6 +774,9 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
                           {clip.mediaType === "audio" && <span className="mr-1 opacity-70">♪</span>}
                           {clip.mediaType === "video" && <span className="mr-1 opacity-70">▶</span>}
                           {clip.mediaType === "image" && <span className="mr-1 opacity-70">▣</span>}
+                          {clip.mediaType === "maskLayer" && <span className="mr-1 opacity-80 text-purple-100" title="Mask Layer">◐</span>}
+                          {clip.mediaType === "logoBlur" && <span className="mr-1 opacity-80 text-orange-100" title="Logo Blur">◍</span>}
+                          {clip.chromaKey?.enabled && <span className="mr-1 opacity-80 text-emerald-200" title="Green screen on">✶</span>}
                           {clip.muted && <VolumeX className="w-2.5 h-2.5 mr-1 opacity-70" />}
                           <span className="truncate drop-shadow">{clip.label}</span>
                           {width > 80 && (

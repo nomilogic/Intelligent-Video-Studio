@@ -92,6 +92,26 @@ export function makeClip(partial: Partial<Clip> & { id?: string }): Clip {
     color: partial.color ?? "#3b82f6",
     effects: partial.effects ?? [],
     transitionIn: partial.transitionIn ?? { type: "none", duration: 0.5 },
+    chromaKey: partial.chromaKey,
+    mask:
+      partial.mask ??
+      (partial.mediaType === "maskLayer"
+        ? {
+            src: "data:image/svg+xml;utf8," + encodeURIComponent(
+              `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='white'/></svg>`,
+            ),
+            mode: "alpha" as const,
+            invert: false,
+            fit: "stretch" as const,
+            scale: 1,
+            offsetX: 0,
+            offsetY: 0,
+            opacity: 1,
+          }
+        : undefined),
+    blurAmount:
+      partial.blurAmount ??
+      (partial.mediaType === "logoBlur" ? 16 : undefined),
   };
 }
 

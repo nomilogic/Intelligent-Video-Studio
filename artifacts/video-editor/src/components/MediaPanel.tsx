@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Plus, Trash2, Film, Music, Image as ImageIcon, Type, Square, Sparkles, Layout } from "lucide-react";
+import { Plus, Trash2, Film, Music, Image as ImageIcon, Type, Square, Sparkles, Layout, Droplets, Shapes } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
@@ -358,6 +358,58 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
             });
           }}>
             <div className="w-3 h-3 rounded-full bg-current" /> Circle
+          </Button>
+
+          <Separator />
+
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Adjustment Layers</p>
+          <p className="text-[10px] text-muted-foreground leading-snug">
+            These sit on the timeline like normal clips and affect the visual composite within their rectangle. Animate position, size and rotation with keyframes.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full h-7 text-xs gap-2 justify-start"
+            data-testid="add-mask-layer"
+            onClick={() => {
+              dispatch({
+                type: "ADD_CLIP",
+                payload: makeClip({
+                  label: "Mask Layer",
+                  mediaType: "maskLayer",
+                  trackIndex: Math.min(state.clips.length, state.tracks.length - 1),
+                  startTime: state.currentTime,
+                  duration: 5,
+                  x: 0.2, y: 0.2, width: 0.6, height: 0.6,
+                  color: "#a855f7",
+                }),
+              });
+            }}
+          >
+            <Shapes className="w-3 h-3" /> Mask Layer
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full h-7 text-xs gap-2 justify-start"
+            data-testid="add-logo-blur"
+            onClick={() => {
+              dispatch({
+                type: "ADD_CLIP",
+                payload: makeClip({
+                  label: "Logo Blur",
+                  mediaType: "logoBlur",
+                  trackIndex: Math.min(state.clips.length, state.tracks.length - 1),
+                  startTime: state.currentTime,
+                  duration: 5,
+                  x: 0.7, y: 0.05, width: 0.25, height: 0.1,
+                  color: "#f97316",
+                  blurAmount: 16,
+                }),
+              });
+            }}
+          >
+            <Droplets className="w-3 h-3" /> Logo Blur
           </Button>
 
           <Separator />
