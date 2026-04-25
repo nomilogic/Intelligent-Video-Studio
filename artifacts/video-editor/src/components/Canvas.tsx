@@ -482,6 +482,63 @@ function buildMaskStyle(mask: ClipMask | undefined): React.CSSProperties {
   return style;
 }
 
+// Build a single canvas-sized SVG that places ONE mask-layer's source image
+// at exactly the same location, scale, rotation and translate the export
+// pipeline draws it (see use-export.ts → maskLayerEntries loop and
+// computeMaskTargetRect). The resulting data: URL is used as a CSS mask-image
+// on the media-composite wrapper so the live preview matches the exported
+// frame pixel-for-pixel — including translateX/Y, scale, rotation, and the
+// mask's own scale/offset/fit/opacity/invert.
+function buildMaskLayerSvgUrl(
+  c: { id: string },
+  r: {
+    x: number; y: number; width: number; height: number;
+    translateX: number; translateY: number; scale: number; rotation: number;
+  },
+  m: ClipMask,
+  canvasW: number,
+  canvasH: number,
+): string | null {
+  if (!m.src) return null;
+  const px = r.x * canvasW;
+  const py = r.y * canvasH;
+  const pw = r.width * canvasW;
+  const ph = r.height * canvasH;
+  const cx = px + pw / 2 + (r.translateX * pw) / 100;
+  const cy = py + ph / 2 + (r.translateY * ph) / 100;
+  const baseScale = r.scale || 1;
+
+  // Mask placement within the clip's local box (pre-scale, pre-rotate).
+  // Mirrors computeMaskTargetRect() in use-export.ts so preview = export.
+  const maskScale = Math.max(0.05, m.scale ?? 1);
+  const dw = pw * maskScale;
+  const dh = ph * maskScale;
+  const dx = -dw / 2 + (m.offsetX || 0) * pw;
+  const dy = -dh / 2 + (m.offsetY || 0) * ph;
+
+  // SVG <image> preserveAspectRatio matches the user's "fit" choice.
+  const par =
+    m.fit === "stretch" ? "none" : m.fit === "cover" ? "xMidYMid slice" : "xMidYMid meet";
+  const opacity = Math.max(0, Math.min(1, m.opacity ?? 1));
+
+  // Invert handling: invert all four channels so it works consistently for
+  // both luminance and alpha modes (white→black and opaque→transparent).
+  const filterId = `mlinv-${c.id.replace(/[^a-z0-9]/gi, "")}`;
+  const filterDef = m.invert
+    ? `<defs><filter id="${filterId}" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="-1 0 0 0 1   0 -1 0 0 1   0 0 -1 0 1   0 0 0 -1 1"/></filter></defs>`
+    : "";
+  const filterAttr = m.invert ? ` filter="url(#${filterId})"` : "";
+
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${canvasW}" height="${canvasH}" viewBox="0 0 ${canvasW} ${canvasH}" preserveAspectRatio="none">` +
+    filterDef +
+    `<g transform="translate(${cx.toFixed(2)} ${cy.toFixed(2)}) rotate(${(r.rotation || 0).toFixed(2)}) scale(${baseScale.toFixed(4)})"${filterAttr}>` +
+    `<image href="${m.src}" x="${dx.toFixed(2)}" y="${dy.toFixed(2)}" width="${dw.toFixed(2)}" height="${dh.toFixed(2)}" preserveAspectRatio="${par}" opacity="${opacity}"/>` +
+    `</g></svg>`;
+
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
 // Memoize MediaContent so video/image clips don't re-render on every playhead
 // tick. Native <video> elements play independently of React; re-rendering them
 // 30+ times per second is pure waste and causes visible playback jitter.
@@ -846,39 +903,45 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
   );
 
   // Build composed CSS mask for the media-clip wrapper from all visible
-  // mask-layer clips. Each contributes a layer; CSS additively composites
-  // the alpha of all layers (matching After Effects "add" mask mode).
+  // mask-layer clips. Each mask layer is wrapped in a canvas-sized SVG that
+  // bakes in the clip's full transform stack (x/y, width/height, translateX,
+  // translateY, scale, rotation, mask scale/offset/fit/opacity/invert) so the
+  // preview matches the exported video pixel-for-pixel. Each wrapped SVG is
+  // applied as its own CSS mask layer (preserving per-layer mode: luminance
+  // vs alpha), and the multiple layers are unioned by the browser's mask
+  // compositor — equivalent to After Effects "add" mode.
   const maskWrapperStyle = useMemo<React.CSSProperties>(() => {
     if (maskLayerClips.length === 0) return {};
+    const W = state.canvasWidth;
+    const H = state.canvasHeight;
     const images: string[] = [];
-    const sizes: string[] = [];
-    const positions: string[] = [];
-    const repeats: string[] = [];
     const modes: string[] = [];
     for (const c of maskLayerClips) {
       const r = resolveClip(c, state.keyframes, state.currentTime);
       if (!r.visible) continue;
       const m = c.mask;
       if (!m || !m.src) continue;
-      images.push(`url("${m.src}")`);
-      sizes.push(`${(r.width * 100).toFixed(3)}% ${(r.height * 100).toFixed(3)}%`);
-      positions.push(`${(r.x * 100).toFixed(3)}% ${(r.y * 100).toFixed(3)}%`);
-      repeats.push("no-repeat");
+      const url = buildMaskLayerSvgUrl(c, r, m, W, H);
+      if (!url) continue;
+      images.push(`url("${url}")`);
       modes.push(m.mode === "luminance" ? "luminance" : "alpha");
     }
     if (images.length === 0) return {};
+    const sizes = images.map(() => "100% 100%").join(", ");
+    const positions = images.map(() => "0% 0%").join(", ");
+    const repeats = images.map(() => "no-repeat").join(", ");
     return {
       WebkitMaskImage: images.join(", "),
       maskImage: images.join(", "),
-      WebkitMaskSize: sizes.join(", "),
-      maskSize: sizes.join(", "),
-      WebkitMaskPosition: positions.join(", "),
-      maskPosition: positions.join(", "),
-      WebkitMaskRepeat: repeats.join(", "),
-      maskRepeat: repeats.join(", "),
+      WebkitMaskSize: sizes,
+      maskSize: sizes,
+      WebkitMaskPosition: positions,
+      maskPosition: positions,
+      WebkitMaskRepeat: repeats,
+      maskRepeat: repeats,
       maskMode: modes.join(", ") as any,
     };
-  }, [maskLayerClips, state.keyframes, state.currentTime]);
+  }, [maskLayerClips, state.keyframes, state.currentTime, state.canvasWidth, state.canvasHeight]);
 
   const onCanvasMouseDown = (e: React.MouseEvent) => {
     if (e.target === containerRef.current) {
@@ -1432,6 +1495,15 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
           const r = resolveClip(clip, state.keyframes, state.currentTime);
           if (!r.visible) return null;
           const isSelected = state.selectedClipIds.includes(clip.id);
+          const m = clip.mask;
+          // Inner image fit corresponds to the user's mask fit choice. Scale
+          // and offset are baked into the wrapper so the preview overlay
+          // sits exactly where the actual mask cutout will be.
+          const innerScale = Math.max(0.05, m?.scale ?? 1);
+          const innerOffsetX = (m?.offsetX ?? 0) * 100;
+          const innerOffsetY = (m?.offsetY ?? 0) * 100;
+          const objectFit: React.CSSProperties["objectFit"] =
+            m?.fit === "stretch" ? "fill" : m?.fit === "cover" ? "cover" : "contain";
           return (
             <div
               key={clip.id}
@@ -1453,6 +1525,31 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
               }}
               onMouseDown={(e) => startDrag(e, clip, "move")}
             >
+              {/*
+                10% opacity preview of the mask shape — visible whether the
+                video is playing or paused so users can always see exactly
+                where the cutout sits while editing. Inverted color/alpha
+                are mirrored here so the preview matches the live cutout.
+              */}
+              {m?.src && (
+                <img
+                  src={m.src}
+                  alt=""
+                  draggable={false}
+                  className="absolute pointer-events-none select-none"
+                  style={{
+                    left: "50%",
+                    top: "50%",
+                    width: `${innerScale * 100}%`,
+                    height: `${innerScale * 100}%`,
+                    transform: `translate(calc(-50% + ${innerOffsetX}%), calc(-50% + ${innerOffsetY}%))`,
+                    objectFit,
+                    opacity: 0.1 * (m.opacity ?? 1),
+                    filter: m.invert ? "invert(1)" : undefined,
+                    mixBlendMode: "screen",
+                  }}
+                />
+              )}
               {!isSelected && (
                 <div className="absolute top-0.5 left-1 text-[10px] text-purple-200/80 pointer-events-none select-none">
                   Mask

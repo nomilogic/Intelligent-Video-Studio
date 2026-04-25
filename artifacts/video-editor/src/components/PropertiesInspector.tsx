@@ -171,69 +171,251 @@ function NumPair({
   );
 }
 
-// Built-in mask presets: each is a small SVG data URL with a white shape on
-// transparent background, well-suited for "alpha" mode out of the box. With
-// "luminance" mode the white shape produces full opacity and transparency
-// becomes black → also fully visible. So we provide both shape masks and
-// gradient masks.
-const MASK_PRESETS: Array<{ label: string; src: string; mode: ClipMask["mode"] }> = [
+// Built-in mask presets, organized by category. Each preset is a small SVG
+// data URL. "alpha" mode masks use white-on-transparent shapes (the alpha
+// channel drives visibility). "luminance" mode masks use grayscale (white =
+// fully visible, black = fully hidden, mid-grey = partial transparency) and
+// are the right choice for any gradient / feathered / blend mask.
+type MaskPreset = { label: string; src: string; mode: ClipMask["mode"]; group: string };
+
+// Helper to build a small SVG and wrap as a data: URL.
+const svg = (inner: string): string =>
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(
+    `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>${inner}</svg>`,
+  );
+
+// Reusable gradient defs (kept as fragments because each <defs> needs a
+// unique id within its own SVG document).
+const linGrad = (id: string, x1: number, y1: number, x2: number, y2: number, stops: string) =>
+  `<linearGradient id='${id}' x1='${x1}' y1='${y1}' x2='${x2}' y2='${y2}'>${stops}</linearGradient>`;
+const radGrad = (id: string, cx: number, cy: number, r: number, stops: string) =>
+  `<radialGradient id='${id}' cx='${cx}%' cy='${cy}%' r='${r}%'>${stops}</radialGradient>`;
+
+const MASK_PRESETS: MaskPreset[] = [
+  // ── Shapes (alpha) ─────────────────────────────────────────────────
   {
     label: "Circle",
     mode: "alpha",
-    src: "data:image/svg+xml;utf8," + encodeURIComponent(
-      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='white'/></svg>`,
-    ),
+    group: "Shapes",
+    src: svg(`<circle cx='50' cy='50' r='48' fill='white'/>`),
   },
   {
     label: "Rounded",
     mode: "alpha",
-    src: "data:image/svg+xml;utf8," + encodeURIComponent(
-      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='4' y='4' width='92' height='92' rx='18' fill='white'/></svg>`,
-    ),
+    group: "Shapes",
+    src: svg(`<rect x='4' y='4' width='92' height='92' rx='18' fill='white'/>`),
   },
   {
     label: "Heart",
     mode: "alpha",
-    src: "data:image/svg+xml;utf8," + encodeURIComponent(
-      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><path d='M50 88 L12 50 C-4 34 14 8 36 22 L50 36 L64 22 C86 8 104 34 88 50 Z' fill='white'/></svg>`,
+    group: "Shapes",
+    src: svg(
+      `<path d='M50 88 L12 50 C-4 34 14 8 36 22 L50 36 L64 22 C86 8 104 34 88 50 Z' fill='white'/>`,
     ),
   },
   {
     label: "Star",
     mode: "alpha",
-    src: "data:image/svg+xml;utf8," + encodeURIComponent(
-      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><polygon points='50,5 61,38 96,38 68,58 78,92 50,72 22,92 32,58 4,38 39,38' fill='white'/></svg>`,
+    group: "Shapes",
+    src: svg(
+      `<polygon points='50,5 61,38 96,38 68,58 78,92 50,72 22,92 32,58 4,38 39,38' fill='white'/>`,
     ),
   },
   {
+    label: "Diamond",
+    mode: "alpha",
+    group: "Shapes",
+    src: svg(`<polygon points='50,4 96,50 50,96 4,50' fill='white'/>`),
+  },
+  {
+    label: "Hexagon",
+    mode: "alpha",
+    group: "Shapes",
+    src: svg(`<polygon points='25,8 75,8 96,50 75,92 25,92 4,50' fill='white'/>`),
+  },
+
+  // ── Gradients (luminance, B/W) ─────────────────────────────────────
+  {
     label: "Fade ↓",
     mode: "luminance",
-    src: "data:image/svg+xml;utf8," + encodeURIComponent(
-      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0' x2='0' y1='0' y2='1'><stop offset='0' stop-color='white'/><stop offset='1' stop-color='black'/></linearGradient></defs><rect width='100' height='100' fill='url(%23g)'/></svg>`,
+    group: "Gradients",
+    src: svg(
+      `<defs>${linGrad("g", 0, 0, 0, 1, `<stop offset='0' stop-color='white'/><stop offset='1' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
+    ),
+  },
+  {
+    label: "Fade ↑",
+    mode: "luminance",
+    group: "Gradients",
+    src: svg(
+      `<defs>${linGrad("g", 0, 1, 0, 0, `<stop offset='0' stop-color='white'/><stop offset='1' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
     ),
   },
   {
     label: "Fade →",
     mode: "luminance",
-    src: "data:image/svg+xml;utf8," + encodeURIComponent(
-      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0' x2='1' y1='0' y2='0'><stop offset='0' stop-color='white'/><stop offset='1' stop-color='black'/></linearGradient></defs><rect width='100' height='100' fill='url(%23g)'/></svg>`,
+    group: "Gradients",
+    src: svg(
+      `<defs>${linGrad("g", 0, 0, 1, 0, `<stop offset='0' stop-color='white'/><stop offset='1' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
+    ),
+  },
+  {
+    label: "Fade ←",
+    mode: "luminance",
+    group: "Gradients",
+    src: svg(
+      `<defs>${linGrad("g", 1, 0, 0, 0, `<stop offset='0' stop-color='white'/><stop offset='1' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
+    ),
+  },
+  {
+    label: "Diag ↘",
+    mode: "luminance",
+    group: "Gradients",
+    src: svg(
+      `<defs>${linGrad("g", 0, 0, 1, 1, `<stop offset='0' stop-color='white'/><stop offset='1' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
+    ),
+  },
+  {
+    label: "Diag ↙",
+    mode: "luminance",
+    group: "Gradients",
+    src: svg(
+      `<defs>${linGrad("g", 1, 0, 0, 1, `<stop offset='0' stop-color='white'/><stop offset='1' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
+    ),
+  },
+  {
+    label: "Mid Grey",
+    mode: "luminance",
+    group: "Gradients",
+    src: svg(`<rect width='100' height='100' fill='#808080'/>`),
+  },
+  {
+    label: "Light Grey",
+    mode: "luminance",
+    group: "Gradients",
+    src: svg(`<rect width='100' height='100' fill='#bfbfbf'/>`),
+  },
+
+  // ── Feathered (luminance, soft edges) ──────────────────────────────
+  {
+    label: "Soft Circle",
+    mode: "luminance",
+    group: "Feathered",
+    src: svg(
+      `<defs>${radGrad("g", 50, 50, 50, `<stop offset='0.45' stop-color='white'/><stop offset='1' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
+    ),
+  },
+  {
+    label: "Soft Spot",
+    mode: "luminance",
+    group: "Feathered",
+    src: svg(
+      `<defs>${radGrad("g", 50, 50, 35, `<stop offset='0' stop-color='white'/><stop offset='0.7' stop-color='%23404040'/><stop offset='1' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
+    ),
+  },
+  {
+    label: "Soft Rect",
+    mode: "luminance",
+    group: "Feathered",
+    src: svg(
+      `<defs><filter id='b' x='-20%' y='-20%' width='140%' height='140%'><feGaussianBlur stdDeviation='8'/></filter></defs><rect width='100' height='100' fill='black'/><rect x='12' y='12' width='76' height='76' fill='white' filter='url(%23b)'/>`,
     ),
   },
   {
     label: "Radial",
     mode: "luminance",
-    src: "data:image/svg+xml;utf8," + encodeURIComponent(
-      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><radialGradient id='g' cx='50%' cy='50%' r='50%'><stop offset='0' stop-color='white'/><stop offset='1' stop-color='black'/></radialGradient></defs><rect width='100' height='100' fill='url(%23g)'/></svg>`,
+    group: "Feathered",
+    src: svg(
+      `<defs>${radGrad("g", 50, 50, 50, `<stop offset='0' stop-color='white'/><stop offset='1' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
     ),
   },
   {
     label: "Vignette",
     mode: "luminance",
-    src: "data:image/svg+xml;utf8," + encodeURIComponent(
-      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><radialGradient id='g' cx='50%' cy='50%' r='65%'><stop offset='0.55' stop-color='white'/><stop offset='1' stop-color='black'/></radialGradient></defs><rect width='100' height='100' fill='url(%23g)'/></svg>`,
+    group: "Feathered",
+    src: svg(
+      `<defs>${radGrad("g", 50, 50, 65, `<stop offset='0.55' stop-color='white'/><stop offset='1' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
+    ),
+  },
+  {
+    label: "Inv Vignette",
+    mode: "luminance",
+    group: "Feathered",
+    src: svg(
+      `<defs>${radGrad("g", 50, 50, 65, `<stop offset='0.45' stop-color='black'/><stop offset='1' stop-color='white'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
+    ),
+  },
+
+  // ── Half / Blend (luminance, half visible, soft transition) ────────
+  {
+    label: "Half ↑",
+    mode: "luminance",
+    group: "Half / Blend",
+    src: svg(
+      `<defs>${linGrad("g", 0, 0, 0, 1, `<stop offset='0.45' stop-color='white'/><stop offset='0.55' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
+    ),
+  },
+  {
+    label: "Half ↓",
+    mode: "luminance",
+    group: "Half / Blend",
+    src: svg(
+      `<defs>${linGrad("g", 0, 0, 0, 1, `<stop offset='0.45' stop-color='black'/><stop offset='0.55' stop-color='white'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
+    ),
+  },
+  {
+    label: "Half ←",
+    mode: "luminance",
+    group: "Half / Blend",
+    src: svg(
+      `<defs>${linGrad("g", 0, 0, 1, 0, `<stop offset='0.45' stop-color='white'/><stop offset='0.55' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
+    ),
+  },
+  {
+    label: "Half →",
+    mode: "luminance",
+    group: "Half / Blend",
+    src: svg(
+      `<defs>${linGrad("g", 0, 0, 1, 0, `<stop offset='0.45' stop-color='black'/><stop offset='0.55' stop-color='white'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
+    ),
+  },
+  {
+    label: "Soft Half ↓",
+    mode: "luminance",
+    group: "Half / Blend",
+    src: svg(
+      `<defs>${linGrad("g", 0, 0, 0, 1, `<stop offset='0.1' stop-color='black'/><stop offset='0.9' stop-color='white'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
+    ),
+  },
+  {
+    label: "Soft Half →",
+    mode: "luminance",
+    group: "Half / Blend",
+    src: svg(
+      `<defs>${linGrad("g", 0, 0, 1, 0, `<stop offset='0.1' stop-color='black'/><stop offset='0.9' stop-color='white'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
+    ),
+  },
+  {
+    label: "Center Band",
+    mode: "luminance",
+    group: "Half / Blend",
+    src: svg(
+      `<defs>${linGrad("g", 0, 0, 0, 1, `<stop offset='0' stop-color='black'/><stop offset='0.35' stop-color='white'/><stop offset='0.65' stop-color='white'/><stop offset='1' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
+    ),
+  },
+  {
+    label: "Edge Fade",
+    mode: "luminance",
+    group: "Half / Blend",
+    src: svg(
+      `<defs>${linGrad("g", 0, 0, 1, 0, `<stop offset='0' stop-color='black'/><stop offset='0.25' stop-color='white'/><stop offset='0.75' stop-color='white'/><stop offset='1' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(%23g)'/>`,
     ),
   },
 ];
+
+// Group order for rendering presets in the inspector.
+const MASK_GROUP_ORDER = ["Shapes", "Gradients", "Feathered", "Half / Blend"];
 
 const DEFAULT_MASK: ClipMask = {
   src: "",
@@ -280,26 +462,37 @@ function MaskSection({
       ) : undefined
     }>
       {!m ? (
-        <p className="text-[10px] text-muted-foreground">Pick a preset or upload an image. Black is hidden, white is visible.</p>
+        <p className="text-[10px] text-muted-foreground">Pick a preset or upload an image. Black is hidden, white is visible — grey gradients give partial transparency.</p>
       ) : null}
-      <div className="grid grid-cols-4 gap-1">
-        {MASK_PRESETS.map((p) => {
-          const active = m?.src === p.src;
-          return (
-            <button
-              key={p.label}
-              type="button"
-              onClick={() => setMask({ src: p.src, mode: p.mode })}
-              className={`group relative aspect-square rounded border ${active ? "border-primary" : "border-white/10 hover:border-white/30"} bg-black/40 overflow-hidden`}
-              title={p.label}
-              data-testid={`mask-preset-${p.label}`}
-            >
-              <img src={p.src} alt={p.label} className="w-full h-full object-contain pointer-events-none" />
-              <span className="absolute bottom-0 inset-x-0 text-[8px] leading-3 text-white/80 bg-black/50 text-center">{p.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      {MASK_GROUP_ORDER.map((group) => {
+        const items = MASK_PRESETS.filter((p) => p.group === group);
+        if (items.length === 0) return null;
+        return (
+          <div key={group} className="space-y-1">
+            <div className="text-[9px] uppercase tracking-wide text-muted-foreground/80">{group}</div>
+            <div className="grid grid-cols-4 gap-1">
+              {items.map((p) => {
+                const active = m?.src === p.src;
+                return (
+                  <button
+                    key={p.label}
+                    type="button"
+                    onClick={() => setMask({ src: p.src, mode: p.mode })}
+                    className={`group relative aspect-square rounded border ${active ? "border-primary" : "border-white/10 hover:border-white/30"} bg-black/40 overflow-hidden`}
+                    title={`${p.label} (${p.mode})`}
+                    data-testid={`mask-preset-${p.label}`}
+                  >
+                    <img src={p.src} alt={p.label} className="w-full h-full object-contain pointer-events-none" />
+                    <span className="absolute bottom-0 inset-x-0 text-[8px] leading-3 text-white/80 bg-black/50 text-center truncate">
+                      {p.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
       <label className="block">
         <span className="text-[10px] text-muted-foreground">Custom image</span>
         <input
