@@ -543,7 +543,7 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
                     title={`${r.label} (${r.w}×${r.h})`}
                   >
                     <div
-                      className={`border-[1.5px] rounded-[2px] ${active ? "border-foreground" : "border-muted-foreground"}`}
+                      className={`rounded-[2px] ${active ? "border-[1.5px] border-foreground" : "border-0"}`}
                       style={{ width: `${boxW}px`, height: `${boxH}px` }}
                     />
                     <span className="text-[10px] leading-none">{r.label}</span>
