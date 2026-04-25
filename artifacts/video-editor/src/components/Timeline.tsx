@@ -46,14 +46,37 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
   const [hoverTime, setHoverTime] = useState<number | null>(null);
 
   const PPS = BASE_PIXELS_PER_SECOND * state.zoom;
-  const timelineWidth = Math.max(state.duration * PPS, 600);
+
+  // The actual end of any video/clip content on the timeline. This is the
+  // "video duration" the user thinks of — the last frame any clip plays.
+  const contentEnd = useMemo(
+    () =>
+      state.clips.length > 0
+        ? Math.max(...state.clips.map((c) => c.startTime + c.duration))
+        : 0,
+    [state.clips],
+  );
+
+  // Visible/working area of the timeline. Always extends past the project
+  // duration so the user has room to drag a clip further right or to author
+  // animation keyframes after the last clip ends. Like CapCut/Premiere, more
+  // empty space is always available beyond the last frame.
+  const TAIL_PAD_SECONDS = 5;
+  const TAIL_PAD_RATIO = 0.25;
+  const projectEnd = Math.max(state.duration, contentEnd);
+  const displayDuration = Math.max(
+    projectEnd + Math.max(TAIL_PAD_SECONDS, projectEnd * TAIL_PAD_RATIO),
+    10,
+  );
+
+  const timelineWidth = Math.max(displayDuration * PPS, 600);
   const isBlade = state.tool === "blade";
 
   const handleRulerDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       const rect = e.currentTarget.getBoundingClientRect();
       const x = e.clientX - rect.left;
-      const t = Math.max(0, Math.min(state.duration, x / PPS));
+      const t = Math.max(0, Math.min(displayDuration, x / PPS));
       if (e.shiftKey) {
         dispatch({ type: "ADD_MARKER", payload: { time: t } });
         return;
@@ -61,18 +84,18 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
       dispatch({ type: "SET_TIME", payload: t });
       setDrag({ kind: "playhead", startX: e.clientX, origTime: t });
     },
-    [state.duration, dispatch, PPS],
+    [displayDuration, dispatch, PPS],
   );
 
   const snapPoints = useMemo(() => {
-    const pts: number[] = [0, state.currentTime, state.duration];
+    const pts: number[] = [0, state.currentTime, state.duration, contentEnd];
     state.clips.forEach((c) => {
       pts.push(c.startTime);
       pts.push(c.startTime + c.duration);
     });
     (state.markers || []).forEach((m) => pts.push(m.time));
     return pts;
-  }, [state.clips, state.currentTime, state.duration, state.markers]);
+  }, [state.clips, state.currentTime, state.duration, state.markers, contentEnd]);
 
   const trySnap = useCallback(
     (t: number, exclude?: string): number => {
@@ -157,7 +180,7 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
       if (drag.kind === "playhead") {
         const dx = ev.clientX - drag.startX;
         const dt = dx / PPS;
-        const t = Math.max(0, Math.min(state.duration, drag.origTime + dt));
+        const t = Math.max(0, Math.min(displayDuration, drag.origTime + dt));
         dispatch({ type: "SET_TIME", payload: t });
       } else if (drag.kind === "move") {
         const dx = ev.clientX - drag.startX;
@@ -234,7 +257,7 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [drag, dispatch, PPS, state.duration, state.tracks.length, state.clips, trySnap, resolveNoOverlap, trackSiblings]);
+  }, [drag, dispatch, PPS, displayDuration, state.tracks.length, state.clips, trySnap, resolveNoOverlap, trackSiblings]);
 
   const handleClipMouseDown = (e: React.MouseEvent, clip: Clip) => {
     e.stopPropagation();
@@ -290,7 +313,7 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
     });
   };
 
-  const totalSeconds = Math.ceil(state.duration);
+  const totalSeconds = Math.ceil(displayDuration);
   const majorEvery = state.zoom < 0.4 ? 30 : state.zoom < 0.8 ? 10 : state.zoom < 2 ? 5 : 1;
   const showFrames = state.zoom >= 4;
   const rulerMarks: number[] = [];
@@ -343,8 +366,11 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
           {formatTime(state.currentTime, true)}
         </span>
         <span className="text-xs text-muted-foreground">/</span>
-        <span className="text-xs tabular-nums font-mono text-muted-foreground">
-          {formatTime(state.duration)}
+        <span
+          className="text-xs tabular-nums font-mono text-muted-foreground"
+          title={`Video duration ${formatTime(contentEnd)} · Project duration ${formatTime(state.duration)}`}
+        >
+          {formatTime(contentEnd > 0 ? contentEnd : state.duration)}
         </span>
 
         <div className="w-px h-5 bg-border mx-2" />
@@ -560,6 +586,25 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
               onMouseDown={handleRulerDown}
               title="Click to scrub. Shift+click to add marker."
             >
+              {/* Video-range backdrop on the ruler — lighter shade across the
+                  zone where actual video plays (0..contentEnd). Lets the user
+                  visually distinguish the played portion from the empty
+                  overflow / animation tail. */}
+              {contentEnd > 0 && (
+                <div
+                  className="absolute top-0 bottom-0 left-0 bg-primary/10 pointer-events-none"
+                  style={{ width: contentEnd * PPS }}
+                />
+              )}
+              {/* Hard line at the end-of-video boundary so the user always
+                  knows where the last frame is. */}
+              {contentEnd > 0 && (
+                <div
+                  className="absolute top-0 bottom-0 w-px bg-primary/70 pointer-events-none z-[1]"
+                  style={{ left: contentEnd * PPS }}
+                  title={`End of video · ${formatTime(contentEnd)}`}
+                />
+              )}
               {rulerMarks.map((s) => {
                 const isMajor = s % majorEvery === 0;
                 return (
@@ -583,7 +628,7 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
 
               {/* Frame ticks when zoomed in */}
               {showFrames &&
-                Array.from({ length: Math.ceil(state.duration * FPS) }).map((_, idx) => {
+                Array.from({ length: Math.ceil(displayDuration * FPS) }).map((_, idx) => {
                   const t = idx / FPS;
                   if (idx % FPS === 0) return null;
                   return (
@@ -642,6 +687,37 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
 
             {/* Tracks */}
             <div className="relative" style={{ width: timelineWidth }}>
+              {/* Dual-shaded video-range backdrop spanning every track row.
+                  Lighter shade for 0..contentEnd marks where actual video
+                  plays; the area beyond contentEnd is left visually empty so
+                  the user can clearly see the timeline has been extended past
+                  the last frame for animation/keyframe authoring. */}
+              {contentEnd > 0 && (
+                <div
+                  className="absolute top-0 left-0 z-0 pointer-events-none bg-primary/[0.06] border-r border-primary/40"
+                  style={{
+                    width: contentEnd * PPS,
+                    height: state.tracks.length * TRACK_HEIGHT,
+                  }}
+                  title={`Video duration · ${formatTime(contentEnd)}`}
+                />
+              )}
+              {/* Diagonal-stripe overlay for the post-video zone — makes it
+                  obvious that this region is empty space beyond the last
+                  frame, available for animation tail-time. */}
+              {contentEnd > 0 && contentEnd < displayDuration && (
+                <div
+                  className="absolute top-0 z-0 pointer-events-none"
+                  style={{
+                    left: contentEnd * PPS,
+                    width: (displayDuration - contentEnd) * PPS,
+                    height: state.tracks.length * TRACK_HEIGHT,
+                    backgroundImage:
+                      "repeating-linear-gradient(135deg, rgba(148,163,184,0.05) 0 6px, transparent 6px 12px)",
+                  }}
+                />
+              )}
+
               {/* Marker lines extend through tracks */}
               {(state.markers || []).map((m) => (
                 <div

@@ -34,6 +34,17 @@ function Editor() {
   durationRef.current = state.duration;
   playbackEndRef.current = playbackEnd;
 
+  // Auto-grow project duration so it always covers the last clip on the
+  // timeline — like a normal NLE. Users can still extend it further by hand
+  // via the Properties Inspector for adding pure-animation tail time.
+  useEffect(() => {
+    if (state.clips.length === 0) return;
+    const contentEnd = Math.max(...state.clips.map((c) => c.startTime + c.duration));
+    if (contentEnd > state.duration + 0.001) {
+      dispatch({ type: "SET_DURATION", payload: contentEnd });
+    }
+  }, [state.clips, state.duration]);
+
   // Playback loop using rAF for smoother updates.
   //
   // Performance: dispatching SET_TIME on every frame (60Hz) re-renders the
