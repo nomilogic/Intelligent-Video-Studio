@@ -1526,12 +1526,13 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
               onMouseDown={(e) => startDrag(e, clip, "move")}
             >
               {/*
-                10% opacity preview of the mask shape — visible whether the
-                video is playing or paused so users can always see exactly
-                where the cutout sits while editing. Inverted color/alpha
-                are mirrored here so the preview matches the live cutout.
+                10% opacity preview of the mask shape — only shown while the
+                video is paused so editors can see exactly where the cutout
+                sits. Hidden during playback so the viewer just sees the
+                clean masked composite. Inverted color/alpha are mirrored
+                here so the preview matches the live cutout.
               */}
-              {m?.src && (
+              {m?.src && !state.isPlaying && (
                 <img
                   src={m.src}
                   alt=""
