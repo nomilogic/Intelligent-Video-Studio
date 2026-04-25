@@ -510,12 +510,28 @@ function TextEditor({
     ? `${ts.fontSize / 10}cqw`
     : `calc(var(--canvas-w, 100cqw) * ${ts.fontSize / 1000})`;
 
+  // Auto-grow the textarea to match its content so the surrounding flex
+  // container can keep it visually centered (matching the rendered text
+  // exactly). Without this, a fixed `height: 100%` textarea would top-align
+  // the caret and cause the text to "jump" upward when editing begins.
+  const autosize = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+  }, []);
+
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.focus();
     el.select();
-  }, []);
+    autosize();
+  }, [autosize]);
+
+  useEffect(() => {
+    autosize();
+  }, [value, autosize]);
 
   return (
     <div
@@ -544,7 +560,8 @@ function TextEditor({
           }
         }}
         spellCheck={false}
-        className="bg-transparent border-none outline-none resize-none p-0 m-0 w-full"
+        rows={1}
+        className="bg-transparent border-none outline-none resize-none p-0 m-0 w-full block"
         style={{
           fontFamily: ts.fontFamily,
           fontSize: fontSizeStyle,
@@ -555,9 +572,10 @@ function TextEditor({
           textDecoration: ts.underline ? "underline" : "none",
           textShadow: ts.shadow ? "0 2px 12px rgba(0,0,0,0.6), 0 0 4px rgba(0,0,0,0.4)" : "none",
           lineHeight: 1.1,
-          height: "100%",
           caretColor: ts.color,
           overflow: "hidden",
+          height: "auto",
+          minHeight: 0,
         }}
         data-testid={`canvas-text-editor-${clip.id}`}
       />
