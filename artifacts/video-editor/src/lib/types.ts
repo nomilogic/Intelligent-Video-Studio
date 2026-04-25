@@ -62,6 +62,7 @@ export interface Clip {
   flipV: boolean;
   blendMode: string;
   borderRadius: number;
+  preserveRatio: boolean;
   cropX: number;
   cropY: number;
   cropWidth: number;

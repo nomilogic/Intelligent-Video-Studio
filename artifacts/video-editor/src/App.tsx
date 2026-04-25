@@ -21,6 +21,7 @@ function Editor() {
   const currentTimeRef = useRef(state.currentTime);
   const durationRef = useRef(state.duration);
   const [canvasZoom, setCanvasZoom] = useState(1);
+  const [isCropping, setIsCropping] = useState(false);
 
   // Effective playback end = the last frame of the last clip in the timeline.
   // Falls back to state.duration when there are no clips.
@@ -143,7 +144,14 @@ function Editor() {
         e.preventDefault();
         setCanvasZoom(1);
       } else if (e.key === "Escape") {
-        dispatchTyped({ type: "SELECT_CLIP", payload: null });
+        if (isCropping) setIsCropping(false);
+        else dispatchTyped({ type: "SELECT_CLIP", payload: null });
+      } else if (e.key.toLowerCase() === "c" && !meta && state.selectedClipIds.length) {
+        const sel = state.clips.find((c) => state.selectedClipIds.includes(c.id));
+        if (sel && (sel.mediaType === "video" || sel.mediaType === "image")) {
+          e.preventDefault();
+          setIsCropping((v) => !v);
+        }
       }
     };
     window.addEventListener("keydown", handler);
@@ -166,7 +174,7 @@ function Editor() {
 
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-hidden bg-neutral-600">
-            <Canvas state={state} dispatch={dispatchTyped} canvasZoom={canvasZoom} onCanvasZoomChange={setCanvasZoom} />
+            <Canvas state={state} dispatch={dispatchTyped} canvasZoom={canvasZoom} onCanvasZoomChange={setCanvasZoom} isCropping={isCropping} onCroppingChange={setIsCropping} />
           </div>
 
           <div className="flex flex-col border-t border-border bg-card" style={{ height: 320 }}>
@@ -175,7 +183,7 @@ function Editor() {
           </div>
         </div>
 
-        <PropertiesInspector state={state} dispatch={dispatchTyped} />
+        <PropertiesInspector state={state} dispatch={dispatchTyped} isCropping={isCropping} onCroppingChange={setIsCropping} />
       </div>
     </div>
   );

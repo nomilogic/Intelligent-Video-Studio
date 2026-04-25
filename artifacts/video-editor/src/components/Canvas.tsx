@@ -8,12 +8,16 @@ interface CanvasProps {
   dispatch: React.Dispatch<EditorAction>;
   canvasZoom: number;
   onCanvasZoomChange: (z: number) => void;
+  isCropping: boolean;
+  onCroppingChange: (v: boolean) => void;
 }
 
 type DragMode =
   | { kind: "move"; clipId: string; startX: number; startY: number; origX: number; origY: number }
   | { kind: "resize"; clipId: string; handle: string; startX: number; startY: number; origX: number; origY: number; origW: number; origH: number }
-  | { kind: "rotate"; clipId: string; centerX: number; centerY: number; startAngle: number; origRotation: number };
+  | { kind: "rotate"; clipId: string; centerX: number; centerY: number; startAngle: number; origRotation: number }
+  | { kind: "cropMove"; clipId: string; startX: number; startY: number; origCx: number; origCy: number }
+  | { kind: "cropResize"; clipId: string; handle: string; startX: number; startY: number; origCx: number; origCy: number; origCw: number; origCh: number };
 
 function cropStyle(clip: Clip): React.CSSProperties {
   const cw = clip.cropWidth ?? 1;
@@ -36,7 +40,7 @@ function flipTransform(clip: Clip): string {
   return `scaleX(${clip.flipH ? -1 : 1}) scaleY(${clip.flipV ? -1 : 1})`;
 }
 
-function MediaContentBase({ clip, videoTime, isPlaying }: { clip: Clip; videoTime: number; isPlaying: boolean }) {
+function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false }: { clip: Clip; videoTime: number; isPlaying: boolean; showFullSource?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
@@ -97,10 +101,12 @@ function MediaContentBase({ clip, videoTime, isPlaying }: { clip: Clip; videoTim
   }, [isPlaying, clip.muted, clip.volume, clip.speed]);
 
   const hasCrop =
-    (clip.cropWidth ?? 1) !== 1 ||
-    (clip.cropHeight ?? 1) !== 1 ||
-    (clip.cropX ?? 0) !== 0 ||
-    (clip.cropY ?? 0) !== 0;
+    !showFullSource && (
+      (clip.cropWidth ?? 1) !== 1 ||
+      (clip.cropHeight ?? 1) !== 1 ||
+      (clip.cropX ?? 0) !== 0 ||
+      (clip.cropY ?? 0) !== 0
+    );
 
   if (clip.mediaType === "video" && clip.src) {
     return (
@@ -198,6 +204,7 @@ function MediaContentBase({ clip, videoTime, isPlaying }: { clip: Clip; videoTim
 const MediaContent = memo(MediaContentBase, (prev, next) => {
   if (prev.clip !== next.clip) return false;
   if (prev.isPlaying !== next.isPlaying) return false;
+  if (prev.showFullSource !== next.showFullSource) return false;
   // While playing, the browser advances the video natively — skip re-renders
   // triggered solely by changes in `videoTime`.
   if (next.isPlaying) return true;
@@ -206,7 +213,7 @@ const MediaContent = memo(MediaContentBase, (prev, next) => {
   return Math.abs(prev.videoTime - next.videoTime) < 0.001;
 });
 
-export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange }: CanvasProps) {
+export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange, isCropping, onCroppingChange }: CanvasProps) {
   const outerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragMode | null>(null);
@@ -259,7 +266,7 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
   };
 
   const startDrag = useCallback(
-    (e: React.MouseEvent, clip: Clip, mode: "move" | string) => {
+    (e: React.MouseEvent, clip: Clip, mode: "move" | "rotate" | "cropMove" | string) => {
       e.stopPropagation();
       e.preventDefault();
       if (clip.locked) return;
@@ -289,6 +296,27 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
           centerY: cy,
           startAngle,
           origRotation: clip.rotation,
+        });
+      } else if (mode === "cropMove") {
+        setDrag({
+          kind: "cropMove",
+          clipId: clip.id,
+          startX: e.clientX,
+          startY: e.clientY,
+          origCx: clip.cropX,
+          origCy: clip.cropY,
+        });
+      } else if (mode.startsWith("crop:")) {
+        setDrag({
+          kind: "cropResize",
+          clipId: clip.id,
+          handle: mode.slice(5),
+          startX: e.clientX,
+          startY: e.clientY,
+          origCx: clip.cropX,
+          origCy: clip.cropY,
+          origCw: clip.cropWidth,
+          origCh: clip.cropHeight,
         });
       } else {
         setDrag({
@@ -363,24 +391,135 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
         setSnapGuides(guides);
         dispatchAnimatable(drag.clipId, { x: nx, y: ny });
       } else if (drag.kind === "resize") {
+        // Anchor-based resize: the opposite edge/corner stays fixed in canvas
+        // space. Without this, ratio-locked drags drift the position because
+        // height was being recomputed AFTER y was set.
+        const handle = drag.handle;
         const dx = (ev.clientX - drag.startX) / rect.width;
         const dy = (ev.clientY - drag.startY) / rect.height;
-        let { origX: nx, origY: ny, origW: nw, origH: nh } = drag;
-        if (drag.handle.includes("e")) nw = Math.max(0.02, drag.origW + dx);
-        if (drag.handle.includes("w")) {
-          nw = Math.max(0.02, drag.origW - dx);
-          nx = drag.origX + (drag.origW - nw);
+
+        const clip = state.clips.find((c) => c.id === drag.clipId);
+        if (!clip) return;
+        const lockRatio = ev.shiftKey || clip.preserveRatio;
+        const fromCenter = ev.altKey;
+        const ratio = drag.origW / drag.origH;
+        const factor = fromCenter ? 2 : 1;
+
+        // Compute new size from the dragged handle. Edge handles affect one
+        // axis; corner handles affect both. Alt = scale-from-center doubles
+        // the delta so both sides grow.
+        let nw = drag.origW;
+        let nh = drag.origH;
+        if (handle.includes("e")) nw = Math.max(0.02, drag.origW + dx * factor);
+        if (handle.includes("w")) nw = Math.max(0.02, drag.origW - dx * factor);
+        if (handle.includes("s")) nh = Math.max(0.02, drag.origH + dy * factor);
+        if (handle.includes("n")) nh = Math.max(0.02, drag.origH - dy * factor);
+
+        if (lockRatio) {
+          const isCorner = handle.length === 2;
+          if (isCorner) {
+            // Pick the axis that grew the most relative to its original.
+            const wScale = nw / drag.origW;
+            const hScale = nh / drag.origH;
+            if (Math.abs(wScale - 1) >= Math.abs(hScale - 1)) {
+              nh = nw / ratio;
+            } else {
+              nw = nh * ratio;
+            }
+          } else if (handle === "e" || handle === "w") {
+            nh = nw / ratio;
+          } else {
+            nw = nh * ratio;
+          }
+          if (nw < 0.02) { nw = 0.02; nh = nw / ratio; }
+          if (nh < 0.02) { nh = 0.02; nw = nh * ratio; }
         }
-        if (drag.handle.includes("s")) nh = Math.max(0.02, drag.origH + dy);
-        if (drag.handle.includes("n")) {
-          nh = Math.max(0.02, drag.origH - dy);
-          ny = drag.origY + (drag.origH - nh);
+
+        // Anchor point — the part of the original rect that should stay put.
+        // For Alt, anchor = original center (so size grows symmetrically).
+        let anchorX: number;
+        let anchorY: number;
+        if (fromCenter) {
+          anchorX = drag.origX + drag.origW / 2;
+          anchorY = drag.origY + drag.origH / 2;
+        } else {
+          anchorX = handle.includes("w")
+            ? drag.origX + drag.origW
+            : handle.includes("e")
+              ? drag.origX
+              : drag.origX + drag.origW / 2;
+          anchorY = handle.includes("n")
+            ? drag.origY + drag.origH
+            : handle.includes("s")
+              ? drag.origY
+              : drag.origY + drag.origH / 2;
         }
-        if (ev.shiftKey) {
-          const ratio = drag.origW / drag.origH;
-          nh = nw / ratio;
+
+        // Derive new position so the anchor stays fixed.
+        let nx: number;
+        let ny: number;
+        if (fromCenter) {
+          nx = anchorX - nw / 2;
+          ny = anchorY - nh / 2;
+        } else {
+          nx = handle.includes("w")
+            ? anchorX - nw
+            : handle.includes("e")
+              ? anchorX
+              : anchorX - nw / 2;
+          ny = handle.includes("n")
+            ? anchorY - nh
+            : handle.includes("s")
+              ? anchorY
+              : anchorY - nh / 2;
         }
+
         dispatchAnimatable(drag.clipId, { x: nx, y: ny, width: nw, height: nh });
+      } else if (drag.kind === "cropMove") {
+        const clip = state.clips.find((c) => c.id === drag.clipId);
+        if (!clip) return;
+        const w = Math.max(0.001, clip.width);
+        const h = Math.max(0.001, clip.height);
+        // The cropped region is shown stretched to fill the clip box, so 1
+        // unit of canvas drag ≈ 1/clipWidth source units.
+        const dCx = ((ev.clientX - drag.startX) / rect.width) / w * clip.cropWidth;
+        const dCy = ((ev.clientY - drag.startY) / rect.height) / h * clip.cropHeight;
+        const nCx = Math.min(1 - clip.cropWidth, Math.max(0, drag.origCx + dCx));
+        const nCy = Math.min(1 - clip.cropHeight, Math.max(0, drag.origCy + dCy));
+        dispatch({ type: "UPDATE_CLIP", payload: { id: drag.clipId, updates: { cropX: nCx, cropY: nCy } } });
+      } else if (drag.kind === "cropResize") {
+        const clip = state.clips.find((c) => c.id === drag.clipId);
+        if (!clip) return;
+        const handle = drag.handle;
+        // The crop overlay is drawn in box space: 1 box-fraction = 1 source
+        // fraction (because the box renders the full source while in crop
+        // mode). So we convert mouse delta to box-fraction directly.
+        const dx = (ev.clientX - drag.startX) / rect.width / Math.max(0.001, clip.width);
+        const dy = (ev.clientY - drag.startY) / rect.height / Math.max(0.001, clip.height);
+
+        let cx = drag.origCx;
+        let cy = drag.origCy;
+        let cw = drag.origCw;
+        let ch = drag.origCh;
+        if (handle.includes("e")) cw = Math.max(0.05, Math.min(1 - cx, drag.origCw + dx));
+        if (handle.includes("w")) {
+          const nw2 = Math.max(0.05, Math.min(drag.origCx + drag.origCw, drag.origCw - dx));
+          cx = drag.origCx + (drag.origCw - nw2);
+          cw = nw2;
+        }
+        if (handle.includes("s")) ch = Math.max(0.05, Math.min(1 - cy, drag.origCh + dy));
+        if (handle.includes("n")) {
+          const nh2 = Math.max(0.05, Math.min(drag.origCy + drag.origCh, drag.origCh - dy));
+          cy = drag.origCy + (drag.origCh - nh2);
+          ch = nh2;
+        }
+        // Clamp into [0,1] just in case.
+        cx = Math.max(0, Math.min(1 - cw, cx));
+        cy = Math.max(0, Math.min(1 - ch, cy));
+        dispatch({
+          type: "UPDATE_CLIP",
+          payload: { id: drag.clipId, updates: { cropX: cx, cropY: cy, cropWidth: cw, cropHeight: ch } },
+        });
       } else if (drag.kind === "rotate") {
         const angle = (Math.atan2(ev.clientY - drag.centerY, ev.clientX - drag.centerX) * 180) / Math.PI;
         const delta = angle - drag.startAngle;
@@ -450,6 +589,7 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
 
         {visibleClips.map((clip) => {
           const isSelected = state.selectedClipIds.includes(clip.id);
+          const cropThis = isCropping && isSelected && (clip.mediaType === "video" || clip.mediaType === "image");
           const r = resolveClip(clip, state.keyframes, state.currentTime);
           if (!r.visible) return null;
           return (
@@ -458,8 +598,8 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
               data-testid={`canvas-clip-${clip.id}`}
               className={cn(
                 "absolute overflow-hidden",
-                clip.locked ? "cursor-not-allowed" : "cursor-grab active:cursor-grabbing",
-                isSelected && "outline outline-2 outline-primary outline-offset-0",
+                clip.locked ? "cursor-not-allowed" : cropThis ? "cursor-default" : "cursor-grab active:cursor-grabbing",
+                isSelected && !cropThis && "outline outline-2 outline-primary outline-offset-0",
               )}
               style={{
                 left: `${r.x * 100}%`,
@@ -470,19 +610,19 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
                 transform: `translate(${r.translateX}%, ${r.translateY}%) rotate(${r.rotation}deg) scale(${r.scale})`,
                 mixBlendMode: clip.blendMode as any,
                 filter: r.filterCss,
-                borderRadius: `${clip.borderRadius}px`,
+                borderRadius: cropThis ? 0 : `${clip.borderRadius}px`,
                 transformOrigin: "center",
                 containerType: "size",
               }}
-              onMouseDown={(e) => startDrag(e, clip, "move")}
+              onMouseDown={cropThis ? undefined : (e) => startDrag(e, clip, "move")}
             >
-              <MediaContent clip={clip} videoTime={r.videoTime} isPlaying={state.isPlaying} />
+              <MediaContent clip={clip} videoTime={r.videoTime} isPlaying={state.isPlaying} showFullSource={cropThis} />
             </div>
           );
         })}
 
         {/* Selection overlay (drawn outside clip transform so handles aren't rotated) */}
-        {selectedClip && (() => {
+        {selectedClip && !isCropping && (() => {
           const r = resolveClip(selectedClip, state.keyframes, state.currentTime);
           if (!r.visible) return null;
           return (
@@ -534,6 +674,101 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
             </div>
           );
         })()}
+
+        {/* Crop overlay (only when cropping a video/image clip) */}
+        {selectedClip && isCropping && (selectedClip.mediaType === "video" || selectedClip.mediaType === "image") && (() => {
+          const r = resolveClip(selectedClip, state.keyframes, state.currentTime);
+          if (!r.visible) return null;
+          const cx = selectedClip.cropX;
+          const cy = selectedClip.cropY;
+          const cw = selectedClip.cropWidth;
+          const ch = selectedClip.cropHeight;
+          return (
+            <div
+              className="absolute"
+              style={{
+                left: `${r.x * 100}%`,
+                top: `${r.y * 100}%`,
+                width: `${r.width * 100}%`,
+                height: `${r.height * 100}%`,
+                transform: `translate(${r.translateX}%, ${r.translateY}%) rotate(${r.rotation}deg) scale(${r.scale})`,
+                transformOrigin: "center",
+              }}
+            >
+              {/* Dimmed regions outside the crop rectangle */}
+              <div
+                className="absolute bg-black/60 pointer-events-none"
+                style={{ left: 0, top: 0, right: 0, height: `${cy * 100}%` }}
+              />
+              <div
+                className="absolute bg-black/60 pointer-events-none"
+                style={{ left: 0, top: `${(cy + ch) * 100}%`, right: 0, bottom: 0 }}
+              />
+              <div
+                className="absolute bg-black/60 pointer-events-none"
+                style={{ left: 0, top: `${cy * 100}%`, width: `${cx * 100}%`, height: `${ch * 100}%` }}
+              />
+              <div
+                className="absolute bg-black/60 pointer-events-none"
+                style={{ left: `${(cx + cw) * 100}%`, top: `${cy * 100}%`, right: 0, height: `${ch * 100}%` }}
+              />
+
+              {/* Crop rectangle frame + pan area + handles */}
+              <div
+                className="absolute ring-2 ring-amber-400 cursor-move"
+                style={{
+                  left: `${cx * 100}%`,
+                  top: `${cy * 100}%`,
+                  width: `${cw * 100}%`,
+                  height: `${ch * 100}%`,
+                }}
+                onMouseDown={(e) => startDrag(e, selectedClip, "cropMove")}
+              >
+                {/* Rule-of-thirds grid */}
+                <div className="absolute inset-0 pointer-events-none" style={{
+                  backgroundImage: "linear-gradient(rgba(255,255,255,0.35) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.35) 1px, transparent 1px)",
+                  backgroundSize: "33.333% 33.333%",
+                  backgroundPosition: "33.333% 33.333%",
+                }} />
+                {handles.map((h) => {
+                  const styles: Record<string, React.CSSProperties> = {
+                    nw: { top: -6, left: -6, cursor: "nwse-resize" },
+                    n:  { top: -6, left: "calc(50% - 6px)", cursor: "ns-resize" },
+                    ne: { top: -6, right: -6, cursor: "nesw-resize" },
+                    e:  { top: "calc(50% - 6px)", right: -6, cursor: "ew-resize" },
+                    se: { bottom: -6, right: -6, cursor: "nwse-resize" },
+                    s:  { bottom: -6, left: "calc(50% - 6px)", cursor: "ns-resize" },
+                    sw: { bottom: -6, left: -6, cursor: "nesw-resize" },
+                    w:  { top: "calc(50% - 6px)", left: -6, cursor: "ew-resize" },
+                  };
+                  return (
+                    <div
+                      key={h}
+                      className="absolute w-3 h-3 bg-amber-400 border-2 border-background rounded-sm"
+                      style={styles[h]}
+                      onMouseDown={(e) => startDrag(e, selectedClip, `crop:${h}`)}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Crop mode toolbar */}
+        {selectedClip && isCropping && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-2 py-1.5 rounded-md bg-black/80 border border-white/10 backdrop-blur-sm shadow-lg z-10 pointer-events-auto">
+            <span className="text-amber-400 text-[11px] font-medium px-1">Crop Mode</span>
+            <button
+              className="text-[11px] text-white/80 hover:text-white px-2 py-0.5 rounded hover:bg-white/10"
+              onClick={() => dispatch({ type: "UPDATE_CLIP", payload: { id: selectedClip.id, updates: { cropX: 0, cropY: 0, cropWidth: 1, cropHeight: 1 } } })}
+            >Reset</button>
+            <button
+              className="text-[11px] text-white bg-amber-500 hover:bg-amber-400 px-2 py-0.5 rounded font-medium"
+              onClick={() => onCroppingChange(false)}
+            >Done (Esc)</button>
+          </div>
+        )}
 
         {/* Snap guides */}
         {snapGuides.x !== undefined && (

@@ -73,6 +73,7 @@ export function makeClip(partial: Partial<Clip> & { id?: string }): Clip {
     flipV: partial.flipV ?? false,
     blendMode: partial.blendMode ?? "normal",
     borderRadius: partial.borderRadius ?? 0,
+    preserveRatio: partial.preserveRatio ?? false,
     cropX: partial.cropX ?? 0,
     cropY: partial.cropY ?? 0,
     cropWidth: partial.cropWidth ?? 1,

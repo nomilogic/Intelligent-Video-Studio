@@ -8,7 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   Trash2, Diamond, Copy, FlipHorizontal2, FlipVertical2, Eye, EyeOff,
   Lock, Unlock, RotateCcw, Volume2, VolumeX, Wand2, Scissors, Crop,
-  Activity, Minus,
+  Activity, Minus, Link2, Link2Off,
 } from "lucide-react";
 import { useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -17,6 +17,8 @@ import { resolveClip, interpolateKeyframes } from "../lib/animation";
 interface PropertiesInspectorProps {
   state: EditorState;
   dispatch: React.Dispatch<EditorAction>;
+  isCropping?: boolean;
+  onCroppingChange?: (v: boolean) => void;
 }
 
 const ANIMATIONS = [
@@ -185,7 +187,7 @@ const FILTER_PROPS = new Set([
   "brightness", "contrast", "saturation", "hue", "blur", "grayscale", "sepia", "invert",
 ]);
 
-export default function PropertiesInspector({ state, dispatch }: PropertiesInspectorProps) {
+export default function PropertiesInspector({ state, dispatch, isCropping = false, onCroppingChange }: PropertiesInspectorProps) {
   const clip = state.clips.find((c) => state.selectedClipIds.includes(c.id));
   const [activeTab, setActiveTab] = useState<string>("basic");
 
@@ -489,14 +491,48 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
               <Separator />
 
               <Section title="Transform" action={
-                <Button variant="ghost" size="icon" className="w-5 h-5" onClick={() => update({ x: 0, y: 0, width: 1, height: 1, rotation: 0, scale: 1 })} title="Reset transform">
-                  <RotateCcw className="w-3 h-3" />
-                </Button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => update({ preserveRatio: !clip.preserveRatio })}
+                    title={clip.preserveRatio ? "Aspect ratio is locked — drag handles preserve W:H. Click to unlock." : "Lock aspect ratio so resize keeps W:H. Hold Shift while dragging for one-off lock."}
+                    className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                      clip.preserveRatio
+                        ? "bg-amber-400/20 border-amber-400/60 text-amber-300"
+                        : "border-border/50 text-muted-foreground hover:text-foreground hover:border-border"
+                    }`}
+                  >
+                    {clip.preserveRatio ? <Link2 className="w-3 h-3" /> : <Link2Off className="w-3 h-3" />}
+                    Ratio
+                  </button>
+                  <Button variant="ghost" size="icon" className="w-5 h-5" onClick={() => update({ x: 0, y: 0, width: 1, height: 1, rotation: 0, scale: 1 })} title="Reset transform">
+                    <RotateCcw className="w-3 h-3" />
+                  </Button>
+                </div>
               }>
                 <NumPair label="X" value={liveVal("x", clip.x)} min={-1} max={2} step={0.01} onChange={(v) => updateAnimatable("x", v)} onKeyframe={() => addKeyframe("x")} hasKeyframe={hasKf("x")} isAtKeyframe={isAtKf("x")} tweened={isTweened("x")} onToggleTween={() => toggleTween("x")} />
                 <NumPair label="Y" value={liveVal("y", clip.y)} min={-1} max={2} step={0.01} onChange={(v) => updateAnimatable("y", v)} onKeyframe={() => addKeyframe("y")} hasKeyframe={hasKf("y")} isAtKeyframe={isAtKf("y")} tweened={isTweened("y")} onToggleTween={() => toggleTween("y")} />
-                <NumPair label="W" value={liveVal("width", clip.width)} min={0.01} max={2} step={0.01} onChange={(v) => updateAnimatable("width", v)} onKeyframe={() => addKeyframe("width")} hasKeyframe={hasKf("width")} isAtKeyframe={isAtKf("width")} tweened={isTweened("width")} onToggleTween={() => toggleTween("width")} />
-                <NumPair label="H" value={liveVal("height", clip.height)} min={0.01} max={2} step={0.01} onChange={(v) => updateAnimatable("height", v)} onKeyframe={() => addKeyframe("height")} hasKeyframe={hasKf("height")} isAtKeyframe={isAtKf("height")} tweened={isTweened("height")} onToggleTween={() => toggleTween("height")} />
+                <NumPair label="W" value={liveVal("width", clip.width)} min={0.01} max={2} step={0.01} onChange={(v) => {
+                  if (clip.preserveRatio) {
+                    const ratio = clip.width / Math.max(0.001, clip.height);
+                    const cx = clip.x + clip.width / 2;
+                    const cy = clip.y + clip.height / 2;
+                    const nh = v / ratio;
+                    update({ width: v, height: nh, x: cx - v / 2, y: cy - nh / 2 });
+                  } else {
+                    updateAnimatable("width", v);
+                  }
+                }} onKeyframe={() => addKeyframe("width")} hasKeyframe={hasKf("width")} isAtKeyframe={isAtKf("width")} tweened={isTweened("width")} onToggleTween={() => toggleTween("width")} />
+                <NumPair label="H" value={liveVal("height", clip.height)} min={0.01} max={2} step={0.01} onChange={(v) => {
+                  if (clip.preserveRatio) {
+                    const ratio = clip.width / Math.max(0.001, clip.height);
+                    const cx = clip.x + clip.width / 2;
+                    const cy = clip.y + clip.height / 2;
+                    const nw = v * ratio;
+                    update({ width: nw, height: v, x: cx - nw / 2, y: cy - v / 2 });
+                  } else {
+                    updateAnimatable("height", v);
+                  }
+                }} onKeyframe={() => addKeyframe("height")} hasKeyframe={hasKf("height")} isAtKeyframe={isAtKf("height")} tweened={isTweened("height")} onToggleTween={() => toggleTween("height")} />
 
                 <NumPair label="Rotation" value={liveVal("rotation", clip.rotation)} min={-180} max={180} step={1} suffix="°" onChange={(v) => updateAnimatable("rotation", v)} onKeyframe={() => addKeyframe("rotation")} hasKeyframe={hasKf("rotation")} isAtKeyframe={isAtKf("rotation")} tweened={isTweened("rotation")} onToggleTween={() => toggleTween("rotation")} />
                 <NumPair label="Scale" value={liveVal("scale", clip.scale)} min={0.1} max={3} step={0.05} suffix="x" onChange={(v) => updateAnimatable("scale", v)} onKeyframe={() => addKeyframe("scale")} hasKeyframe={hasKf("scale")} isAtKeyframe={isAtKf("scale")} tweened={isTweened("scale")} onToggleTween={() => toggleTween("scale")} />
@@ -626,6 +662,18 @@ export default function PropertiesInspector({ state, dispatch }: PropertiesInspe
                   <RotateCcw className="w-3 h-3" />
                 </Button>
               }>
+                {(clip.mediaType === "video" || clip.mediaType === "image") && onCroppingChange && (
+                  <Button
+                    variant={isCropping ? "secondary" : "outline"}
+                    size="sm"
+                    className={`h-7 w-full text-xs ${isCropping ? "bg-amber-500/30 hover:bg-amber-500/40 text-amber-100 border-amber-400/60" : ""}`}
+                    onClick={() => onCroppingChange(!isCropping)}
+                    title="Toggle on-canvas crop tool (C)"
+                  >
+                    <Crop className="w-3 h-3 mr-1.5" />
+                    {isCropping ? "Exit Crop Mode" : "Crop on Canvas"}
+                  </Button>
+                )}
                 <p className="text-[10px] text-muted-foreground flex items-center gap-1"><Crop className="w-3 h-3" /> Zoom into a region (0–1 fractions of source).</p>
                 <NumPair label="Crop X" value={clip.cropX} min={0} max={0.95} step={0.01} onChange={(v) => update({ cropX: Math.min(v, 1 - clip.cropWidth) })} />
                 <NumPair label="Crop Y" value={clip.cropY} min={0} max={0.95} step={0.01} onChange={(v) => update({ cropY: Math.min(v, 1 - clip.cropHeight) })} />
