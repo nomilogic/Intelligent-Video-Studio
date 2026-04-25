@@ -1,4 +1,10 @@
-import { EditorState, EditorAction, Clip, ClipMask, DEFAULT_FILTERS, EasingType, Effect, EffectType, TransitionType, FONT_OPTIONS, type TextStyle, type TextGradient, type TextStroke, type TextGlow, type TextShadow, type TextBackground } from "../lib/types";
+import { EditorState, EditorAction, Clip, ClipMask, DEFAULT_FILTERS, EasingType, Effect, EffectType, TransitionType, FONT_OPTIONS, type TextStyle, type TextGradient, type TextStroke, type TextGlow, type TextShadow, type TextBackground, type Fill } from "../lib/types";
+import { EFFECT_LIBRARY as EFFECT_CATALOG, EFFECT_CATEGORIES } from "../lib/effect-library";
+import { TRANSITION_LIBRARY as TRANSITION_CATALOG, TRANSITION_CATEGORIES } from "../lib/transition-library";
+import { SHAPE_LIBRARY } from "../lib/shape-library";
+import { SPECIAL_LAYERS } from "../lib/special-layers";
+import { savePreset, loadPresets, deletePreset, type CustomPreset } from "../lib/custom-library";
+import ColorGradientPicker from "./ColorGradientPicker";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
@@ -31,26 +37,13 @@ const ANIMATIONS = [
   "zoomIn", "zoomOut", "spin", "bounce",
 ];
 
-const TRANSITIONS: { value: TransitionType; label: string }[] = [
-  { value: "none", label: "None" },
-  { value: "fade", label: "Fade" },
-  { value: "slideLeft", label: "Slide Left" },
-  { value: "slideRight", label: "Slide Right" },
-  { value: "slideUp", label: "Slide Up" },
-  { value: "slideDown", label: "Slide Down" },
-  { value: "zoom", label: "Zoom" },
-  { value: "blur", label: "Blur" },
-  { value: "wipeLeft", label: "Wipe" },
-];
-
-const EFFECT_LIBRARY: { type: EffectType; label: string; defaultColor?: string }[] = [
-  { type: "vignette",  label: "Vignette" },
-  { type: "glow",      label: "Glow", defaultColor: "#ffffff" },
-  { type: "shake",     label: "Shake" },
-  { type: "scanlines", label: "Scanlines" },
-  { type: "tint",      label: "Tint", defaultColor: "#ff00aa" },
-  { type: "blurMore",  label: "Soft Blur" },
-];
+// Transitions and Effects are imported from the canonical libraries.
+// `TRANSITION_CATALOG` (50) → ./lib/transition-library
+// `EFFECT_CATALOG` (50) → ./lib/effect-library
+//
+// We keep the local names short for the JSX below but alias to the imports.
+const TRANSITIONS = TRANSITION_CATALOG.map((t) => ({ value: t.type, label: t.label, category: t.category }));
+const EFFECT_LIBRARY = EFFECT_CATALOG;
 
 const BLEND_MODES = [
   "normal", "multiply", "screen", "overlay", "darken",
@@ -809,20 +802,31 @@ function EffectsSection({
         </Button>
       ) : undefined
     }>
-      <div className="grid grid-cols-3 gap-1">
-        {EFFECT_LIBRARY.map((e) => {
-          const active = effects.some((ef) => ef.type === e.type);
+      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+        {EFFECT_CATEGORIES.map((cat) => {
+          const items = EFFECT_LIBRARY.filter((e) => e.category === cat);
+          if (items.length === 0) return null;
           return (
-            <Button
-              key={e.type}
-              variant={active ? "secondary" : "outline"}
-              size="sm"
-              className={`h-7 text-[10px] ${active ? "bg-primary/20 border-primary/50" : ""}`}
-              onClick={() => active ? removeEffect(effects.find((ef) => ef.type === e.type)!.id) : addEffect(e.type)}
-              data-testid={`effect-toggle-${e.type}`}
-            >
-              {e.label}
-            </Button>
+            <div key={cat} className="space-y-1">
+              <p className="text-[9px] uppercase tracking-wider text-muted-foreground">{cat}</p>
+              <div className="grid grid-cols-3 gap-1">
+                {items.map((e) => {
+                  const active = effects.some((ef) => ef.type === e.type);
+                  return (
+                    <Button
+                      key={e.type}
+                      variant={active ? "secondary" : "outline"}
+                      size="sm"
+                      className={`h-7 text-[10px] ${active ? "bg-primary/20 border-primary/50" : ""}`}
+                      onClick={() => active ? removeEffect(effects.find((ef) => ef.type === e.type)!.id) : addEffect(e.type)}
+                      data-testid={`effect-toggle-${e.type}`}
+                    >
+                      {e.label}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
           );
         })}
       </div>
@@ -861,6 +865,214 @@ function EffectsSection({
         );
       })}
     </Section>
+  );
+}
+
+/**
+ * ShapeSection — inspector panel for `mediaType === "shape"` clips.
+ * Lets the user pick which of the 50 SHAPE_LIBRARY shapes to render and
+ * controls fill (solid/linear/radial gradient via ColorGradientPicker)
+ * plus stroke color/width.
+ */
+function ShapeSection({
+  clip,
+  dispatch,
+}: {
+  clip: Clip;
+  dispatch: React.Dispatch<EditorAction>;
+}) {
+  const update = (updates: Partial<Clip>) =>
+    dispatch({ type: "UPDATE_CLIP", payload: { id: clip.id, updates } });
+  const fill: Fill = clip.fill ?? { kind: "solid", color: "#3b82f6" };
+  return (
+    <Section title="Shape">
+      <Label className="text-[10px] text-muted-foreground">Shape</Label>
+      <div className="grid grid-cols-6 gap-1 max-h-44 overflow-y-auto pr-1">
+        {SHAPE_LIBRARY.map((s) => (
+          <button
+            key={s.key}
+            onClick={() => update({ shapeKind: s.key })}
+            className={`aspect-square rounded border p-1 text-foreground hover:bg-muted/40 ${
+              clip.shapeKind === s.key ? "border-primary bg-primary/15" : "border-border"
+            }`}
+            title={s.name}
+          >
+            <svg
+              viewBox="0 0 100 100"
+              preserveAspectRatio="xMidYMid meet"
+              className="w-full h-full"
+              dangerouslySetInnerHTML={{ __html: `<g fill="currentColor">${s.svg}</g>` }}
+            />
+          </button>
+        ))}
+      </div>
+
+      <Label className="text-[10px] text-muted-foreground mt-2 block">Fill</Label>
+      <ColorGradientPicker value={fill} onChange={(next) => update({ fill: next })} />
+
+      <Label className="text-[10px] text-muted-foreground mt-2 block">Stroke</Label>
+      <div className="flex items-center gap-2">
+        <Input
+          type="color"
+          value={clip.strokeColor ?? "#ffffff"}
+          onChange={(e) => update({ strokeColor: e.target.value })}
+          className="h-7 w-12 p-0.5 cursor-pointer"
+        />
+        <NumPair
+          label="Width"
+          value={clip.strokeWidth ?? 0}
+          min={0}
+          max={20}
+          step={0.5}
+          suffix="px"
+          onChange={(v) => update({ strokeWidth: v })}
+        />
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * SpecialLayerSection — inspector panel for `mediaType === "specialLayer"`
+ * clips. Lets the user swap presets (light leak / grain / vignette / etc),
+ * tune intensity, and recolor the overlay tint.
+ */
+function SpecialLayerSection({
+  clip,
+  dispatch,
+}: {
+  clip: Clip;
+  dispatch: React.Dispatch<EditorAction>;
+}) {
+  const update = (updates: Partial<Clip>) =>
+    dispatch({ type: "UPDATE_CLIP", payload: { id: clip.id, updates } });
+  // Group presets by category for easier scanning.
+  const cats = Array.from(new Set(SPECIAL_LAYERS.map((s) => s.category)));
+  return (
+    <Section title="Special Layer">
+      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+        {cats.map((cat) => (
+          <div key={cat} className="space-y-1">
+            <p className="text-[9px] uppercase tracking-wider text-muted-foreground">{cat}</p>
+            <div className="grid grid-cols-2 gap-1">
+              {SPECIAL_LAYERS.filter((s) => s.category === cat).map((s) => (
+                <button
+                  key={s.key}
+                  onClick={() => update({
+                    specialKind: s.key,
+                    specialIntensity: s.intensity,
+                    specialColor: s.color,
+                    label: s.name,
+                  })}
+                  className={`text-[10px] px-1.5 py-1 rounded border text-left truncate ${
+                    clip.specialKind === s.key
+                      ? "border-primary bg-primary/15 text-primary"
+                      : "border-border text-foreground hover:bg-muted/40"
+                  }`}
+                  title={s.name}
+                >
+                  {s.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <NumPair
+        label="Intensity"
+        value={clip.specialIntensity ?? 0.6}
+        min={0}
+        max={1}
+        step={0.05}
+        onChange={(v) => update({ specialIntensity: v })}
+      />
+      <div className="flex items-center gap-2">
+        <Label className="text-[10px] text-muted-foreground w-14">Color</Label>
+        <Input
+          type="color"
+          value={clip.specialColor ?? "#ffffff"}
+          onChange={(e) => update({ specialColor: e.target.value })}
+          className="h-7 w-12 p-0.5 cursor-pointer"
+        />
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * SavedPresetsSection — save the current clip's styling/transform as a
+ * named preset to localStorage, then re-apply or delete later. Surfaces
+ * the user's "custom library" in the inspector itself so it travels
+ * with the selected clip.
+ */
+function SavedPresetsSection({
+  clip,
+  dispatch,
+}: {
+  clip: Clip;
+  dispatch: React.Dispatch<EditorAction>;
+}) {
+  const [presets, setPresets] = useState<CustomPreset[]>(() => loadPresets());
+  const [name, setName] = useState("");
+
+  const refresh = () => setPresets(loadPresets());
+
+  const onSave = () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    savePreset(trimmed, clip);
+    setName("");
+    refresh();
+  };
+
+  const onApply = (p: CustomPreset) => {
+    dispatch({ type: "UPDATE_CLIP", payload: { id: clip.id, updates: p.data } });
+  };
+
+  const onDelete = (id: string) => {
+    deletePreset(id);
+    refresh();
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-1.5">
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Preset name…"
+          className="h-7 text-xs"
+        />
+        <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={onSave} disabled={!name.trim()}>
+          Save
+        </Button>
+      </div>
+      {presets.length === 0 ? (
+        <p className="text-[10px] text-muted-foreground">No presets saved. Save the current clip's styling to reuse later.</p>
+      ) : (
+        <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+          {presets.map((p) => (
+            <div key={p.id} className="flex items-center gap-1 rounded border border-border bg-muted/20 px-1.5 py-1">
+              <button
+                onClick={() => onApply(p)}
+                className="flex-1 text-left text-[11px] truncate hover:text-primary"
+                title="Apply preset to this clip"
+              >
+                {p.name}
+              </button>
+              <button
+                onClick={() => onDelete(p.id)}
+                className="text-[10px] text-muted-foreground hover:text-destructive px-1"
+                title="Delete preset"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1425,6 +1637,30 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
                 </div>
               </Section>
 
+              {/*
+                Shape & Special-Layer editors. Only render when the clip
+                actually carries one of those mediaTypes — otherwise stay
+                out of the way for plain video / image / text clips.
+              */}
+              {clip.mediaType === "shape" && (
+                <>
+                  <Separator />
+                  <ShapeSection clip={clip} dispatch={dispatch} />
+                </>
+              )}
+              {clip.mediaType === "specialLayer" && (
+                <>
+                  <Separator />
+                  <SpecialLayerSection clip={clip} dispatch={dispatch} />
+                </>
+              )}
+
+              <Separator />
+
+              <Section title="Saved Presets">
+                <SavedPresetsSection clip={clip} dispatch={dispatch} />
+              </Section>
+
               <Separator />
 
               <Section title="Transform" action={
@@ -1633,10 +1869,19 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
                   <SelectTrigger className="h-7 text-xs" data-testid="select-transition-in">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
-                    {TRANSITIONS.map((t) => (
-                      <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>
-                    ))}
+                  <SelectContent className="max-h-80">
+                    {TRANSITION_CATEGORIES.map((cat) => {
+                      const items = TRANSITIONS.filter((t) => t.category === cat);
+                      if (items.length === 0) return null;
+                      return (
+                        <div key={cat}>
+                          <div className="px-2 py-1 text-[9px] uppercase tracking-wider text-muted-foreground">{cat}</div>
+                          {items.map((t) => (
+                            <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>
+                          ))}
+                        </div>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
                 <NumPair

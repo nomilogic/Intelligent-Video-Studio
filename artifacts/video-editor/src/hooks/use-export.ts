@@ -14,6 +14,67 @@ import {
   type TransitionMod,
   type EffectImpact,
 } from "../lib/animation";
+import { getShape, buildShapeSvg, buildGradientDefs, type ShapeDef } from "../lib/shape-library";
+import { getSpecialLayer, type SpecialDef } from "../lib/special-layers";
+
+/**
+ * Convert a Fill (solid | linear | radial gradient) into either a CSS color
+ * string (solid) or a CanvasGradient. Returns a string when solid so callers
+ * can `ctx.fillStyle = ...`, or a CanvasGradient otherwise. The gradient is
+ * positioned in the rect [-pw/2, -ph/2, pw, ph] = the clip-local box.
+ */
+function fillToCanvasFill(
+  ctx: CanvasRenderingContext2D,
+  fill: Clip["fill"] | undefined,
+  fallback: string,
+  pw: number,
+  ph: number,
+): string | CanvasGradient {
+  if (!fill) return fallback;
+  if (fill.kind === "solid") return fill.color;
+  if (fill.kind === "linear") {
+    const a = ((fill.angle || 0) * Math.PI) / 180;
+    const r = Math.hypot(pw, ph) / 2;
+    const dx = Math.sin(a) * r;
+    const dy = -Math.cos(a) * r;
+    const grad = ctx.createLinearGradient(-dx, -dy, dx, dy);
+    for (const [o, c] of fill.stops) grad.addColorStop(Math.max(0, Math.min(1, o)), c);
+    return grad;
+  }
+  if (fill.kind === "radial") {
+    const cx = (fill.cx - 0.5) * pw;
+    const cy = (fill.cy - 0.5) * ph;
+    const rad = Math.max(pw, ph) * (fill.r || 0.7);
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
+    for (const [o, c] of fill.stops) grad.addColorStop(Math.max(0, Math.min(1, o)), c);
+    return grad;
+  }
+  return fallback;
+}
+
+/**
+ * Rasterize a shape SVG to an HTMLImageElement at a given pixel size and
+ * fill string. Returns a Promise that resolves once the image loads. Used
+ * during export so we can `drawImage()` shape clips into the composite.
+ */
+function rasterizeShape(
+  shape: ShapeDef,
+  fillCss: string,
+  strokeCss: string | undefined,
+  strokeWidth: number,
+  gradientFill?: any,
+): Promise<HTMLImageElement | null> {
+  const defs = gradientFill ? buildGradientDefs(gradientFill) : "";
+  const svg = buildShapeSvg(shape, fillCss, strokeCss, strokeWidth, defs);
+  return new Promise((resolve) => {
+    const blob = new Blob([svg], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
 
 // Sample rate used for offline audio rendering and encoding.
 const AUDIO_SAMPLE_RATE = 48000;
@@ -31,7 +92,7 @@ export const FPS_OPTIONS = [24, 30, 60] as const;
 export type FpsOption = (typeof FPS_OPTIONS)[number];
 
 export type Resolution = "full" | "720p" | "480p" | "360p" | "240p" | "144p" | "half" | "quarter";
-export type ExportFormat = "webm" | "mp4" | "audio";
+export type ExportFormat = "webm" | "mp4" | "audio" | "gif";
 export type ExportMode = "quick" | "optimized";
 
 export interface ExportConfig {
@@ -224,6 +285,150 @@ function computeMaskTargetRect(
   return { dx, dy, dw, dh };
 }
 
+/**
+ * Paint a SpecialLayer preset into the clip-local rect [-pw/2, -ph/2, pw, ph]
+ * using Canvas2D primitives. Mirrors the CSS branches in Canvas.tsx →
+ * `specialLayerCss` so preview & export look the same. Blend modes set via
+ * the preset are applied as `globalCompositeOperation`.
+ */
+function paintSpecialLayer(
+  ctx: CanvasRenderingContext2D,
+  def: SpecialDef,
+  intensity: number,
+  colorOverride: string | undefined,
+  pw: number,
+  ph: number,
+) {
+  const i = Math.max(0, Math.min(1, intensity));
+  if (i <= 0) return;
+  const c1 = colorOverride || def.color;
+  const c2 = def.color2 || "rgba(0,0,0,0)";
+  const p = def.params || {};
+  ctx.save();
+  ctx.globalAlpha = i;
+  if (def.blend) {
+    try { ctx.globalCompositeOperation = def.blend as GlobalCompositeOperation; } catch {}
+  }
+  const x = -pw / 2, y = -ph / 2;
+  const fill = (style: string | CanvasGradient | CanvasPattern) => {
+    ctx.fillStyle = style;
+    ctx.fillRect(x, y, pw, ph);
+  };
+  switch (def.kind) {
+    case "solidTint": fill(c1); break;
+    case "linearGradient": {
+      const a = (((p.angle ?? 180) - 90) * Math.PI) / 180;
+      const r = Math.hypot(pw, ph) / 2;
+      const dx = Math.cos(a) * r, dy = Math.sin(a) * r;
+      const g = ctx.createLinearGradient(-dx, -dy, dx, dy);
+      g.addColorStop(0, c1); g.addColorStop(1, c2);
+      fill(g);
+      break;
+    }
+    case "radialGradient": case "lightLeak": case "vignette": {
+      const cx = (((p.cx ?? 0.5) - 0.5)) * pw;
+      const cy = (((p.cy ?? 0.5) - 0.5)) * ph;
+      const rad = Math.max(pw, ph) * (p.r ?? 0.7);
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
+      if (def.kind === "vignette") {
+        g.addColorStop(0, "rgba(0,0,0,0)");
+        g.addColorStop(0.4, "rgba(0,0,0,0)");
+        g.addColorStop(1, c1);
+      } else {
+        g.addColorStop(0, c1);
+        g.addColorStop(1, c2);
+      }
+      fill(g);
+      break;
+    }
+    case "lensFlare": {
+      const cx = (((p.cx ?? 0.75) - 0.5)) * pw;
+      const cy = (((p.cy ?? 0.25) - 0.5)) * ph;
+      const r1 = Math.max(pw, ph) * 0.08;
+      const r2 = Math.max(pw, ph) * 0.4;
+      const g1 = ctx.createRadialGradient(cx, cy, 0, cx, cy, r1);
+      g1.addColorStop(0, c1); g1.addColorStop(1, "rgba(0,0,0,0)");
+      fill(g1);
+      const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, r2);
+      g2.addColorStop(0, c1); g2.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.globalAlpha = i * 0.6; fill(g2);
+      break;
+    }
+    case "filmGrain": {
+      const tile = Math.max(64, Math.min(192, Math.round(Math.min(pw, ph) / 4)));
+      const off = document.createElement("canvas");
+      off.width = tile; off.height = tile;
+      const ox = off.getContext("2d");
+      if (ox) {
+        const id = ox.createImageData(tile, tile);
+        const a = (p.density ?? 1) * 200;
+        for (let q = 0; q < id.data.length; q += 4) {
+          const v = (Math.random() * 255) | 0;
+          id.data[q] = v; id.data[q + 1] = v; id.data[q + 2] = v;
+          id.data[q + 3] = (Math.random() * a) | 0;
+        }
+        ox.putImageData(id, 0, 0);
+        const pat = ctx.createPattern(off, "repeat");
+        if (pat) fill(pat);
+      }
+      break;
+    }
+    case "scanlines": {
+      ctx.fillStyle = c1;
+      const step = p.spacing ?? 3;
+      for (let yy = y; yy < y + ph; yy += step) ctx.fillRect(x, yy, pw, 1);
+      break;
+    }
+    case "vScanlines": {
+      ctx.fillStyle = c1;
+      const step = p.spacing ?? 4;
+      for (let xx = x; xx < x + pw; xx += step) ctx.fillRect(xx, y, 1, ph);
+      break;
+    }
+    case "stripes": {
+      ctx.fillStyle = c1;
+      const angle = ((p.angle ?? 45) * Math.PI) / 180;
+      const spacing = p.spacing ?? 12;
+      ctx.save();
+      ctx.rotate(angle);
+      const r0 = Math.hypot(pw, ph);
+      for (let s = -r0; s < r0; s += spacing) ctx.fillRect(-r0, s, r0 * 2, 4);
+      ctx.restore();
+      break;
+    }
+    case "gridOverlay": {
+      ctx.strokeStyle = c1;
+      ctx.lineWidth = 1;
+      const sp = p.spacing ?? 32;
+      for (let xx = x; xx < x + pw; xx += sp) { ctx.beginPath(); ctx.moveTo(xx, y); ctx.lineTo(xx, y + ph); ctx.stroke(); }
+      for (let yy = y; yy < y + ph; yy += sp) { ctx.beginPath(); ctx.moveTo(x, yy); ctx.lineTo(x + pw, yy); ctx.stroke(); }
+      break;
+    }
+    case "colorWash": {
+      const g = ctx.createLinearGradient(0, y, 0, y + ph);
+      g.addColorStop(0, c1); g.addColorStop(1, c2);
+      fill(g);
+      break;
+    }
+    case "bokeh": {
+      ctx.fillStyle = c1;
+      const count = p.count ?? 30;
+      const sz = (p.size ?? 0.08) * Math.min(pw, ph);
+      // Use deterministic positions seeded by index so each frame matches.
+      for (let n = 0; n < count; n++) {
+        const px = x + ((Math.sin(n * 12.9898) * 43758.5453) % 1 + 1) % 1 * pw;
+        const py = y + ((Math.sin(n * 78.233) * 12345.6789) % 1 + 1) % 1 * ph;
+        ctx.beginPath();
+        ctx.arc(px, py, sz, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    default: fill(c1);
+  }
+  ctx.restore();
+}
+
 function drawClipToCanvas(
   ctx: CanvasRenderingContext2D,
   clip: Clip,
@@ -261,21 +466,23 @@ function drawClipToCanvas(
   const txPct = resolved.translateX + mod.translateXPct + fx.shakeXPct;
   const tyPct = resolved.translateY + mod.translateYPct + fx.shakeYPct;
   ctx.translate(cx + (txPct * pw) / 100, cy + (tyPct * ph) / 100);
-  ctx.rotate(((resolved.rotation || 0) * Math.PI) / 180);
+  // Base rotation + transition spin (TransitionMod.rotateExtraDeg).
+  ctx.rotate((((resolved.rotation || 0) + (mod.rotateExtraDeg || 0)) * Math.PI) / 180);
 
   const baseScale = (resolved.scale || 1) * mod.scaleMul;
   const sx = baseScale * (clip.flipH ? -1 : 1);
   const sy = baseScale * (clip.flipV ? -1 : 1);
   ctx.scale(sx, sy);
 
-  // Wipe transition: clip the rect from one side. clipInsetRight cuts off a
-  // fraction of the right edge (incoming side); clipInsetLeft cuts the left.
-  if (mod.clipInsetRight > 0 || mod.clipInsetLeft > 0) {
-    const left = -pw / 2 + mod.clipInsetLeft * pw;
-    const right = pw / 2 - mod.clipInsetRight * pw;
-    if (right > left) {
+  // Wipe transition: inset from any of the 4 sides (composes to iris/diag).
+  if (mod.clipInsetRight > 0 || mod.clipInsetLeft > 0 || mod.clipInsetTop > 0 || mod.clipInsetBottom > 0) {
+    const left   = -pw / 2 + mod.clipInsetLeft   * pw;
+    const right  =  pw / 2 - mod.clipInsetRight  * pw;
+    const top    = -ph / 2 + mod.clipInsetTop    * ph;
+    const bottom =  ph / 2 - mod.clipInsetBottom * ph;
+    if (right > left && bottom > top) {
       ctx.beginPath();
-      ctx.rect(left, -ph / 2, right - left, ph);
+      ctx.rect(left, top, right - left, bottom - top);
       ctx.clip();
     }
   }
@@ -344,6 +551,35 @@ function drawClipToCanvas(
       const lineY = (i - (lines.length - 1) / 2) * lineH;
       ctx.fillText(line, anchorX, lineY);
     });
+  } else if (clip.mediaType === "shape") {
+    // Shape clip — drawImage a pre-rasterized SVG when available so gradients
+    // and complex paths render exactly the same as in preview. Falls back to
+    // a solid-color rect when no rasterized image is loaded yet.
+    const shapeImg = mediaEl instanceof HTMLImageElement ? mediaEl : null;
+    if (shapeImg && shapeImg.naturalWidth > 0 && shapeImg.naturalHeight > 0 && pw > 0 && ph > 0) {
+      ctx.drawImage(shapeImg, -pw / 2, -ph / 2, pw, ph);
+    } else {
+      // Best-effort path-based fallback for solid fills.
+      const shape = getShape(clip.shapeKind);
+      const fillCss = fillToCanvasFill(ctx, clip.fill, clip.color || "#ffffff", pw, ph);
+      ctx.fillStyle = fillCss as any;
+      if (shape) {
+        // Cheap fallback: stretch a square that approximates the bounding box.
+        ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
+      } else {
+        ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
+      }
+    }
+  } else if (clip.mediaType === "specialLayer") {
+    // Special layer overlay — paint a CSS-style background using Canvas2D
+    // primitives based on the preset kind.
+    const def = getSpecialLayer(clip.specialKind);
+    if (def) {
+      paintSpecialLayer(ctx, def, clip.specialIntensity ?? def.intensity, clip.specialColor, pw, ph);
+    } else {
+      ctx.fillStyle = clip.specialColor || clip.color || "rgba(255,255,255,0.5)";
+      ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
+    }
   } else {
     // Color-block / blank clip. Treat empty/missing color as transparent so
     // placeholders don't leak a stray colored frame into the export. Also
@@ -366,29 +602,95 @@ function drawClipToCanvas(
     ctx.shadowBlur = 0;
     for (const o of fx.overlays) {
       const i = Math.max(0, Math.min(1, o.intensity));
-      if (o.kind === "vignette") {
-        const radius = Math.hypot(pw / 2, ph / 2);
-        const grad = ctx.createRadialGradient(0, 0, radius * 0.4, 0, 0, radius);
+      const k = o.kind;
+      // ── Vignette family ────────────────────────────────────────────
+      if (k === "vignette" || k === "vignetteSoft" || k === "vignetteHard" || k === "vignetteOval" || k === "vignetteCorner") {
+        const r0 = Math.hypot(pw / 2, ph / 2);
+        const inner = k === "vignetteSoft" ? r0 * 0.6 : k === "vignetteHard" ? r0 * 0.25 : k === "vignetteOval" ? r0 * 0.3 : r0 * 0.4;
+        const cx0 = k === "vignetteCorner" ? -pw / 2 : 0;
+        const cy0 = k === "vignetteCorner" ? -ph / 2 : 0;
+        const grad = ctx.createRadialGradient(cx0, cy0, inner, cx0, cy0, r0);
         grad.addColorStop(0, "rgba(0,0,0,0)");
         grad.addColorStop(1, `rgba(0,0,0,${(0.85 * i).toFixed(3)})`);
         ctx.fillStyle = grad;
         ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
-      } else if (o.kind === "scanlines") {
+      }
+      // ── Scanlines family ───────────────────────────────────────────
+      else if (k === "scanlines" || k === "scanlinesThick" || k === "scanlinesVertical" || k === "scanlinesCRT") {
         const alpha = Math.min(0.6, 0.4 * i + 0.05);
         ctx.fillStyle = `rgba(0,0,0,${alpha.toFixed(3)})`;
-        // Draw 1px lines every 3px (in clip-local pixels). Density tracks the
-        // intensity slightly.
-        const step = 3;
-        for (let y = -ph / 2; y < ph / 2; y += step) {
-          ctx.fillRect(-pw / 2, y, pw, 1);
+        if (k === "scanlinesVertical") {
+          const step = 4;
+          for (let x = -pw / 2; x < pw / 2; x += step) ctx.fillRect(x, -ph / 2, 1, ph);
+        } else {
+          const step = k === "scanlinesThick" ? 6 : 3;
+          const lineH = k === "scanlinesThick" ? 3 : 1;
+          for (let y = -ph / 2; y < ph / 2; y += step) ctx.fillRect(-pw / 2, y, pw, lineH);
+          if (k === "scanlinesCRT") {
+            // Add subtle vertical R/G/B aperture stripes.
+            for (let x = -pw / 2; x < pw / 2; x += 3) {
+              ctx.fillStyle = `rgba(255,0,0,${(alpha * 0.3).toFixed(3)})`; ctx.fillRect(x,     -ph / 2, 1, ph);
+              ctx.fillStyle = `rgba(0,255,0,${(alpha * 0.3).toFixed(3)})`; ctx.fillRect(x + 1, -ph / 2, 1, ph);
+              ctx.fillStyle = `rgba(0,0,255,${(alpha * 0.3).toFixed(3)})`; ctx.fillRect(x + 2, -ph / 2, 1, ph);
+            }
+          }
         }
-      } else if (o.kind === "tint") {
+      }
+      // ── Tint ───────────────────────────────────────────────────────
+      else if (k === "tint") {
         const color = o.color || "#ff00aa";
         const alpha = Math.min(0.7, 0.5 * i);
         ctx.fillStyle = hexWithAlpha(color, alpha);
         ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
       }
+      // ── Noise / film grain — small per-pixel random alpha ───────────
+      else if (k === "noise" || k === "filmGrain" || k === "filmGrainHeavy") {
+        const tile = Math.max(64, Math.min(192, Math.round(Math.min(pw, ph) / 4)));
+        const off = document.createElement("canvas");
+        off.width = tile;
+        off.height = tile;
+        const ox = off.getContext("2d");
+        if (ox) {
+          const id = ox.createImageData(tile, tile);
+          const aBase = k === "filmGrainHeavy" ? 0.6 : k === "filmGrain" ? 0.4 : 0.3;
+          const a = aBase * i * 255;
+          for (let p = 0; p < id.data.length; p += 4) {
+            const v = (Math.random() * 255) | 0;
+            id.data[p] = v; id.data[p + 1] = v; id.data[p + 2] = v;
+            id.data[p + 3] = (Math.random() * a) | 0;
+          }
+          ox.putImageData(id, 0, 0);
+          const pat = ctx.createPattern(off, "repeat");
+          if (pat) {
+            ctx.fillStyle = pat;
+            // Tile is centered around 0,0 — easier to translate than to
+            // recompute. This still ends up tiling because pattern repeats.
+            ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
+          }
+        }
+      }
+      // ── Halftone — grid of dots painted via radial gradient -------
+      else if (k === "halftone") {
+        const step = Math.round(6 + 8 * (1 - i));
+        const dotR = 1 + i;
+        ctx.fillStyle = `rgba(0,0,0,${(0.4 + 0.5 * i).toFixed(3)})`;
+        for (let y = -ph / 2; y < ph / 2; y += step) {
+          for (let x = -pw / 2; x < pw / 2; x += step) {
+            ctx.beginPath(); ctx.arc(x, y, dotR, 0, Math.PI * 2); ctx.fill();
+          }
+        }
+      }
     }
+  }
+
+  // ─── Color flash overlay from the transition (fadeBlack/White/Color/flash/
+  //     filmBurn/lightLeak/glitchCut/tvOff/tvOn). Painted after effect
+  //     overlays so it dominates the final pixel. ─────────────────────────
+  if (mod.overlayColor && mod.overlayAlpha > 0) {
+    ctx.filter = "none";
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = hexWithAlpha(mod.overlayColor, Math.max(0, Math.min(1, mod.overlayAlpha)));
+    ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
   }
 
   // ─── Apply per-clip mask (still inside the clip's transform, so the mask
@@ -523,6 +825,30 @@ async function preloadMedia(s: EditorState): Promise<PreloadedMedia> {
         });
         imageEls.set(clip.id, img);
       }
+    }),
+  );
+  // Rasterize shape clips (mediaType === "shape") into HTMLImageElements so
+  // the export can drawImage them with full SVG fidelity (gradients, paths,
+  // strokes). Stored in imageEls keyed by clip.id, picked up by drawClip.
+  await Promise.all(
+    s.clips.map(async (clip) => {
+      if (clip.mediaType !== "shape") return;
+      const shape = getShape(clip.shapeKind);
+      if (!shape) return;
+      const fillCss =
+        clip.fill && clip.fill.kind === "solid"
+          ? clip.fill.color
+          : clip.color || "#ffffff";
+      // For gradient fills the SVG includes the gradient definition itself.
+      const isGradient = !!(clip.fill && clip.fill.kind !== "solid");
+      const img = await rasterizeShape(
+        shape,
+        isGradient ? "url(#g)" : fillCss,
+        clip.strokeColor,
+        clip.strokeWidth ?? 0,
+        isGradient ? clip.fill : undefined,
+      );
+      if (img) imageEls.set(clip.id, img);
     }),
   );
   return { videoEls, imageEls, maskEls };
@@ -1259,6 +1585,71 @@ async function exportOptimized(
   return { blob, ext };
 }
 
+/**
+ * Animated GIF export. Uses the `gifenc` library for a fast pure-JS encoder.
+ * The video timeline is rasterized frame-by-frame at the configured fps and
+ * resolution, then quantized to a 256-color palette per-frame for solid
+ * fidelity without the file blowing up. Audio is dropped (GIF has no audio).
+ */
+async function exportGif(
+  s: EditorState,
+  config: ExportConfig,
+  cancelRef: React.MutableRefObject<boolean>,
+  onProgress: (phase: "rendering" | "encoding", progress: number) => void,
+): Promise<{ blob: Blob; ext: string }> {
+  // GIFs over ~15fps tend to bloat without much visual benefit.
+  const fps = Math.min(config.fps, 20);
+  const scale = computeScale(config.resolution, s.canvasWidth, s.canvasHeight);
+  const W = Math.round(s.canvasWidth * scale);
+  const H = Math.round(s.canvasHeight * scale);
+  const TOTAL_FRAMES = Math.max(1, Math.ceil(s.duration * fps));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+
+  const media = await preloadMedia(s);
+  if (cancelRef.current) throw new Error("Cancelled");
+
+  // Lazy-load the encoder so the editor's initial bundle doesn't pay for it.
+  const { GIFEncoder, quantize, applyPalette } = await import("gifenc");
+  const enc = GIFEncoder();
+  const frameDelayMs = Math.round(1000 / fps);
+
+  const sortedClips = [...s.clips].sort((a, b) => b.trackIndex - a.trackIndex);
+
+  for (let frame = 0; frame < TOTAL_FRAMES; frame++) {
+    if (cancelRef.current) break;
+    const time = frame / fps;
+    await renderFrame(ctx, s, sortedClips, media, W, H, scale, time);
+    if (cancelRef.current) break;
+
+    const imageData = ctx.getImageData(0, 0, W, H);
+    const palette = quantize(imageData.data, 256, { format: "rgb444" });
+    const indexed = applyPalette(imageData.data, palette, "rgb444");
+    enc.writeFrame(indexed, W, H, { palette, delay: frameDelayMs });
+
+    onProgress("rendering", (frame + 1) / TOTAL_FRAMES);
+    // Yield so the UI can update mid-encode.
+    if ((frame & 3) === 0) await new Promise<void>((r) => setTimeout(r, 0));
+  }
+
+  for (const v of media.videoEls.values()) v.pause();
+  if (cancelRef.current) throw new Error("Cancelled");
+
+  onProgress("encoding", 1);
+  enc.finish();
+  // gifenc returns a Uint8Array<ArrayBufferLike>. We copy the underlying
+  // bytes into a fresh ArrayBuffer to guarantee BlobPart compatibility
+  // (TS doesn't accept SharedArrayBuffer-backed views).
+  const bytes = enc.bytes();
+  const buf = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buf).set(bytes);
+  const blob = new Blob([buf], { type: "image/gif" });
+  return { blob, ext: "gif" };
+}
+
 export function useExport(state: EditorState) {
   const [exportStatus, setExportStatus] = useState<ExportStatus>({ phase: "idle", progress: 0 });
   const cancelRef = useRef(false);
@@ -1273,13 +1664,17 @@ export function useExport(state: EditorState) {
     try {
       setExportStatus({ phase: "rendering", progress: 0, mode: config.mode });
 
-      const { blob, ext } = config.mode === "optimized"
-        ? await exportOptimized(s, config, cancelRef, (phase, progress) => {
+      const { blob, ext } = config.format === "gif"
+        ? await exportGif(s, config, cancelRef, (phase, progress) => {
             setExportStatus({ phase, progress, mode: config.mode });
           })
-        : await exportQuick(s, config, cancelRef, (progress) => {
-            setExportStatus({ phase: "rendering", progress, mode: config.mode });
-          });
+        : config.mode === "optimized"
+          ? await exportOptimized(s, config, cancelRef, (phase, progress) => {
+              setExportStatus({ phase, progress, mode: config.mode });
+            })
+          : await exportQuick(s, config, cancelRef, (progress) => {
+              setExportStatus({ phase: "rendering", progress, mode: config.mode });
+            });
 
       if (cancelRef.current) { setExportStatus({ phase: "idle", progress: 0 }); return; }
 

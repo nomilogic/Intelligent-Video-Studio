@@ -12,6 +12,66 @@ import {
 } from "../lib/animation";
 import { textContainerStyle, textElementStyle } from "../lib/text-style";
 import { cn } from "@/lib/utils";
+import { getShape } from "../lib/shape-library";
+import { getSpecialLayer, type SpecialDef } from "../lib/special-layers";
+
+/**
+ * Build a CSS `clip-path: inset(...)` string from a TransitionMod, or
+ * undefined when no edge is inset (so we don't override a clip's
+ * existing border-radius / mask styling).
+ */
+function buildInsetClipPath(t: number, r: number, b: number, l: number): string | undefined {
+  if (t <= 0 && r <= 0 && b <= 0 && l <= 0) return undefined;
+  const pct = (v: number) => `${Math.max(0, Math.min(100, v * 100)).toFixed(2)}%`;
+  return `inset(${pct(t)} ${pct(r)} ${pct(b)} ${pct(l)})`;
+}
+
+/**
+ * Convert a Fill (solid | linear gradient | radial gradient) into a CSS
+ * background string. Used by shape clips and any other paintable area.
+ */
+function fillToCss(fill: { kind: string; [k: string]: any } | undefined, fallback: string): string {
+  if (!fill) return fallback;
+  if (fill.kind === "solid") return fill.color;
+  if (fill.kind === "linear") {
+    const stops = fill.stops.map(([o, c]: [number, string]) => `${c} ${(o * 100).toFixed(1)}%`).join(", ");
+    return `linear-gradient(${fill.angle}deg, ${stops})`;
+  }
+  if (fill.kind === "radial") {
+    const stops = fill.stops.map(([o, c]: [number, string]) => `${c} ${(o * 100).toFixed(1)}%`).join(", ");
+    return `radial-gradient(circle at ${(fill.cx * 100).toFixed(1)}% ${(fill.cy * 100).toFixed(1)}%, ${stops})`;
+  }
+  return fallback;
+}
+
+/**
+ * CSS background recipe for a SpecialLayer preset. Mirrors the kinds in
+ * `lib/special-layers.ts`. The `intensity` knob biases opacity, and the
+ * primary/secondary colors come from the preset (or per-clip overrides).
+ */
+function specialLayerCss(def: SpecialDef, intensity: number, colorOverride?: string): React.CSSProperties {
+  const i = Math.max(0, Math.min(1, intensity));
+  const c1 = colorOverride || def.color;
+  const c2 = def.color2 || "transparent";
+  const p = def.params || {};
+  const blendMode = (def.blend || "normal") as React.CSSProperties["mixBlendMode"];
+  switch (def.kind) {
+    case "solidTint":       return { backgroundColor: c1, opacity: i, mixBlendMode: blendMode };
+    case "linearGradient":  return { background: `linear-gradient(${p.angle ?? 180}deg, ${c1}, ${c2})`, opacity: i, mixBlendMode: blendMode };
+    case "radialGradient":  return { background: `radial-gradient(circle at ${(p.cx ?? 0.5) * 100}% ${(p.cy ?? 0.5) * 100}%, ${c1}, ${c2} ${(p.r ?? 0.7) * 100}%)`, opacity: i, mixBlendMode: blendMode };
+    case "vignette":        return { background: `radial-gradient(ellipse at center, transparent 40%, ${c1} 100%)`, opacity: i, mixBlendMode: blendMode };
+    case "lightLeak":       return { background: `radial-gradient(circle at ${(p.cx ?? 0.7) * 100}% ${(p.cy ?? 0.3) * 100}%, ${c1} 0%, transparent ${(p.r ?? 0.6) * 100}%)`, opacity: i, mixBlendMode: blendMode };
+    case "lensFlare":       return { background: `radial-gradient(circle at ${(p.cx ?? 0.75) * 100}% ${(p.cy ?? 0.25) * 100}%, ${c1} 0%, transparent 8%), radial-gradient(circle at ${(p.cx ?? 0.75) * 100}% ${(p.cy ?? 0.25) * 100}%, ${c1} 0%, transparent 30%)`, opacity: i, mixBlendMode: blendMode };
+    case "filmGrain":       return { backgroundImage: NOISE_SVG_BG((p.density ?? 1) * 0.9, 2, Math.min(0.9, i)), backgroundSize: "200px 200px", mixBlendMode: blendMode };
+    case "scanlines":       return { backgroundImage: `repeating-linear-gradient(0deg, ${c1} 0px, ${c1} 1px, transparent 1px, transparent ${p.spacing ?? 3}px)`, opacity: i, mixBlendMode: blendMode };
+    case "vScanlines":      return { backgroundImage: `repeating-linear-gradient(90deg, ${c1} 0px, ${c1} 1px, transparent 1px, transparent ${p.spacing ?? 4}px)`, opacity: i, mixBlendMode: blendMode };
+    case "stripes":         return { backgroundImage: `repeating-linear-gradient(${p.angle ?? 45}deg, ${c1} 0px, ${c1} 4px, transparent 4px, transparent ${p.spacing ?? 12}px)`, opacity: i, mixBlendMode: blendMode };
+    case "gridOverlay":     return { backgroundImage: `linear-gradient(${c1} 1px, transparent 1px), linear-gradient(90deg, ${c1} 1px, transparent 1px)`, backgroundSize: `${p.spacing ?? 32}px ${p.spacing ?? 32}px`, opacity: i, mixBlendMode: blendMode };
+    case "colorWash":       return { background: `linear-gradient(180deg, ${c1}, ${c2})`, opacity: i, mixBlendMode: blendMode };
+    case "bokeh":           return { backgroundImage: `radial-gradient(circle, ${c1} 1px, transparent 30%)`, backgroundSize: `80px 80px, 120px 120px`, opacity: i, mixBlendMode: blendMode };
+    default:                return { backgroundColor: c1, opacity: i, mixBlendMode: blendMode };
+  }
+}
 
 interface CanvasProps {
   state: EditorState;
@@ -409,6 +469,63 @@ function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false }
     );
   }
 
+  if (clip.mediaType === "shape") {
+    const shape = getShape(clip.shapeKind);
+    const fillCss = fillToCss(clip.fill as any, clip.color || "#ffffff");
+    if (shape) {
+      const stroke =
+        clip.strokeColor && (clip.strokeWidth ?? 0) > 0
+          ? ` stroke="${clip.strokeColor}" stroke-width="${clip.strokeWidth}" stroke-linejoin="round"`
+          : "";
+      // Inline the SVG so the fill string can reference a CSS gradient. We
+      // use a <foreignObject>-style trick: paint the gradient on a div and
+      // mask it with the SVG path. CSS gradients aren't valid SVG fills, so
+      // for gradient fills we render a div behind a `mask-image` SVG.
+      const isGradient = clip.fill && (clip.fill as any).kind !== "solid";
+      if (isGradient) {
+        const maskSvg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'><g fill='black'>${shape.svg}</g></svg>`;
+        const maskUrl = `url("data:image/svg+xml;utf8,${encodeURIComponent(maskSvg)}")`;
+        return (
+          <div className="w-full h-full pointer-events-none" style={{ transform: flipTransform(clip) }}>
+            <div
+              className="w-full h-full"
+              style={{
+                background: fillCss,
+                WebkitMaskImage: maskUrl,
+                maskImage: maskUrl,
+                WebkitMaskSize: "100% 100%",
+                maskSize: "100% 100%",
+                WebkitMaskRepeat: "no-repeat",
+                maskRepeat: "no-repeat",
+              }}
+            />
+          </div>
+        );
+      }
+      // Solid fill — inline SVG is simplest and handles strokes natively.
+      return (
+        <div
+          className="w-full h-full pointer-events-none"
+          style={{ transform: flipTransform(clip) }}
+          dangerouslySetInnerHTML={{
+            __html: `<svg width='100%' height='100%' viewBox='0 0 100 100' preserveAspectRatio='none'><g fill='${fillCss}'${stroke}>${shape.svg}</g></svg>`,
+          }}
+        />
+      );
+    }
+    // Unknown shape — degrade to a solid-color filled square.
+    return <div className="w-full h-full pointer-events-none" style={{ background: fillCss }} />;
+  }
+
+  if (clip.mediaType === "specialLayer") {
+    const def = getSpecialLayer(clip.specialKind);
+    const intensity = clip.specialIntensity ?? def?.intensity ?? 0.6;
+    const style = def
+      ? specialLayerCss(def, intensity, clip.specialColor)
+      : { background: clip.specialColor || clip.color || "#ffffff", opacity: intensity };
+    return <div className="w-full h-full pointer-events-none" style={style} />;
+  }
+
   return (
     <div
       className="w-full h-full flex items-center justify-center"
@@ -763,45 +880,82 @@ function TextEditor({
  * that translate to CSS filters / transforms are applied at the wrapper level
  * via getEffectImpact() and are not drawn here.
  */
+// Reusable inline SVG turbulence noise filter — used as a `filter:` source
+// for divs that want a procedural grain texture without shipping any image
+// assets. Each kind picks a different baseFrequency / octaves combo.
+const NOISE_SVG_BG = (freq: number, octaves: number, alpha: number) =>
+  `url("data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'>` +
+      `<filter id='n'><feTurbulence type='fractalNoise' baseFrequency='${freq}' numOctaves='${octaves}' stitchTiles='stitch'/>` +
+      `<feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 ${alpha} 0'/></filter>` +
+      `<rect width='100%' height='100%' filter='url(%23n)'/></svg>`,
+  )}")`;
+
 function EffectOverlays({ overlays }: { overlays: EffectOverlay[] }) {
   if (!overlays || overlays.length === 0) return null;
   return (
     <>
       {overlays.map((o, i) => {
-        if (o.kind === "vignette") {
-          // Radial gradient that fades from transparent center to dark edges.
+        const k = o.kind;
+        // ── Vignette family ───────────────────────────────────────────
+        if (k === "vignette" || k === "vignetteSoft" || k === "vignetteHard" || k === "vignetteOval" || k === "vignetteCorner") {
           const dark = Math.min(0.9, 0.85 * o.intensity);
+          // Each variant tweaks center transparency stop / shape / spread.
+          const grad =
+            k === "vignetteSoft"
+              ? `radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,${dark.toFixed(2)}) 100%)`
+              : k === "vignetteHard"
+              ? `radial-gradient(circle at center, transparent 25%, rgba(0,0,0,${dark.toFixed(2)}) 75%)`
+              : k === "vignetteOval"
+              ? `radial-gradient(ellipse 70% 90% at center, transparent 30%, rgba(0,0,0,${dark.toFixed(2)}) 100%)`
+              : k === "vignetteCorner"
+              ? `radial-gradient(ellipse at top left, transparent 30%, rgba(0,0,0,${dark.toFixed(2)}) 100%)`
+              : `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${dark.toFixed(2)}) 100%)`;
+          return <div key={`v-${i}`} className="absolute inset-0 pointer-events-none" style={{ background: grad }} />;
+        }
+        // ── Scanlines family ─────────────────────────────────────────
+        if (k === "scanlines" || k === "scanlinesThick" || k === "scanlinesVertical" || k === "scanlinesCRT") {
+          const alpha = Math.min(0.6, 0.4 * o.intensity + 0.05);
+          const a = alpha.toFixed(2);
+          const grad =
+            k === "scanlinesThick"
+              ? `repeating-linear-gradient(0deg, rgba(0,0,0,${a}) 0px, rgba(0,0,0,${a}) 3px, transparent 3px, transparent 6px)`
+              : k === "scanlinesVertical"
+              ? `repeating-linear-gradient(90deg, rgba(0,0,0,${a}) 0px, rgba(0,0,0,${a}) 1px, transparent 1px, transparent 4px)`
+              : k === "scanlinesCRT"
+              ? `repeating-linear-gradient(0deg, rgba(0,0,0,${a}) 0px, rgba(0,0,0,${a}) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,0,0,${(alpha * 0.3).toFixed(2)}) 0px, rgba(0,255,0,${(alpha * 0.3).toFixed(2)}) 1px, rgba(0,0,255,${(alpha * 0.3).toFixed(2)}) 2px, transparent 3px)`
+              : `repeating-linear-gradient(0deg, rgba(0,0,0,${a}) 0px, rgba(0,0,0,${a}) 1px, transparent 1px, transparent 3px)`;
+          return <div key={`s-${i}`} className="absolute inset-0 pointer-events-none mix-blend-multiply" style={{ backgroundImage: grad }} />;
+        }
+        // ── Tint ─────────────────────────────────────────────────────
+        if (k === "tint") {
+          const alpha = Math.min(0.7, 0.5 * o.intensity);
+          return <div key={`t-${i}`} className="absolute inset-0 pointer-events-none mix-blend-color" style={{ backgroundColor: o.color, opacity: alpha }} />;
+        }
+        // ── Noise / film grain ───────────────────────────────────────
+        if (k === "noise" || k === "filmGrain" || k === "filmGrainHeavy") {
+          const a = k === "filmGrainHeavy" ? 0.9 * o.intensity
+                  : k === "filmGrain"      ? 0.6 * o.intensity
+                                            : 0.45 * o.intensity;
+          const freq = k === "filmGrainHeavy" ? 1.4 : k === "filmGrain" ? 0.95 : 0.7;
           return (
             <div
-              key={`v-${i}`}
-              className="absolute inset-0 pointer-events-none"
-              style={{
-                background: `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${dark.toFixed(2)}) 100%)`,
-              }}
+              key={`n-${i}`}
+              className="absolute inset-0 pointer-events-none mix-blend-overlay"
+              style={{ backgroundImage: NOISE_SVG_BG(freq, 2, Math.min(0.9, a)), backgroundSize: "200px 200px" }}
             />
           );
         }
-        if (o.kind === "scanlines") {
-          const alpha = Math.min(0.6, 0.4 * o.intensity + 0.05);
+        // ── Halftone ─────────────────────────────────────────────────
+        if (k === "halftone") {
+          const a = (0.4 + 0.5 * o.intensity).toFixed(2);
           return (
             <div
-              key={`s-${i}`}
+              key={`h-${i}`}
               className="absolute inset-0 pointer-events-none mix-blend-multiply"
               style={{
-                backgroundImage: `repeating-linear-gradient(0deg, rgba(0,0,0,${alpha.toFixed(2)}) 0px, rgba(0,0,0,${alpha.toFixed(2)}) 1px, transparent 1px, transparent 3px)`,
-              }}
-            />
-          );
-        }
-        if (o.kind === "tint") {
-          const alpha = Math.min(0.7, 0.5 * o.intensity);
-          return (
-            <div
-              key={`t-${i}`}
-              className="absolute inset-0 pointer-events-none mix-blend-color"
-              style={{
-                backgroundColor: o.color,
-                opacity: alpha,
+                backgroundImage: `radial-gradient(circle, rgba(0,0,0,${a}) 1px, transparent 2px)`,
+                backgroundSize: `${Math.round(6 + 8 * (1 - o.intensity))}px ${Math.round(6 + 8 * (1 - o.intensity))}px`,
               }}
             />
           );
@@ -1355,20 +1509,24 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
                   width: `${pr.width * 100}%`,
                   height: `${pr.height * 100}%`,
                   opacity: pr.opacity * out.opacityMul,
-                  transform: `translate(${pr.translateX + out.translateXPct + pFx.shakeXPct}%, ${pr.translateY + out.translateYPct + pFx.shakeYPct}%) rotate(${pr.rotation}deg) scale(${pr.scale * out.scaleMul})`,
+                  transform: `translate(${pr.translateX + out.translateXPct + pFx.shakeXPct}%, ${pr.translateY + out.translateYPct + pFx.shakeYPct}%) rotate(${pr.rotation + out.rotateExtraDeg}deg) scale(${pr.scale * out.scaleMul})`,
                   mixBlendMode: prev.blendMode as any,
                   filter: combineFilterCss(pr.filterCss, pFx.extraFilter, out.blurExtra),
                   borderRadius: `${prev.borderRadius}px`,
                   transformOrigin: "center",
-                  clipPath:
-                    out.clipInsetLeft > 0
-                      ? `inset(0 0 0 ${(out.clipInsetLeft * 100).toFixed(2)}%)`
-                      : undefined,
+                  clipPath: buildInsetClipPath(out.clipInsetTop, out.clipInsetRight, out.clipInsetBottom, out.clipInsetLeft),
                   containerType: "size",
                 }}
               >
                 <MediaContent clip={prev} videoTime={pr.videoTime} isPlaying={false} showFullSource={false} />
                 <EffectOverlays overlays={pFx.overlays} />
+                {out.overlayColor && out.overlayAlpha > 0 ? (
+                  <div
+                    aria-hidden
+                    className="absolute inset-0 pointer-events-none"
+                    style={{ background: out.overlayColor, opacity: out.overlayAlpha }}
+                  />
+                ) : null}
               </div>,
             );
           }
@@ -1397,15 +1555,12 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
                 width: `${r.width * 100}%`,
                 height: `${r.height * 100}%`,
                 opacity: r.opacity * incomingMod.opacityMul,
-                transform: `translate(${r.translateX + incomingMod.translateXPct + fxImpact.shakeXPct}%, ${r.translateY + incomingMod.translateYPct + fxImpact.shakeYPct}%) rotate(${r.rotation}deg) scale(${r.scale * incomingMod.scaleMul})`,
+                transform: `translate(${r.translateX + incomingMod.translateXPct + fxImpact.shakeXPct}%, ${r.translateY + incomingMod.translateYPct + fxImpact.shakeYPct}%) rotate(${r.rotation + incomingMod.rotateExtraDeg}deg) scale(${r.scale * incomingMod.scaleMul})`,
                 mixBlendMode: clip.blendMode as any,
                 filter: combineFilterCss(r.filterCss, fxImpact.extraFilter, incomingMod.blurExtra),
                 borderRadius: cropThis ? 0 : `${clip.borderRadius}px`,
                 transformOrigin: "center",
-                clipPath:
-                  incomingMod.clipInsetRight > 0
-                    ? `inset(0 ${(incomingMod.clipInsetRight * 100).toFixed(2)}% 0 0)`
-                    : undefined,
+                clipPath: buildInsetClipPath(incomingMod.clipInsetTop, incomingMod.clipInsetRight, incomingMod.clipInsetBottom, incomingMod.clipInsetLeft),
                 containerType: "size",
                 ...buildMaskStyle(clip.mask),
               }}
@@ -1443,6 +1598,13 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
                 />
               )}
               <EffectOverlays overlays={fxImpact.overlays} />
+              {incomingMod.overlayColor && incomingMod.overlayAlpha > 0 ? (
+                <div
+                  aria-hidden
+                  className="absolute inset-0 pointer-events-none"
+                  style={{ background: incomingMod.overlayColor, opacity: incomingMod.overlayAlpha }}
+                />
+              ) : null}
             </div>,
           );
 

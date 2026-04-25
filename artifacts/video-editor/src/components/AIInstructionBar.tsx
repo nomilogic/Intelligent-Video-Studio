@@ -5,6 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Sparkles, Loader2, Wand2, ChevronDown, ChevronUp } from "lucide-react";
 import { EditorState, EditorAction } from "../lib/types";
 import { useToast } from "@/hooks/use-toast";
+import { buildAiSchemaMarkdown } from "../lib/ai-schema";
+
+// Cache the schema once — it's static across renders.
+const AI_SCHEMA_MD = buildAiSchemaMarkdown();
 
 const QUICK_ACTIONS = [
   { label: "✨ Auto-edit", prompt: "Create a polished, professional edit. Add smooth fade transitions between adjacent clips, subtle zoom-in animation on the first clip, and a fade-out on the last clip. Add a tasteful cinematic color preset to the longest video clip." },
@@ -35,8 +39,12 @@ export default function AIInstructionBar({
       type: "ADD_AI_MESSAGE",
       payload: { id: `m-${Date.now()}`, role: "user", text: prompt, timestamp: Date.now() },
     });
+    // Prepend the schema markdown so the model knows what shapes /
+    // effects / transitions / templates / fonts / special layers and
+    // reducer actions are available in this build.
+    const enriched = `${AI_SCHEMA_MD}\n\n## User instruction\n${prompt}`;
     processInstruction.mutate(
-      { data: { instruction: prompt, currentState: JSON.stringify(state) } },
+      { data: { instruction: enriched, currentState: JSON.stringify(state) } },
       {
         onSuccess: (result) => {
           if (result.operations && result.operations.length > 0) {

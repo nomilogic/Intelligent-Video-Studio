@@ -57,6 +57,7 @@ export default function ExportDialog({
   const videoFormatOptions: { value: ExportFormat; label: string; desc: string }[] = [
     { value: "mp4", label: "MP4", desc: "Universal" },
     { value: "webm", label: "WebM", desc: "Compact" },
+    { value: "gif", label: "GIF", desc: "Animated, no audio" },
   ];
 
   const modeOptions: { value: ExportMode; label: string; desc: string; icon: typeof Zap }[] = [

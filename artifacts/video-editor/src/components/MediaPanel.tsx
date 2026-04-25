@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Plus, Trash2, Film, Music, Image as ImageIcon, Type, Square, Sparkles, Layout, Droplets, Shapes } from "lucide-react";
+import { Plus, Trash2, Film, Music, Image as ImageIcon, Type, Square, Sparkles, Layout, Droplets, Shapes, Bookmark } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
@@ -7,6 +7,9 @@ import { EditorState, EditorAction, MediaAsset, DEFAULT_TEXT_STYLE, type TextSty
 import { textContainerStyle, textElementStyle } from "../lib/text-style";
 import { makeClip } from "../lib/reducer";
 import { TEMPLATES } from "../lib/templates";
+import { SHAPE_LIBRARY } from "../lib/shape-library";
+import { SPECIAL_LAYERS } from "../lib/special-layers";
+import { loadPresets, deletePreset, type CustomPreset } from "../lib/custom-library";
 import { cn } from "@/lib/utils";
 
 const CLIP_COLORS = ["#3b82f6", "#8b5cf6", "#f59e0b", "#10b981", "#f43f5e", "#06b6d4", "#f97316", "#ec4899"];
@@ -36,8 +39,13 @@ async function probeDuration(src: string, type: "video" | "audio"): Promise<numb
 
 export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [activeTab, setActiveTab] = useState<"media" | "text" | "shapes" | "templates">("media");
+  const [activeTab, setActiveTab] = useState<"media" | "text" | "shapes" | "templates" | "saved">("media");
   const [textInput, setTextInput] = useState("Your title here");
+  // `presets` is a localStorage-backed list of user-saved clip styling.
+  // We re-read it whenever the Saved tab gains focus so changes from the
+  // PropertiesInspector show up immediately.
+  const [presets, setPresets] = useState<CustomPreset[]>(() => loadPresets());
+  const refreshPresets = () => setPresets(loadPresets());
 
   const addAssetToTimeline = (asset: MediaAsset) => {
     const colorIdx = state.clips.length % CLIP_COLORS.length;
@@ -270,6 +278,7 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
           { key: "text" as const, label: "Text" },
           { key: "shapes" as const, label: "Stock" },
           { key: "templates" as const, label: "Templates" },
+          { key: "saved" as const, label: "Saved" },
         ].map((t) => (
           <button
             key={t.key}
@@ -466,40 +475,95 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
 
           <Separator />
 
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Shapes</p>
-          <Button variant="outline" size="sm" className="w-full h-7 text-xs gap-2 justify-start" onClick={() => {
-            dispatch({
-              type: "ADD_CLIP",
-              payload: makeClip({
-                label: "Square",
-                mediaType: "blank",
-                trackIndex: Math.min(state.clips.length, state.tracks.length - 1),
-                startTime: state.currentTime,
-                duration: 4,
-                x: 0.4, y: 0.4, width: 0.2, height: 0.2,
-                color: "#ec4899",
-              }),
-            });
-          }}>
-            <Square className="w-3 h-3" /> Square
-          </Button>
-          <Button variant="outline" size="sm" className="w-full h-7 text-xs gap-2 justify-start" onClick={() => {
-            dispatch({
-              type: "ADD_CLIP",
-              payload: makeClip({
-                label: "Circle",
-                mediaType: "blank",
-                trackIndex: Math.min(state.clips.length, state.tracks.length - 1),
-                startTime: state.currentTime,
-                duration: 4,
-                x: 0.4, y: 0.4, width: 0.2, height: 0.2,
-                borderRadius: 999,
-                color: "#06b6d4",
-              }),
-            });
-          }}>
-            <div className="w-3 h-3 rounded-full bg-current" /> Circle
-          </Button>
+          {/*
+            Shape Library — 50 ready-made vector shapes from
+            ./lib/shape-library. Click adds a `mediaType: "shape"` clip
+            with the chosen `shapeKind`; the inspector lets users tweak
+            fill/stroke/gradient afterwards.
+          */}
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Shapes ({SHAPE_LIBRARY.length})</p>
+          <div className="grid grid-cols-5 gap-1">
+            {SHAPE_LIBRARY.map((s) => (
+              <button
+                key={s.key}
+                onClick={() => {
+                  const colorIdx = state.clips.length % CLIP_COLORS.length;
+                  dispatch({
+                    type: "ADD_CLIP",
+                    payload: makeClip({
+                      label: s.name,
+                      mediaType: "shape",
+                      shapeKind: s.key,
+                      fill: { kind: "solid", color: CLIP_COLORS[colorIdx] },
+                      strokeColor: "#ffffff",
+                      strokeWidth: 0,
+                      trackIndex: Math.min(state.clips.length, state.tracks.length - 1),
+                      startTime: state.currentTime,
+                      duration: 4,
+                      x: 0.4, y: 0.4, width: 0.2, height: 0.2,
+                      color: CLIP_COLORS[colorIdx],
+                    }),
+                  });
+                }}
+                title={s.name}
+                className="aspect-square rounded border border-border hover:bg-muted/40 hover:border-primary/40 p-1 text-foreground"
+                data-testid={`shape-${s.key}`}
+              >
+                <svg
+                  viewBox="0 0 100 100"
+                  preserveAspectRatio="xMidYMid meet"
+                  className="w-full h-full"
+                  // ShapeDef stores a raw inner SVG fragment (paths, polygons,
+                  // etc) — drop it into a fixed 100×100 viewBox.
+                  dangerouslySetInnerHTML={{ __html: `<g fill="currentColor">${s.svg}</g>` }}
+                />
+              </button>
+            ))}
+          </div>
+
+          <Separator />
+
+          {/*
+            Special Layers — 50 cinematic overlays (light leaks, grain,
+            vignette, color grades, geometry overlays, atmosphere). Each
+            adds a `mediaType: "specialLayer"` clip configured with the
+            preset's intensity & tint color.
+          */}
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Special Layers ({SPECIAL_LAYERS.length})</p>
+          <div className="grid grid-cols-2 gap-1">
+            {SPECIAL_LAYERS.map((s) => (
+              <button
+                key={s.key}
+                onClick={() => {
+                  dispatch({
+                    type: "ADD_CLIP",
+                    payload: makeClip({
+                      label: s.name,
+                      mediaType: "specialLayer",
+                      specialKind: s.key,
+                      specialIntensity: s.intensity,
+                      specialColor: s.color,
+                      blendMode: s.blend,
+                      trackIndex: 0, // overlay track
+                      startTime: state.currentTime,
+                      duration: 5,
+                      x: 0, y: 0, width: 1, height: 1,
+                      color: s.color,
+                    }),
+                  });
+                }}
+                title={`${s.name} · ${s.category}`}
+                className="text-[10px] px-1.5 py-1 rounded border border-border text-foreground hover:bg-muted/40 hover:border-primary/40 truncate text-left"
+                data-testid={`special-${s.key}`}
+              >
+                <span
+                  className="inline-block w-2 h-2 rounded-full mr-1 align-middle"
+                  style={{ backgroundColor: s.color }}
+                />
+                {s.name}
+              </button>
+            ))}
+          </div>
 
           <Separator />
 
@@ -611,6 +675,87 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {activeTab === "saved" && (
+        <div className="flex flex-col flex-1 overflow-y-auto p-2 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">My Saved Presets</p>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 text-[10px] px-2"
+              onClick={refreshPresets}
+              title="Reload from local storage"
+            >
+              Refresh
+            </Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground leading-snug">
+            Save styling from any selected clip in the inspector's "Saved Presets" section. Click a preset here to add a fresh clip pre-styled with that look.
+          </p>
+          {presets.length === 0 ? (
+            <div className="text-[11px] text-muted-foreground text-center py-8">
+              <Bookmark className="w-5 h-5 mx-auto mb-2 opacity-40" />
+              No saved presets yet.
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {presets.map((p) => (
+                <div
+                  key={p.id}
+                  className="group flex items-center gap-2 p-1.5 rounded border border-border bg-muted/20 hover:bg-muted/40 hover:border-primary/40 transition-colors"
+                >
+                  <button
+                    className="flex-1 min-w-0 text-left"
+                    onClick={() => {
+                      // Drop a fresh clip carrying the preset's saved fields
+                      // onto the timeline at the playhead. We seed sensible
+                      // defaults (duration, position) since presets only
+                      // capture styling — never timing.
+                      const colorIdx = state.clips.length % CLIP_COLORS.length;
+                      dispatch({
+                        type: "ADD_CLIP",
+                        payload: makeClip({
+                          ...p.data,
+                          label: p.name,
+                          trackIndex: Math.min(state.clips.length, state.tracks.length - 1),
+                          startTime: state.currentTime,
+                          duration: 4,
+                          color: p.data.color ?? CLIP_COLORS[colorIdx],
+                        }),
+                      });
+                    }}
+                    title="Add a new clip with this preset's styling"
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <Bookmark className="w-3 h-3 text-primary shrink-0" />
+                      <span className="text-xs font-medium text-foreground truncate">{p.name}</span>
+                    </div>
+                    <div className="text-[10px] text-muted-foreground capitalize">
+                      {p.data.mediaType ?? "clip"}
+                      {p.data.shapeKind ? ` · ${p.data.shapeKind}` : ""}
+                      {p.data.specialKind ? ` · ${p.data.specialKind}` : ""}
+                    </div>
+                  </button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="w-5 h-5 opacity-0 group-hover:opacity-100"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deletePreset(p.id);
+                      refreshPresets();
+                    }}
+                    title="Delete preset"
+                  >
+                    <Trash2 className="w-3 h-3 text-destructive" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
