@@ -52,6 +52,60 @@ function Section({ title, action, children }: { title: string; action?: React.Re
   );
 }
 
+function EditableNumber({
+  value, min, max, step, onChange, suffix = "", className = "",
+}: {
+  value: number; min: number; max: number; step: number;
+  onChange: (v: number) => void; suffix?: string; className?: string;
+}) {
+  const format = (v: number) => v.toFixed(v < 1 && v > -1 ? 2 : 1);
+  const [draft, setDraft] = useState<string | null>(null);
+  const display = draft ?? format(value);
+  const commit = () => {
+    if (draft == null) return;
+    const parsed = parseFloat(draft);
+    if (Number.isFinite(parsed)) {
+      const clamped = Math.max(min, Math.min(max, parsed));
+      if (clamped !== value) onChange(clamped);
+    }
+    setDraft(null);
+  };
+  return (
+    <div className="flex items-center gap-0.5">
+      <input
+        type="text"
+        inputMode="decimal"
+        value={display}
+        onChange={(e) => setDraft(e.target.value)}
+        onFocus={(e) => {
+          setDraft(format(value));
+          requestAnimationFrame(() => e.target.select());
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            (e.target as HTMLInputElement).blur();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            setDraft(null);
+            (e.target as HTMLInputElement).blur();
+          } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            const dir = e.key === "ArrowUp" ? 1 : -1;
+            const mult = e.shiftKey ? 10 : e.altKey ? 0.1 : 1;
+            const next = Math.max(min, Math.min(max, value + dir * step * mult));
+            setDraft(null);
+            onChange(next);
+          }
+        }}
+        className={`tabular-nums bg-transparent border border-transparent hover:border-border focus:border-primary focus:bg-background rounded px-1 py-0 text-right text-xs w-14 outline-none transition-colors ${className}`}
+      />
+      {suffix && <span className="text-muted-foreground text-xs select-none">{suffix}</span>}
+    </div>
+  );
+}
+
 function NumPair({
   label, value, min, max, step, onChange, onKeyframe, hasKeyframe, isAtKeyframe,
   tweened, onToggleTween, suffix = "",
@@ -64,7 +118,7 @@ function NumPair({
 }) {
   return (
     <div className="space-y-1">
-      <div className="flex justify-between text-xs">
+      <div className="flex justify-between items-center text-xs">
         <Label className="text-muted-foreground flex items-center gap-1">
           {label}
           {onToggleTween && (
@@ -81,9 +135,15 @@ function NumPair({
             </button>
           )}
         </Label>
-        <span className={`tabular-nums ${hasKeyframe ? "text-yellow-400" : "text-foreground"}`}>
-          {value.toFixed(value < 1 && value > -1 ? 2 : 1)}{suffix}
-        </span>
+        <EditableNumber
+          value={value}
+          min={min}
+          max={max}
+          step={step}
+          onChange={onChange}
+          suffix={suffix}
+          className={hasKeyframe ? "text-yellow-400" : "text-foreground"}
+        />
       </div>
       <Slider value={[value]} min={min} max={max} step={step} onValueChange={([v]) => onChange(v)} />
     </div>
