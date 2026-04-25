@@ -153,9 +153,31 @@ function applyClipUpdate(state: EditorState, ids: string[], updates: Partial<Cli
     }
     return { ...c, ...updates };
   };
+
+  // When a clip's startTime changes, its keyframes (stored as absolute project
+  // time) must shift by the same delta — otherwise dragging a clip on the
+  // timeline leaves keyframes anchored at the old position, where they appear
+  // to "vanish" because they fall outside the clip's new visible range.
+  let nextKeyframes = state.keyframes;
+  if (updates.startTime !== undefined) {
+    const deltas = new Map<string, number>();
+    for (const c of state.clips) {
+      if (ids.includes(c.id)) {
+        const d = (updates.startTime as number) - c.startTime;
+        if (d !== 0) deltas.set(c.id, d);
+      }
+    }
+    if (deltas.size > 0) {
+      nextKeyframes = state.keyframes.map((k) =>
+        deltas.has(k.clipId) ? { ...k, time: k.time + (deltas.get(k.clipId) as number) } : k,
+      );
+    }
+  }
+
   return {
     ...state,
     clips: state.clips.map((c) => (ids.includes(c.id) ? ensureFilters(c) : c)),
+    keyframes: nextKeyframes,
   };
 }
 
