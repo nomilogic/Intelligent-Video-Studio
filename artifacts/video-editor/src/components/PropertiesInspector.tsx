@@ -516,33 +516,37 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
           </Section>
           <Separator />
           <Section title="Aspect Ratio Presets">
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-3 gap-1.5">
               {[
-                { label: "16:9 1080p", w: 1920, h: 1080 },
-                { label: "16:9 4K", w: 3840, h: 2160 },
-                { label: "9:16 TikTok", w: 1080, h: 1920 },
-                { label: "9:16 Reels", w: 1080, h: 1920 },
-                { label: "1:1 Square", w: 1080, h: 1080 },
-                { label: "4:5 IG Post", w: 1080, h: 1350 },
-                { label: "2:3 Pinterest", w: 1000, h: 1500 },
-                { label: "3:4 Portrait", w: 1080, h: 1440 },
-                { label: "21:9 Cinema", w: 2560, h: 1080 },
-                { label: "2.39 Ultrawide", w: 2390, h: 1000 },
-                { label: "4:3 Classic", w: 1440, h: 1080 },
-                { label: "5:4 Photo", w: 1280, h: 1024 },
-                { label: "YT Short", w: 1080, h: 1920 },
-                { label: "FB Cover", w: 1640, h: 924 },
+                { label: "16:9", w: 1920, h: 1080 },
+                { label: "9:16", w: 1080, h: 1920 },
+                { label: "1:1", w: 1080, h: 1080 },
+                { label: "4:5", w: 1080, h: 1350 },
+                { label: "2:3", w: 1000, h: 1500 },
+                { label: "3:4", w: 1080, h: 1440 },
+                { label: "21:9", w: 2560, h: 1080 },
+                { label: "4:3", w: 1440, h: 1080 },
+                { label: "5:4", w: 1280, h: 1024 },
               ].map((r) => {
                 const active = state.canvasWidth === r.w && state.canvasHeight === r.h;
+                const ratio = r.w / r.h;
+                const maxDim = 22;
+                const boxW = ratio >= 1 ? maxDim : maxDim * ratio;
+                const boxH = ratio >= 1 ? maxDim / ratio : maxDim;
                 return (
                   <Button
                     key={r.label}
                     variant={active ? "secondary" : "outline"}
                     size="sm"
-                    className="h-7 text-[10px] px-1.5"
+                    className="h-14 flex flex-col items-center justify-center gap-1 px-1.5"
                     onClick={() => dispatch({ type: "SET_CANVAS_SIZE", payload: { width: r.w, height: r.h } })}
+                    title={`${r.label} (${r.w}×${r.h})`}
                   >
-                    {r.label}
+                    <div
+                      className={`border-[1.5px] rounded-[2px] ${active ? "border-foreground" : "border-muted-foreground"}`}
+                      style={{ width: `${boxW}px`, height: `${boxH}px` }}
+                    />
+                    <span className="text-[10px] leading-none">{r.label}</span>
                   </Button>
                 );
               })}
