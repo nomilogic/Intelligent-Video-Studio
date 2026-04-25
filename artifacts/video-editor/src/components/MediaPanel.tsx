@@ -102,7 +102,7 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
 
   const addBlank = (kind: "video" | "audio" | "image") => {
     const presets = {
-      video: { label: "Video Block", duration: 8, color: "#3b82f6", w: 1, h: 1, x: 0, y: 0 },
+      video: { label: "Video Block", duration: 8, color: "#1f1f24", w: 1, h: 1, x: 0, y: 0 },
       audio: { label: "Audio Track", duration: 30, color: "#10b981", w: 1, h: 0.05, x: 0, y: 0.95 },
       image: { label: "Image", duration: 5, color: "#f59e0b", w: 0.5, h: 0.5, x: 0.25, y: 0.25 },
     };

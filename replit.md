@@ -88,3 +88,17 @@ A professional browser-based video editor with AI instruction processing, multi-
 - `AI_INTEGRATIONS_GEMINI_BASE_URL` — Replit AI proxy base URL
 - `AI_INTEGRATIONS_GEMINI_API_KEY` — Replit AI proxy key
 - `SESSION_SECRET` — Session secret
+
+## Phase-1 Updates (April 2026)
+
+- **Blue-frame export glitch fixed.** Default clip color was `#3b82f6` (a bright blue used as a chip swatch) and the export's blank-clip fallback painted that color onto the frame, causing visible blue frames at clip boundaries during transitions. Reducer / templates / MediaPanel defaults switched to `#1f1f24` (canvas-grey). Export now paints the blank-clip fallback as **transparent** (no fill, no label) so seams between clips never flash a solid color.
+- **Smaller export resolutions.** `Resolution` type extended with `360p`, `240p`, `144p`, and `quarter`. `computeScale` in `use-export.ts` derives the scale from the source canvas height for each tier. ExportDialog now lists Full / 720p / 480p / 360p / 240p / 144p / Half / Quarter.
+- **Per-mask depth control.** Added `maskAffectsTracksBelow?: number` to `Clip`. Default `0` = "all tracks below" (legacy). Numeric value N restricts the cutout to the N tracks immediately beneath the mask layer. Applied in both the live preview (`Canvas.tsx → clipMaskStyle(clip)` builds a per-clip CSS mask SVG that only includes mask layers in reach of that clip's track) and the export pipeline (`use-export.ts → DrawBatch grouping by mask signature`).
+- **Per-clip mask compositing.** The Canvas no longer wraps the entire media composite in a single global CSS mask. Each media clip with at least one mask in reach is wrapped in its own canvas-sized mask box (`pointer-events-none` on the wrapper, `auto` on the inner content so clips remain selectable). Clips outside the depth window render unmasked.
+- **Universal Canvas Fit & Align section.** New `CanvasFitAlignSection` in `PropertiesInspector.tsx` replaces the old video/image-only "Canvas Fit" buttons. Works on every transformable clip type (video, image, text, color, mask layer, blur, shape, …). Provides icon-based Fill / Fit / Cover / Reset actions plus a 3×3 alignment grid that snaps the clip's bounding rect to canvas corners/edges/center while preserving size.
+- **Icon-based mask fit.** The Mask section's "Fit" dropdown was replaced with an icon row (Stretch / Fit / Cover) matching the universal section's visual language. Mask Layer clips additionally show a numeric "Affects tracks below" input bound to `maskAffectsTracksBelow`.
+
+### Deferred to Phase 2
+- GIF export (will use `gifenc`).
+- ~50 each of shapes / fonts / effects / transitions / templates / special layers, plus a custom user library and AI-controllable schema.
+- Color and gradient picker for shape clips.

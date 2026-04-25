@@ -52,7 +52,7 @@ function templateClip(partial: Partial<Clip>): Clip {
     muted: false,
     locked: false,
     hidden: false,
-    color: partial.color ?? "#3b82f6",
+    color: partial.color ?? "#1f1f24",
     effects: partial.effects ?? [],
     transitionIn: partial.transitionIn ?? { type: "none", duration: 0.5 },
   };

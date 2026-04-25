@@ -30,7 +30,7 @@ export const DEFAULT_FPS = 30;
 export const FPS_OPTIONS = [24, 30, 60] as const;
 export type FpsOption = (typeof FPS_OPTIONS)[number];
 
-export type Resolution = "full" | "720p" | "480p" | "half";
+export type Resolution = "full" | "720p" | "480p" | "360p" | "240p" | "144p" | "half" | "quarter";
 export type ExportFormat = "webm" | "mp4" | "audio";
 export type ExportMode = "quick" | "optimized";
 
@@ -52,7 +52,19 @@ export interface ExportStatus {
 export function computeScale(resolution: Resolution, canvasW: number, canvasH: number): number {
   if (resolution === "full") return 1;
   if (resolution === "half") return 0.5;
-  const target = resolution === "720p" ? 720 : 480;
+  if (resolution === "quarter") return 0.25;
+  // Pixel-height-targeted resolutions (720p, 480p, 360p, 240p, 144p): scale
+  // so the SHORTER dimension matches the named pixel count. Capped at 1 so
+  // we never upscale beyond the source canvas.
+  const targetMap: Partial<Record<Resolution, number>> = {
+    "720p": 720,
+    "480p": 480,
+    "360p": 360,
+    "240p": 240,
+    "144p": 144,
+  };
+  const target = targetMap[resolution];
+  if (!target) return 1;
   const shorter = Math.min(canvasW, canvasH);
   return Math.min(1, target / shorter);
 }
@@ -333,13 +345,15 @@ function drawClipToCanvas(
       ctx.fillText(line, anchorX, lineY);
     });
   } else {
-    ctx.fillStyle = clip.color || "#3b82f6";
-    ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
-    ctx.fillStyle = "rgba(255,255,255,0.7)";
-    ctx.font = `600 ${Math.max(12, Math.min(pw * 0.08, 24))}px sans-serif`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(clip.label, 0, 0);
+    // Color-block / blank clip. Treat empty/missing color as transparent so
+    // placeholders don't leak a stray colored frame into the export. Also
+    // skip the label overlay during export — labels are an editor-only
+    // affordance, not part of the final video.
+    const fill = clip.color && clip.color !== "transparent" ? clip.color : null;
+    if (fill) {
+      ctx.fillStyle = fill;
+      ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
+    }
   }
 
   // ─── Post-effect overlays (drawn within the clip's transform so they stay
@@ -554,48 +568,78 @@ async function renderFrame(
   ctx.fillStyle = s.background || "#000000";
   ctx.fillRect(0, 0, W, H);
 
-  // Pre-resolve mask-layer and logo-blur clips so we know whether to detour
-  // through an offscreen media composite for masking.
-  const maskLayerEntries: { clip: Clip; resolved: ReturnType<typeof resolveClip> }[] = [];
+  // Pre-resolve mask-layer and logo-blur clips. For masks, also compute the
+  // set of "affected" track indices using each mask's optional
+  // `maskAffectsTracksBelow` (depth) setting. A mask layer at trackIndex T
+  // with depth N affects clips on tracks (T-N .. T-1] — i.e. the N tracks
+  // visually beneath it (lower trackIndex = drawn first / underneath in
+  // sortedClips). When depth is unset/0, it affects ALL lower tracks (legacy
+  // behavior).
+  type MaskEntry = {
+    clip: Clip;
+    resolved: ReturnType<typeof resolveClip>;
+    minTrack: number; // inclusive lower bound of affected trackIndex
+    maxTrack: number; // inclusive upper bound of affected trackIndex
+  };
+  const maskLayerEntries: MaskEntry[] = [];
   const logoBlurEntries: { clip: Clip; resolved: ReturnType<typeof resolveClip> }[] = [];
   for (const clip of sortedClips) {
     if (clip.hidden) continue;
     if (clip.mediaType !== "maskLayer" && clip.mediaType !== "logoBlur") continue;
     const r = resolveClip(clip, s.keyframes, time);
     if (!r.visible) continue;
-    if (clip.mediaType === "maskLayer") maskLayerEntries.push({ clip, resolved: r });
-    else logoBlurEntries.push({ clip, resolved: r });
+    if (clip.mediaType === "maskLayer") {
+      const depth = clip.maskAffectsTracksBelow ?? 0;
+      const minTrack = depth > 0 ? Math.max(0, clip.trackIndex - depth) : -Infinity;
+      const maxTrack = clip.trackIndex - 1; // never affect own track or above
+      maskLayerEntries.push({ clip, resolved: r, minTrack, maxTrack });
+    } else logoBlurEntries.push({ clip, resolved: r });
   }
   const hasMaskLayers = maskLayerEntries.length > 0;
 
-  // 3. Draw media clips. When mask layers are present we render media into an
-  //    offscreen canvas first, apply the composed mask alpha via
-  //    destination-in, then drawImage the result onto the main canvas. This
-  //    keeps the page background visible in masked-out areas instead of
-  //    cutting it as well.
-  let mediaCanvas: HTMLCanvasElement | null = null;
-  let mediaCtx: CanvasRenderingContext2D = ctx;
-  if (hasMaskLayers) {
-    mediaCanvas = document.createElement("canvas");
-    mediaCanvas.width = W;
-    mediaCanvas.height = H;
-    const mc = mediaCanvas.getContext("2d");
-    if (mc) mediaCtx = mc;
-  }
+  // Helper: which mask layers (if any) affect a given media clip's track?
+  const masksFor = (mediaClip: Clip): MaskEntry[] => {
+    if (!hasMaskLayers) return [];
+    return maskLayerEntries.filter(
+      (m) => mediaClip.trackIndex >= m.minTrack && mediaClip.trackIndex <= m.maxTrack,
+    );
+  };
 
+  // Group consecutive media clips by their mask-set "signature" so clips
+  // sharing the same mask group can share an offscreen composite. Clips
+  // affected by zero masks are drawn directly to the main ctx.
+  type DrawBatch = {
+    sig: string;                   // joined mask-clip-ids
+    masks: MaskEntry[];            // mask layers to apply (empty = no masks)
+    clips: Clip[];                 // media clips drawn into this batch
+  };
+  const batches: DrawBatch[] = [];
+  let cur: DrawBatch | null = null;
   for (const clip of sortedClips) {
     if (clip.hidden) continue;
     if (clip.mediaType === "maskLayer" || clip.mediaType === "logoBlur") continue;
     const resolved = resolveClip(clip, s.keyframes, time);
     if (!resolved.visible) continue;
+    const ms = masksFor(clip);
+    const sig = ms.map((m) => m.clip.id).join("|");
+    if (!cur || cur.sig !== sig) {
+      cur = { sig, masks: ms, clips: [clip] };
+      batches.push(cur);
+    } else {
+      cur.clips.push(clip);
+    }
+  }
 
+  // 3. Render each batch in z-order. Batches with masks render to a per-batch
+  //    offscreen, get masked via destination-in, then composite onto the main
+  //    canvas. Batches without masks draw straight to the main canvas.
+  const drawClipBatch = (targetCtx: CanvasRenderingContext2D, clip: Clip) => {
+    const resolved = resolveClip(clip, s.keyframes, time);
+    if (!resolved.visible) return;
     const trans = getActiveTransition(clip, s.clips, time);
     const incomingMod = trans?.incoming ?? NO_TRANSITION;
     const fxImpact = getEffectImpact(clip, time);
 
-    // Ghost-render the prev clip (if any) with outgoing modulation. Drawing
-    // it BEFORE the current clip respects the natural z-order: the incoming
-    // clip sits on top of the outgoing one within its own track lane.
     if (trans && trans.prevClip) {
       const prev = trans.prevClip;
       const lastT = prev.startTime + prev.duration - 0.001;
@@ -607,7 +651,7 @@ async function renderFrame(
           : null;
       const pFx = getEffectImpact(prev, time);
       const prevMask = media.maskEls.get(prev.id) ?? null;
-      drawClipWithMask(mediaCtx, prev, pr, prevMediaEl, prevMask, W, H, scale, trans.outgoing, pFx);
+      drawClipWithMask(targetCtx, prev, pr, prevMediaEl, prevMask, W, H, scale, trans.outgoing, pFx);
     }
 
     const mediaEl = clip.mediaType === "video"
@@ -616,16 +660,13 @@ async function renderFrame(
         ? (media.imageEls.get(clip.id) ?? null)
         : null;
     const clipMask = media.maskEls.get(clip.id) ?? null;
-    drawClipWithMask(mediaCtx, clip, resolved, mediaEl, clipMask, W, H, scale, incomingMod, fxImpact);
-  }
+    drawClipWithMask(targetCtx, clip, resolved, mediaEl, clipMask, W, H, scale, incomingMod, fxImpact);
+  };
 
-  // 4. Apply mask-layer composite (destination-in) to the media offscreen,
-  //    then layer the masked media onto the main canvas (which already has
-  //    the page background filled).
-  if (hasMaskLayers && mediaCanvas) {
-    mediaCtx.save();
-    mediaCtx.globalCompositeOperation = "destination-in";
-    for (const { clip, resolved } of maskLayerEntries) {
+  const applyMasksToOffscreen = (offCtx: CanvasRenderingContext2D, masks: MaskEntry[]) => {
+    offCtx.save();
+    offCtx.globalCompositeOperation = "destination-in";
+    for (const { clip, resolved } of masks) {
       const maskCanvas = media.maskEls.get(clip.id);
       if (!maskCanvas) continue;
       const px = resolved.x * W;
@@ -635,17 +676,36 @@ async function renderFrame(
       const cx = px + pw / 2 + (resolved.translateX * pw) / 100;
       const cy = py + ph / 2 + (resolved.translateY * ph) / 100;
       const baseScale = resolved.scale || 1;
-      mediaCtx.save();
-      mediaCtx.globalAlpha = Math.max(0, Math.min(1, resolved.opacity));
-      mediaCtx.translate(cx, cy);
-      mediaCtx.rotate(((resolved.rotation || 0) * Math.PI) / 180);
-      mediaCtx.scale(baseScale, baseScale);
+      offCtx.save();
+      offCtx.globalAlpha = Math.max(0, Math.min(1, resolved.opacity));
+      offCtx.translate(cx, cy);
+      offCtx.rotate(((resolved.rotation || 0) * Math.PI) / 180);
+      offCtx.scale(baseScale, baseScale);
       const r = computeMaskTargetRect(clip.mask!, maskCanvas.width, maskCanvas.height, pw, ph);
-      mediaCtx.drawImage(maskCanvas, r.dx, r.dy, r.dw, r.dh);
-      mediaCtx.restore();
+      offCtx.drawImage(maskCanvas, r.dx, r.dy, r.dw, r.dh);
+      offCtx.restore();
     }
-    mediaCtx.restore();
-    ctx.drawImage(mediaCanvas, 0, 0);
+    offCtx.restore();
+  };
+
+  for (const batch of batches) {
+    if (batch.masks.length === 0) {
+      // No masks affect these clips — paint straight to the main canvas.
+      for (const c of batch.clips) drawClipBatch(ctx, c);
+    } else {
+      // Render to a per-batch offscreen so masking only clips THIS group.
+      const off = document.createElement("canvas");
+      off.width = W;
+      off.height = H;
+      const offCtx = off.getContext("2d");
+      if (!offCtx) {
+        for (const c of batch.clips) drawClipBatch(ctx, c);
+        continue;
+      }
+      for (const c of batch.clips) drawClipBatch(offCtx, c);
+      applyMasksToOffscreen(offCtx, batch.masks);
+      ctx.drawImage(off, 0, 0);
+    }
   }
 
   // 5. Apply logo-blur regions on top of the composite. Snapshot the current

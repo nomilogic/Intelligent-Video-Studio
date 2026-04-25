@@ -214,6 +214,11 @@ export interface Clip {
   // logoBlur clip type: blur radius in canvas-relative pixels (relative to a
   // 1080-px-wide canvas, scales with output size on export).
   blurAmount?: number;
+  // maskLayer clip type: limit how many tracks BELOW this mask layer are
+  // affected by it. 0 or undefined = all tracks below (current behavior).
+  // 1 = only the immediately-lower track, 2 = next two, etc. Lets users
+  // build per-clip cutouts without affecting unrelated tracks.
+  maskAffectsTracksBelow?: number;
 }
 
 export interface Transition {

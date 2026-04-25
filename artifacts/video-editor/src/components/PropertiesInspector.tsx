@@ -9,6 +9,11 @@ import {
   Trash2, Diamond, Copy, FlipHorizontal2, FlipVertical2, Eye, EyeOff,
   Lock, Unlock, RotateCcw, Volume2, VolumeX, Wand2, Scissors, Crop,
   Activity, Minus, Link2, Link2Off,
+  // Canvas-fit / alignment iconography
+  Maximize2, Minimize2, Move, Square,
+  AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
+  AlignStartVertical, AlignCenterVertical, AlignEndVertical,
+  Layers,
 } from "lucide-react";
 import { useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -428,6 +433,181 @@ const DEFAULT_MASK: ClipMask = {
   opacity: 1,
 };
 
+/**
+ * Icon-based row of mask-fit options. The same component is reused by
+ * the universal Canvas Fit & Align section (where it sets the clip's
+ * `objectFit`-equivalent positioning) and by MaskSection (where it
+ * configures `ClipMask.fit`). Pure UI — the parent decides what each
+ * button does.
+ */
+function FitIconRow({
+  value,
+  onChange,
+  options,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string; Icon: React.ComponentType<{ className?: string }> }[];
+}) {
+  return (
+    <div className="grid grid-cols-4 gap-1">
+      {options.map((o) => {
+        const active = value === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => onChange(o.value)}
+            title={o.label}
+            data-testid={`fit-${o.value}`}
+            className={`flex flex-col items-center gap-0.5 px-1.5 py-1.5 rounded-md border text-[9px] transition-colors ${
+              active
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border text-muted-foreground hover:bg-muted/40"
+            }`}
+          >
+            <o.Icon className="w-3.5 h-3.5" />
+            <span className="leading-none">{o.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * 3×3 alignment grid. The handler receives a horizontal/vertical pair
+ * ("left|center|right" × "top|middle|bottom") so the parent can apply it
+ * to whatever properties make sense (clip rect for canvas-align, mask
+ * offset for mask-align).
+ */
+function AlignmentGrid({
+  onAlign,
+  testIdPrefix,
+}: {
+  onAlign: (h: "left" | "center" | "right", v: "top" | "middle" | "bottom") => void;
+  testIdPrefix: string;
+}) {
+  const cells: { h: "left" | "center" | "right"; v: "top" | "middle" | "bottom"; Icon: any; label: string }[] = [
+    { h: "left", v: "top", Icon: AlignStartVertical, label: "Top-Left" },
+    { h: "center", v: "top", Icon: AlignStartHorizontal, label: "Top" },
+    { h: "right", v: "top", Icon: AlignStartVertical, label: "Top-Right" },
+    { h: "left", v: "middle", Icon: AlignStartVertical, label: "Left" },
+    { h: "center", v: "middle", Icon: AlignCenterHorizontal, label: "Center" },
+    { h: "right", v: "middle", Icon: AlignEndVertical, label: "Right" },
+    { h: "left", v: "bottom", Icon: AlignEndVertical, label: "Bottom-Left" },
+    { h: "center", v: "bottom", Icon: AlignEndHorizontal, label: "Bottom" },
+    { h: "right", v: "bottom", Icon: AlignEndVertical, label: "Bottom-Right" },
+  ];
+  return (
+    <div className="grid grid-cols-3 gap-1">
+      {cells.map((c, i) => (
+        <button
+          key={i}
+          type="button"
+          onClick={() => onAlign(c.h, c.v)}
+          title={c.label}
+          data-testid={`${testIdPrefix}-${c.h}-${c.v}`}
+          className="aspect-square flex items-center justify-center rounded-md border border-border text-muted-foreground hover:border-primary hover:text-primary hover:bg-primary/10 transition-colors"
+        >
+          <c.Icon className="w-3.5 h-3.5" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Universal Canvas Fit & Align — appears on every transformable clip
+ * (video, image, text, color block, mask layer, blur layer, etc). Lets
+ * the user snap-fill, snap-fit, stretch, reset, or align the clip's
+ * bounding rect to the canvas with a single click. All actions write
+ * to the same x/y/width/height the keyframe pipeline reads, so the
+ * preview + export stay consistent.
+ */
+function CanvasFitAlignSection({
+  clip, dispatch,
+}: {
+  clip: Clip;
+  dispatch: React.Dispatch<EditorAction>;
+}) {
+  const update = (updates: Partial<Clip>) =>
+    dispatch({ type: "UPDATE_CLIP", payload: { id: clip.id, updates } });
+
+  // Fit actions write x/y/width/height in canvas-relative units (0..1).
+  // Aspect-aware fits (Fill/Fit) need the clip's intrinsic aspect ratio
+  // so they don't distort. We use the current width/height ratio as a
+  // proxy when there's no source media (good enough for color/text/mask
+  // boxes); for media clips this matches what the user sees.
+  const aspect = clip.width > 0 && clip.height > 0 ? clip.width / clip.height : 1;
+
+  const fillCanvas = () => update({ x: 0, y: 0, width: 1, height: 1 });
+  const fitCanvas = () => {
+    // contain: keep aspect, fill the smaller side
+    if (aspect >= 1) {
+      const h = 1 / aspect;
+      update({ x: 0, y: (1 - h) / 2, width: 1, height: h });
+    } else {
+      const w = aspect;
+      update({ x: (1 - w) / 2, y: 0, width: w, height: 1 });
+    }
+  };
+  const coverCanvas = () => {
+    // cover: keep aspect, fill the larger side (one dim crops)
+    if (aspect >= 1) {
+      const w = 1;
+      const h = w / aspect;
+      // Center vertically; if h > 1, the overflow is the cropped portion.
+      update({ x: 0, y: (1 - h) / 2, width: 1, height: h });
+    } else {
+      const h = 1;
+      const w = h * aspect;
+      update({ x: (1 - w) / 2, y: 0, width: w, height: 1 });
+    }
+  };
+  const resetSize = () => {
+    // half-canvas centered — sensible default
+    update({ x: 0.25, y: 0.25, width: 0.5, height: 0.5 });
+  };
+
+  const align = (h: "left" | "center" | "right", v: "top" | "middle" | "bottom") => {
+    const w = clip.width;
+    const ht = clip.height;
+    const x = h === "left" ? 0 : h === "right" ? 1 - w : (1 - w) / 2;
+    const y = v === "top" ? 0 : v === "bottom" ? 1 - ht : (1 - ht) / 2;
+    update({ x, y });
+  };
+
+  return (
+    <Section title="Canvas Fit & Align">
+      <FitIconRow
+        value=""
+        onChange={(v) => {
+          if (v === "fill") fillCanvas();
+          else if (v === "fit") fitCanvas();
+          else if (v === "cover") coverCanvas();
+          else if (v === "reset") resetSize();
+        }}
+        options={[
+          { value: "fill", label: "Fill", Icon: Maximize2 },
+          { value: "fit", label: "Fit", Icon: Minimize2 },
+          { value: "cover", label: "Cover", Icon: Square },
+          { value: "reset", label: "Reset", Icon: Move },
+        ]}
+      />
+      <div className="space-y-1">
+        <div className="text-[9px] uppercase tracking-wide text-muted-foreground/80">
+          Snap to canvas
+        </div>
+        <AlignmentGrid onAlign={align} testIdPrefix="canvas-align" />
+      </div>
+      <p className="text-[9px] text-muted-foreground leading-snug">
+        Fill stretches edge-to-edge. Fit/Cover preserve aspect (Fit shows the whole clip, Cover crops to fill). Snap moves the clip while keeping its current size.
+      </p>
+    </Section>
+  );
+}
+
 function MaskSection({
   clip, dispatch,
 }: {
@@ -521,14 +701,16 @@ function MaskSection({
             </div>
             <div>
               <Label className="text-[10px] text-muted-foreground">Fit</Label>
-              <Select value={m.fit} onValueChange={(v: any) => setMask({ fit: v })}>
-                <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="stretch" className="text-xs">Stretch</SelectItem>
-                  <SelectItem value="contain" className="text-xs">Contain</SelectItem>
-                  <SelectItem value="cover" className="text-xs">Cover</SelectItem>
-                </SelectContent>
-              </Select>
+              <FitIconRow
+                value={m.fit}
+                onChange={(v) => setMask({ fit: v as any })}
+                options={[
+                  { value: "stretch", label: "Stretch", Icon: Maximize2 },
+                  { value: "contain", label: "Fit", Icon: Minimize2 },
+                  { value: "cover", label: "Cover", Icon: Square },
+                  { value: "stretch", label: "Fill", Icon: Move },
+                ].slice(0, 3)}
+              />
             </div>
           </div>
           <NumPair label="Scale" value={m.scale} min={0.1} max={3} step={0.05} onChange={(v) => setMask({ scale: v })} />
@@ -543,6 +725,51 @@ function MaskSection({
           >
             {m.invert ? "Inverted" : "Invert mask"}
           </Button>
+          {/*
+            Mask depth — ONLY meaningful on a Mask Layer clip itself
+            (clip.mediaType === "maskLayer"), where it controls how many
+            tracks beneath this layer the cutout reaches. 0 = "all
+            tracks below" (legacy behaviour). N = "the N tracks directly
+            beneath only". Other clips with a mask field (per-clip mask
+            on a video, etc) ignore this — their mask only affects that
+            single clip by definition.
+          */}
+          {clip.mediaType === "maskLayer" && (
+            <div className="space-y-1 pt-1 border-t border-border/40">
+              <div className="flex items-center gap-1.5">
+                <Layers className="w-3 h-3 text-muted-foreground" />
+                <Label className="text-[10px] text-muted-foreground">
+                  Affects tracks below
+                </Label>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Input
+                  type="number"
+                  min={0}
+                  max={20}
+                  step={1}
+                  value={clip.maskAffectsTracksBelow ?? 0}
+                  onChange={(e) => {
+                    const n = Math.max(0, Math.min(20, Math.floor(Number(e.target.value) || 0)));
+                    dispatch({
+                      type: "UPDATE_CLIP",
+                      payload: { id: clip.id, updates: { maskAffectsTracksBelow: n } },
+                    });
+                  }}
+                  className="h-7 text-xs w-16"
+                  data-testid="mask-depth-input"
+                />
+                <span className="text-[10px] text-muted-foreground">
+                  {(clip.maskAffectsTracksBelow ?? 0) === 0
+                    ? "all tracks below"
+                    : `next ${clip.maskAffectsTracksBelow} track${(clip.maskAffectsTracksBelow ?? 0) === 1 ? "" : "s"}`}
+                </span>
+              </div>
+              <p className="text-[9px] text-muted-foreground leading-snug">
+                Set to 0 to mask everything underneath. Set to a number to limit the cutout to just the N tracks directly below this mask (e.g. 1 only cuts the track right beneath it).
+              </p>
+            </div>
+          )}
         </>
       )}
     </Section>
@@ -1257,59 +1484,20 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
                   </Button>
                 </div>
 
-                {(clip.mediaType === "video" || clip.mediaType === "image") && (
-                  <div className="space-y-1.5">
-                    <Label className="text-[10px] text-muted-foreground uppercase">Canvas Fit</Label>
-                    <div className="grid grid-cols-2 gap-1">
-                      <Button
-                        variant="outline" size="sm" className="h-7 text-[10px]"
-                        title="Stretch to fill canvas (ignores aspect ratio)"
-                        onClick={() => update({ x: 0, y: 0, width: 1, height: 1 })}
-                      >
-                        Stretch Fill
-                      </Button>
-                      <Button
-                        variant="outline" size="sm" className="h-7 text-[10px]"
-                        title="Scale to cover canvas, maintaining aspect ratio (may overflow)"
-                        onClick={() => {
-                          const s = 1 / Math.min(clip.width, clip.height);
-                          const nw = clip.width * s;
-                          const nh = clip.height * s;
-                          update({ x: (1 - nw) / 2, y: (1 - nh) / 2, width: nw, height: nh });
-                        }}
-                      >
-                        Scale Fill
-                      </Button>
-                      <Button
-                        variant="outline" size="sm" className="h-7 text-[10px]"
-                        title="Scale to fit inside canvas, maintaining aspect ratio"
-                        onClick={() => {
-                          const s = 1 / Math.max(clip.width, clip.height);
-                          const nw = clip.width * s;
-                          const nh = clip.height * s;
-                          update({ x: (1 - nw) / 2, y: (1 - nh) / 2, width: nw, height: nh });
-                        }}
-                      >
-                        Scale Fit
-                      </Button>
-                      <Button
-                        variant="outline" size="sm" className="h-7 text-[10px]"
-                        title="Center at original proportion (50% of canvas)"
-                        onClick={() => {
-                          const ratio = clip.width / clip.height;
-                          const nw = Math.min(0.8, ratio >= 1 ? 0.8 : 0.8 * ratio);
-                          const nh = nw / ratio;
-                          update({ x: (1 - nw) / 2, y: (1 - nh) / 2, width: nw, height: nh, rotation: 0, scale: 1 });
-                        }}
-                      >
-                        Original Ratio
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
                 <NumPair label="Border Radius" value={clip.borderRadius} min={0} max={64} step={1} suffix="px" onChange={(v) => update({ borderRadius: v })} />
               </Section>
+
+              <Separator />
+
+              {/*
+                Universal Canvas Fit & Align — works on every transformable
+                clip (video, image, text, color block, mask layer, blur,
+                shape, etc). Replaces the old video/image-only "Canvas
+                Fit" buttons with icon-based fit options + a 3×3
+                alignment grid so anyone can snap-fill or snap-align in
+                one click, regardless of clip type.
+              */}
+              <CanvasFitAlignSection clip={clip} dispatch={dispatch} />
 
               <Separator />
 

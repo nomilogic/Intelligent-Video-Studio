@@ -89,7 +89,7 @@ export function makeClip(partial: Partial<Clip> & { id?: string }): Clip {
     muted: partial.muted ?? false,
     locked: partial.locked ?? false,
     hidden: partial.hidden ?? false,
-    color: partial.color ?? "#3b82f6",
+    color: partial.color ?? "#1f1f24",
     effects: partial.effects ?? [],
     transitionIn: partial.transitionIn ?? { type: "none", duration: 0.5 },
     chromaKey: partial.chromaKey,

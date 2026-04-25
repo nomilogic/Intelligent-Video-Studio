@@ -902,44 +902,55 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
     [visibleClips],
   );
 
-  // Build composed CSS mask for the media-clip wrapper from all visible
-  // mask-layer clips. Each mask layer is wrapped in a canvas-sized SVG that
-  // bakes in the clip's full transform stack (x/y, width/height, translateX,
-  // translateY, scale, rotation, mask scale/offset/fit/opacity/invert) so the
-  // preview matches the exported video pixel-for-pixel. Each wrapped SVG is
-  // applied as its own CSS mask layer (preserving per-layer mode: luminance
-  // vs alpha), and the multiple layers are unioned by the browser's mask
-  // compositor — equivalent to After Effects "add" mode.
-  const maskWrapperStyle = useMemo<React.CSSProperties>(() => {
-    if (maskLayerClips.length === 0) return {};
+  // Per-mask-layer reach: a mask at trackIndex T with depth N affects
+  // clips on tracks (T-N .. T-1]. Depth 0/undefined = all tracks below.
+  // Returns the CSS-mask style (already canvas-sized via SVG) that should
+  // wrap a given media clip — empty object if no masks affect it.
+  const clipMaskStyle = useMemo(() => {
     const W = state.canvasWidth;
     const H = state.canvasHeight;
-    const images: string[] = [];
-    const modes: string[] = [];
-    for (const c of maskLayerClips) {
-      const r = resolveClip(c, state.keyframes, state.currentTime);
-      if (!r.visible) continue;
-      const m = c.mask;
-      if (!m || !m.src) continue;
-      const url = buildMaskLayerSvgUrl(c, r, m, W, H);
-      if (!url) continue;
-      images.push(`url("${url}")`);
-      modes.push(m.mode === "luminance" ? "luminance" : "alpha");
-    }
-    if (images.length === 0) return {};
-    const sizes = images.map(() => "100% 100%").join(", ");
-    const positions = images.map(() => "0% 0%").join(", ");
-    const repeats = images.map(() => "no-repeat").join(", ");
-    return {
-      WebkitMaskImage: images.join(", "),
-      maskImage: images.join(", "),
-      WebkitMaskSize: sizes,
-      maskSize: sizes,
-      WebkitMaskPosition: positions,
-      maskPosition: positions,
-      WebkitMaskRepeat: repeats,
-      maskRepeat: repeats,
-      maskMode: modes.join(", ") as any,
+    // Pre-resolve each visible mask layer once per render so we don't redo
+    // keyframe sampling per affected clip.
+    const resolvedMasks = maskLayerClips
+      .map((c) => {
+        const r = resolveClip(c, state.keyframes, state.currentTime);
+        return r.visible ? { c, r } : null;
+      })
+      .filter((x): x is { c: typeof maskLayerClips[number]; r: ReturnType<typeof resolveClip> } => !!x);
+
+    return (clip: { trackIndex: number }): React.CSSProperties => {
+      if (resolvedMasks.length === 0) return {};
+      const images: string[] = [];
+      const modes: string[] = [];
+      for (const { c, r } of resolvedMasks) {
+        const depth = c.maskAffectsTracksBelow ?? 0;
+        // Lower trackIndex = drawn first / underneath. A mask only ever
+        // affects clips on tracks BELOW (lower index), and only within the
+        // depth window if one is set.
+        if (clip.trackIndex >= c.trackIndex) continue;
+        if (depth > 0 && clip.trackIndex < c.trackIndex - depth) continue;
+        const m = c.mask;
+        if (!m || !m.src) continue;
+        const url = buildMaskLayerSvgUrl(c, r, m, W, H);
+        if (!url) continue;
+        images.push(`url("${url}")`);
+        modes.push(m.mode === "luminance" ? "luminance" : "alpha");
+      }
+      if (images.length === 0) return {};
+      const sizes = images.map(() => "100% 100%").join(", ");
+      const positions = images.map(() => "0% 0%").join(", ");
+      const repeats = images.map(() => "no-repeat").join(", ");
+      return {
+        WebkitMaskImage: images.join(", "),
+        maskImage: images.join(", "),
+        WebkitMaskSize: sizes,
+        maskSize: sizes,
+        WebkitMaskPosition: positions,
+        maskPosition: positions,
+        WebkitMaskRepeat: repeats,
+        maskRepeat: repeats,
+        maskMode: modes.join(", ") as any,
+      };
     };
   }, [maskLayerClips, state.keyframes, state.currentTime, state.canvasWidth, state.canvasHeight]);
 
@@ -1299,14 +1310,15 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
         />
 
         {/*
-          Media-clip composite, wrapped in a div whose CSS mask is the union
-          of all visible mask-layer clips' alphas. When there are no mask
-          layers, the wrapper has no mask and behaves transparently.
+          Media-clip composite. Masks are applied PER CLIP (respecting each
+          mask layer's optional `maskAffectsTracksBelow` depth setting), so a
+          mask only cuts the tracks the user wants it to. Each clip whose
+          track is in a mask's reach gets wrapped in a canvas-sized mask
+          box; clips with no masks render directly.
         */}
         <div
           className="absolute inset-0"
           data-testid="canvas-media-composite"
-          style={maskWrapperStyle}
         >
         {mediaClips.flatMap((clip) => {
           const isSelected = state.selectedClipIds.includes(clip.id);
@@ -1434,6 +1446,30 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
             </div>,
           );
 
+          // If any mask layer affects this clip's track, wrap its nodes in a
+          // canvas-sized mask box so the cutout applies only to this clip
+          // (and its transition ghost). Otherwise return the nodes directly.
+          const maskStyle = clipMaskStyle(clip);
+          const hasMask = !!(maskStyle as any).maskImage || !!(maskStyle as any).WebkitMaskImage;
+          if (hasMask) {
+            const wrapped: React.ReactNode[] = [
+              <div
+                key={`maskbox-${clip.id}`}
+                className="absolute inset-0 pointer-events-none"
+                style={maskStyle}
+              >
+                {/*
+                  Inner content keeps default pointer-events so individual
+                  clips remain selectable / draggable. The wrapper itself
+                  only carries the CSS mask.
+                */}
+                <div className="absolute inset-0 pointer-events-auto">
+                  {nodes}
+                </div>
+              </div>,
+            ];
+            return wrapped;
+          }
           return nodes;
         })}
         </div>

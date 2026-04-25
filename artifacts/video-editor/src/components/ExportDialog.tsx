@@ -37,17 +37,21 @@ export default function ExportDialog({
   const W_out = Math.round(state.canvasWidth * computeScale(resolution, state.canvasWidth, state.canvasHeight));
   const H_out = Math.round(state.canvasHeight * computeScale(resolution, state.canvasWidth, state.canvasHeight));
 
+  // Helper: build "WxH" string for a Resolution key without repeating
+  // the long computeScale boilerplate for every option.
+  const dimsFor = (r: Resolution) => {
+    const s = computeScale(r, state.canvasWidth, state.canvasHeight);
+    return `${Math.round(state.canvasWidth * s)}×${Math.round(state.canvasHeight * s)}`;
+  };
   const resolutionOptions: { value: Resolution; label: string; dims: string }[] = [
     { value: "full", label: "Full Res", dims: `${state.canvasWidth}×${state.canvasHeight}` },
-    {
-      value: "720p", label: "720p",
-      dims: `${Math.round(state.canvasWidth * computeScale("720p", state.canvasWidth, state.canvasHeight))}×${Math.round(state.canvasHeight * computeScale("720p", state.canvasWidth, state.canvasHeight))}`,
-    },
-    {
-      value: "480p", label: "480p",
-      dims: `${Math.round(state.canvasWidth * computeScale("480p", state.canvasWidth, state.canvasHeight))}×${Math.round(state.canvasHeight * computeScale("480p", state.canvasWidth, state.canvasHeight))}`,
-    },
-    { value: "half", label: "Half", dims: `${Math.round(state.canvasWidth * 0.5)}×${Math.round(state.canvasHeight * 0.5)}` },
+    { value: "720p", label: "720p", dims: dimsFor("720p") },
+    { value: "480p", label: "480p", dims: dimsFor("480p") },
+    { value: "360p", label: "360p", dims: dimsFor("360p") },
+    { value: "240p", label: "240p", dims: dimsFor("240p") },
+    { value: "144p", label: "144p", dims: dimsFor("144p") },
+    { value: "half", label: "Half", dims: dimsFor("half") },
+    { value: "quarter", label: "Quarter", dims: dimsFor("quarter") },
   ];
 
   const videoFormatOptions: { value: ExportFormat; label: string; desc: string }[] = [
