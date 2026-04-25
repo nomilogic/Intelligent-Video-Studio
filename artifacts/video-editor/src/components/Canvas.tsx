@@ -1,6 +1,15 @@
 import { useRef, useState, useCallback, useEffect, useMemo, memo } from "react";
 import { EditorState, EditorAction, Clip } from "../lib/types";
-import { resolveClip, clipVisibleAt } from "../lib/animation";
+import {
+  resolveClip,
+  clipVisibleAt,
+  getActiveTransition,
+  getEffectImpact,
+  combineFilterCss,
+  type EffectOverlay,
+  type TransitionMod,
+  NO_TRANSITION,
+} from "../lib/animation";
 import { cn } from "@/lib/utils";
 
 interface CanvasProps {
@@ -212,6 +221,61 @@ const MediaContent = memo(MediaContentBase, (prev, next) => {
   // changed enough to need a seek.
   return Math.abs(prev.videoTime - next.videoTime) < 0.001;
 });
+
+/**
+ * Renders the per-clip post-effect overlays (vignette, scanlines, tint).
+ * These are stacked inset divs that sit on top of the clip's media. Effects
+ * that translate to CSS filters / transforms are applied at the wrapper level
+ * via getEffectImpact() and are not drawn here.
+ */
+function EffectOverlays({ overlays }: { overlays: EffectOverlay[] }) {
+  if (!overlays || overlays.length === 0) return null;
+  return (
+    <>
+      {overlays.map((o, i) => {
+        if (o.kind === "vignette") {
+          // Radial gradient that fades from transparent center to dark edges.
+          const dark = Math.min(0.9, 0.85 * o.intensity);
+          return (
+            <div
+              key={`v-${i}`}
+              className="absolute inset-0 pointer-events-none"
+              style={{
+                background: `radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,${dark.toFixed(2)}) 100%)`,
+              }}
+            />
+          );
+        }
+        if (o.kind === "scanlines") {
+          const alpha = Math.min(0.6, 0.4 * o.intensity + 0.05);
+          return (
+            <div
+              key={`s-${i}`}
+              className="absolute inset-0 pointer-events-none mix-blend-multiply"
+              style={{
+                backgroundImage: `repeating-linear-gradient(0deg, rgba(0,0,0,${alpha.toFixed(2)}) 0px, rgba(0,0,0,${alpha.toFixed(2)}) 1px, transparent 1px, transparent 3px)`,
+              }}
+            />
+          );
+        }
+        if (o.kind === "tint") {
+          const alpha = Math.min(0.7, 0.5 * o.intensity);
+          return (
+            <div
+              key={`t-${i}`}
+              className="absolute inset-0 pointer-events-none mix-blend-color"
+              style={{
+                backgroundColor: o.color,
+                opacity: alpha,
+              }}
+            />
+          );
+        }
+        return null;
+      })}
+    </>
+  );
+}
 
 export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange, isCropping, onCroppingChange }: CanvasProps) {
   const outerRef = useRef<HTMLDivElement>(null);
@@ -612,12 +676,61 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
           }}
         />
 
-        {visibleClips.map((clip) => {
+        {visibleClips.flatMap((clip) => {
           const isSelected = state.selectedClipIds.includes(clip.id);
           const cropThis = isCropping && isSelected && (clip.mediaType === "video" || clip.mediaType === "image");
           const r = resolveClip(clip, state.keyframes, state.currentTime);
-          if (!r.visible) return null;
-          return (
+          if (!r.visible) return [];
+
+          // Transition state: if active, also render the prev clip (frozen at
+          // its last frame) underneath with the OUTGOING modulation.
+          const trans = getActiveTransition(clip, state.clips, state.currentTime);
+          const incomingMod = trans?.incoming ?? NO_TRANSITION;
+          const fxImpact = getEffectImpact(clip, state.currentTime);
+
+          const nodes: React.ReactNode[] = [];
+
+          // 1. Ghost-render the prev clip during the transition window.
+          if (trans && trans.prevClip) {
+            const prev = trans.prevClip;
+            // Resolve the prev clip at its last visible moment so we get a
+            // stable "frozen final frame" to fade/slide out from.
+            const lastT = prev.startTime + prev.duration - 0.001;
+            const pr = resolveClip(prev, state.keyframes, lastT);
+            const pFx = getEffectImpact(prev, state.currentTime);
+            const out = trans.outgoing;
+            nodes.push(
+              <div
+                key={`ghost-${prev.id}-${clip.id}`}
+                aria-hidden
+                data-testid={`canvas-ghost-${prev.id}`}
+                className="absolute overflow-hidden pointer-events-none"
+                style={{
+                  left: `${pr.x * 100}%`,
+                  top: `${pr.y * 100}%`,
+                  width: `${pr.width * 100}%`,
+                  height: `${pr.height * 100}%`,
+                  opacity: pr.opacity * out.opacityMul,
+                  transform: `translate(${pr.translateX + out.translateXPct + pFx.shakeXPct}%, ${pr.translateY + out.translateYPct + pFx.shakeYPct}%) rotate(${pr.rotation}deg) scale(${pr.scale * out.scaleMul})`,
+                  mixBlendMode: prev.blendMode as any,
+                  filter: combineFilterCss(pr.filterCss, pFx.extraFilter, out.blurExtra),
+                  borderRadius: `${prev.borderRadius}px`,
+                  transformOrigin: "center",
+                  clipPath:
+                    out.clipInsetLeft > 0
+                      ? `inset(0 0 0 ${(out.clipInsetLeft * 100).toFixed(2)}%)`
+                      : undefined,
+                  containerType: "size",
+                }}
+              >
+                <MediaContent clip={prev} videoTime={pr.videoTime} isPlaying={false} showFullSource={false} />
+                <EffectOverlays overlays={pFx.overlays} />
+              </div>,
+            );
+          }
+
+          // 2. The clip itself (with incoming transition + effects).
+          nodes.push(
             <div
               key={clip.id}
               data-testid={`canvas-clip-${clip.id}`}
@@ -631,19 +744,26 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
                 top: `${r.y * 100}%`,
                 width: `${r.width * 100}%`,
                 height: `${r.height * 100}%`,
-                opacity: r.opacity,
-                transform: `translate(${r.translateX}%, ${r.translateY}%) rotate(${r.rotation}deg) scale(${r.scale})`,
+                opacity: r.opacity * incomingMod.opacityMul,
+                transform: `translate(${r.translateX + incomingMod.translateXPct + fxImpact.shakeXPct}%, ${r.translateY + incomingMod.translateYPct + fxImpact.shakeYPct}%) rotate(${r.rotation}deg) scale(${r.scale * incomingMod.scaleMul})`,
                 mixBlendMode: clip.blendMode as any,
-                filter: r.filterCss,
+                filter: combineFilterCss(r.filterCss, fxImpact.extraFilter, incomingMod.blurExtra),
                 borderRadius: cropThis ? 0 : `${clip.borderRadius}px`,
                 transformOrigin: "center",
+                clipPath:
+                  incomingMod.clipInsetRight > 0
+                    ? `inset(0 ${(incomingMod.clipInsetRight * 100).toFixed(2)}% 0 0)`
+                    : undefined,
                 containerType: "size",
               }}
               onMouseDown={cropThis ? undefined : (e) => startDrag(e, clip, "move")}
             >
               <MediaContent clip={clip} videoTime={r.videoTime} isPlaying={state.isPlaying} showFullSource={cropThis} />
-            </div>
+              <EffectOverlays overlays={fxImpact.overlays} />
+            </div>,
           );
+
+          return nodes;
         })}
 
         {/* Selection overlay (drawn outside clip transform so handles aren't rotated) */}

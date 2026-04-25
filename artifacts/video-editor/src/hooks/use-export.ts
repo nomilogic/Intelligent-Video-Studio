@@ -2,7 +2,18 @@ import { useState, useRef, useCallback } from "react";
 import { Muxer as Mp4Muxer, ArrayBufferTarget as Mp4Target } from "mp4-muxer";
 import { Muxer as WebMMuxer, ArrayBufferTarget as WebMTarget } from "webm-muxer";
 import { EditorState, Clip } from "../lib/types";
-import { resolveClip, clipVisibleAt } from "../lib/animation";
+import {
+  resolveClip,
+  clipVisibleAt,
+  getActiveTransition,
+  getEffectImpact,
+  combineFilterCss,
+  hexWithAlpha,
+  NO_TRANSITION,
+  NO_EFFECT_IMPACT,
+  type TransitionMod,
+  type EffectImpact,
+} from "../lib/animation";
 
 // Sample rate used for offline audio rendering and encoding.
 const AUDIO_SAMPLE_RATE = 48000;
@@ -106,13 +117,21 @@ function drawClipToCanvas(
   W: number,
   H: number,
   resScale: number,
+  mod: TransitionMod = NO_TRANSITION,
+  fx: EffectImpact = NO_EFFECT_IMPACT,
 ) {
   ctx.save();
-  ctx.globalAlpha = Math.max(0, Math.min(1, resolved.opacity));
+  ctx.globalAlpha = Math.max(0, Math.min(1, resolved.opacity * mod.opacityMul));
   ctx.globalCompositeOperation = (clip.blendMode || "normal") as GlobalCompositeOperation;
 
-  const filterStr = buildCanvasFilter(resolved.filterCss);
+  // Combine base filter + effect-driven filter + transition blur.
+  const combinedFilter = combineFilterCss(resolved.filterCss, fx.extraFilter, mod.blurExtra);
+  const filterStr = buildCanvasFilter(combinedFilter);
   if (filterStr !== "none") ctx.filter = filterStr;
+
+  // Set glow shadow if any glow effect contributed (we approximate by parsing
+  // out the first drop-shadow from extraFilter — but ctx.filter already
+  // handles drop-shadow on the drawn image, so no extra work needed here).
 
   const px = resolved.x * W;
   const py = resolved.y * H;
@@ -121,12 +140,29 @@ function drawClipToCanvas(
   const cx = px + pw / 2;
   const cy = py + ph / 2;
 
-  ctx.translate(cx + resolved.translateX * pw / 100, cy + resolved.translateY * ph / 100);
+  // Combined translate: base + transition + effect shake. Each component is
+  // expressed as a percentage of the clip's own width/height.
+  const txPct = resolved.translateX + mod.translateXPct + fx.shakeXPct;
+  const tyPct = resolved.translateY + mod.translateYPct + fx.shakeYPct;
+  ctx.translate(cx + (txPct * pw) / 100, cy + (tyPct * ph) / 100);
   ctx.rotate(((resolved.rotation || 0) * Math.PI) / 180);
 
-  const sx = (resolved.scale || 1) * (clip.flipH ? -1 : 1);
-  const sy = (resolved.scale || 1) * (clip.flipV ? -1 : 1);
+  const baseScale = (resolved.scale || 1) * mod.scaleMul;
+  const sx = baseScale * (clip.flipH ? -1 : 1);
+  const sy = baseScale * (clip.flipV ? -1 : 1);
   ctx.scale(sx, sy);
+
+  // Wipe transition: clip the rect from one side. clipInsetRight cuts off a
+  // fraction of the right edge (incoming side); clipInsetLeft cuts the left.
+  if (mod.clipInsetRight > 0 || mod.clipInsetLeft > 0) {
+    const left = -pw / 2 + mod.clipInsetLeft * pw;
+    const right = pw / 2 - mod.clipInsetRight * pw;
+    if (right > left) {
+      ctx.beginPath();
+      ctx.rect(left, -ph / 2, right - left, ph);
+      ctx.clip();
+    }
+  }
 
   if (clip.borderRadius > 0) {
     roundRectPath(ctx, -pw / 2, -ph / 2, pw, ph, clip.borderRadius * resScale);
@@ -198,6 +234,41 @@ function drawClipToCanvas(
     ctx.fillText(clip.label, 0, 0);
   }
 
+  // ─── Post-effect overlays (drawn within the clip's transform so they stay
+  //      attached to the clip, including transition shifts and shake). Each
+  //      overlay paints over the clip rect [-pw/2, -ph/2, pw, ph]. We reset
+  //      the canvas filter to avoid double-applying drop-shadow/blur to the
+  //      overlay rectangles. ────────────────────────────────────────────────
+  if (fx.overlays.length > 0) {
+    ctx.filter = "none";
+    ctx.shadowBlur = 0;
+    for (const o of fx.overlays) {
+      const i = Math.max(0, Math.min(1, o.intensity));
+      if (o.kind === "vignette") {
+        const radius = Math.hypot(pw / 2, ph / 2);
+        const grad = ctx.createRadialGradient(0, 0, radius * 0.4, 0, 0, radius);
+        grad.addColorStop(0, "rgba(0,0,0,0)");
+        grad.addColorStop(1, `rgba(0,0,0,${(0.85 * i).toFixed(3)})`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
+      } else if (o.kind === "scanlines") {
+        const alpha = Math.min(0.6, 0.4 * i + 0.05);
+        ctx.fillStyle = `rgba(0,0,0,${alpha.toFixed(3)})`;
+        // Draw 1px lines every 3px (in clip-local pixels). Density tracks the
+        // intensity slightly.
+        const step = 3;
+        for (let y = -ph / 2; y < ph / 2; y += step) {
+          ctx.fillRect(-pw / 2, y, pw, 1);
+        }
+      } else if (o.kind === "tint") {
+        const color = o.color || "#ff00aa";
+        const alpha = Math.min(0.7, 0.5 * i);
+        ctx.fillStyle = hexWithAlpha(color, alpha);
+        ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
+      }
+    }
+  }
+
   ctx.restore();
 }
 
@@ -250,7 +321,9 @@ async function renderFrame(
   scale: number,
   time: number,
 ) {
-  // 1. Seek visible video clips to their exact frame positions.
+  // 1. Seek visible video clips to their exact frame positions. Also seek the
+  //    "prev clip" of any active transition to its final frame, so the
+  //    outgoing ghost has real video content (not a black frame).
   for (const clip of sortedClips) {
     if (clip.mediaType !== "video" || clip.hidden) continue;
     const vid = media.videoEls.get(clip.id);
@@ -259,6 +332,18 @@ async function renderFrame(
       const resolved = resolveClip(clip, s.keyframes, time);
       await seekVideo(vid, resolved.videoTime);
     }
+  }
+  // Pre-seek prev video clips that need to be ghost-rendered.
+  for (const clip of sortedClips) {
+    if (clip.hidden) continue;
+    const trans = getActiveTransition(clip, s.clips, time);
+    if (!trans || !trans.prevClip || trans.prevClip.mediaType !== "video") continue;
+    const prev = trans.prevClip;
+    const vid = media.videoEls.get(prev.id);
+    if (!vid) continue;
+    const lastT = prev.startTime + prev.duration - 0.001;
+    const pr = resolveClip(prev, s.keyframes, lastT);
+    await seekVideo(vid, pr.videoTime);
   }
 
   // 2. Clear and draw everything onto the offscreen canvas.
@@ -270,12 +355,33 @@ async function renderFrame(
     if (clip.hidden) continue;
     const resolved = resolveClip(clip, s.keyframes, time);
     if (!resolved.visible) continue;
+
+    const trans = getActiveTransition(clip, s.clips, time);
+    const incomingMod = trans?.incoming ?? NO_TRANSITION;
+    const fxImpact = getEffectImpact(clip, time);
+
+    // Ghost-render the prev clip (if any) with outgoing modulation. Drawing
+    // it BEFORE the current clip respects the natural z-order: the incoming
+    // clip sits on top of the outgoing one within its own track lane.
+    if (trans && trans.prevClip) {
+      const prev = trans.prevClip;
+      const lastT = prev.startTime + prev.duration - 0.001;
+      const pr = resolveClip(prev, s.keyframes, lastT);
+      const prevMediaEl = prev.mediaType === "video"
+        ? (media.videoEls.get(prev.id) ?? null)
+        : prev.mediaType === "image"
+          ? (media.imageEls.get(prev.id) ?? null)
+          : null;
+      const pFx = getEffectImpact(prev, time);
+      drawClipToCanvas(ctx, prev, pr, prevMediaEl, W, H, scale, trans.outgoing, pFx);
+    }
+
     const mediaEl = clip.mediaType === "video"
       ? (media.videoEls.get(clip.id) ?? null)
       : clip.mediaType === "image"
         ? (media.imageEls.get(clip.id) ?? null)
         : null;
-    drawClipToCanvas(ctx, clip, resolved, mediaEl, W, H, scale);
+    drawClipToCanvas(ctx, clip, resolved, mediaEl, W, H, scale, incomingMod, fxImpact);
   }
 }
 

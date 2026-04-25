@@ -1,4 +1,4 @@
-import { EditorState, EditorAction, Clip, DEFAULT_FILTERS, EasingType } from "../lib/types";
+import { EditorState, EditorAction, Clip, DEFAULT_FILTERS, EasingType, Effect, EffectType, TransitionType } from "../lib/types";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
@@ -24,6 +24,27 @@ interface PropertiesInspectorProps {
 const ANIMATIONS = [
   "none", "fade", "slideLeft", "slideRight", "slideUp", "slideDown",
   "zoomIn", "zoomOut", "spin", "bounce",
+];
+
+const TRANSITIONS: { value: TransitionType; label: string }[] = [
+  { value: "none", label: "None" },
+  { value: "fade", label: "Fade" },
+  { value: "slideLeft", label: "Slide Left" },
+  { value: "slideRight", label: "Slide Right" },
+  { value: "slideUp", label: "Slide Up" },
+  { value: "slideDown", label: "Slide Down" },
+  { value: "zoom", label: "Zoom" },
+  { value: "blur", label: "Blur" },
+  { value: "wipeLeft", label: "Wipe" },
+];
+
+const EFFECT_LIBRARY: { type: EffectType; label: string; defaultColor?: string }[] = [
+  { type: "vignette",  label: "Vignette" },
+  { type: "glow",      label: "Glow", defaultColor: "#ffffff" },
+  { type: "shake",     label: "Shake" },
+  { type: "scanlines", label: "Scanlines" },
+  { type: "tint",      label: "Tint", defaultColor: "#ff00aa" },
+  { type: "blurMore",  label: "Soft Blur" },
 ];
 
 const BLEND_MODES = [
@@ -147,6 +168,94 @@ function NumPair({
       </div>
       <Slider value={[value]} min={min} max={max} step={step} onValueChange={([v]) => onChange(v)} />
     </div>
+  );
+}
+
+function EffectsSection({
+  clip, dispatch,
+}: {
+  clip: Clip;
+  dispatch: React.Dispatch<EditorAction>;
+}) {
+  const effects = clip.effects ?? [];
+  const writeEffects = (next: Effect[]) => {
+    dispatch({ type: "UPDATE_CLIP", payload: { id: clip.id, updates: { effects: next } } });
+  };
+  const addEffect = (type: EffectType) => {
+    if (effects.some((e) => e.type === type)) return; // one of each kind
+    const def = EFFECT_LIBRARY.find((e) => e.type === type);
+    const eff: Effect = {
+      id: `fx-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      type,
+      intensity: 0.5,
+      ...(def?.defaultColor ? { color: def.defaultColor } : {}),
+    };
+    writeEffects([...effects, eff]);
+  };
+  const removeEffect = (id: string) => writeEffects(effects.filter((e) => e.id !== id));
+  const updateEffect = (id: string, patch: Partial<Effect>) =>
+    writeEffects(effects.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+
+  return (
+    <Section title="Visual Effects" action={
+      effects.length > 0 ? (
+        <Button variant="ghost" size="icon" className="w-5 h-5" onClick={() => writeEffects([])} title="Clear all effects">
+          <RotateCcw className="w-3 h-3" />
+        </Button>
+      ) : undefined
+    }>
+      <div className="grid grid-cols-3 gap-1">
+        {EFFECT_LIBRARY.map((e) => {
+          const active = effects.some((ef) => ef.type === e.type);
+          return (
+            <Button
+              key={e.type}
+              variant={active ? "secondary" : "outline"}
+              size="sm"
+              className={`h-7 text-[10px] ${active ? "bg-primary/20 border-primary/50" : ""}`}
+              onClick={() => active ? removeEffect(effects.find((ef) => ef.type === e.type)!.id) : addEffect(e.type)}
+              data-testid={`effect-toggle-${e.type}`}
+            >
+              {e.label}
+            </Button>
+          );
+        })}
+      </div>
+      {effects.length === 0 && (
+        <p className="text-[10px] text-muted-foreground">Tap an effect to add it. Stack as many as you like.</p>
+      )}
+      {effects.map((eff) => {
+        const def = EFFECT_LIBRARY.find((e) => e.type === eff.type);
+        const supportsColor = eff.type === "tint" || eff.type === "glow";
+        return (
+          <div key={eff.id} className="rounded-md border border-white/10 bg-black/20 p-1.5 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-medium text-white/80">{def?.label ?? eff.type}</span>
+              <Button variant="ghost" size="icon" className="w-5 h-5" onClick={() => removeEffect(eff.id)} title="Remove">
+                <Trash2 className="w-3 h-3" />
+              </Button>
+            </div>
+            <NumPair
+              label="Intensity"
+              value={eff.intensity}
+              min={0} max={1} step={0.05}
+              onChange={(v) => updateEffect(eff.id, { intensity: v })}
+            />
+            {supportsColor && (
+              <div className="flex items-center gap-1.5">
+                <Label className="text-[10px] text-muted-foreground w-14">Color</Label>
+                <Input
+                  type="color"
+                  value={eff.color || "#ffffff"}
+                  onChange={(e) => updateEffect(eff.id, { color: e.target.value })}
+                  className="h-6 w-10 p-0.5 cursor-pointer"
+                />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </Section>
   );
 }
 
@@ -650,6 +759,10 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
             </TabsContent>
 
             <TabsContent value="effects" className="m-0">
+              <EffectsSection clip={clip} dispatch={dispatch} />
+
+              <Separator />
+
               <Section title="Filter Presets">
                 <div className="grid grid-cols-3 gap-1.5">
                   {FILTER_PRESETS.map((p) => (
@@ -731,6 +844,33 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
             </TabsContent>
 
             <TabsContent value="anim" className="m-0">
+              <Section title="Transition In">
+                <Select
+                  value={(clip.transitionIn?.type ?? "none") as string}
+                  onValueChange={(v) => update({ transitionIn: { type: v as TransitionType, duration: clip.transitionIn?.duration ?? 0.5 } })}
+                >
+                  <SelectTrigger className="h-7 text-xs" data-testid="select-transition-in">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TRANSITIONS.map((t) => (
+                      <SelectItem key={t.value} value={t.value} className="text-xs">{t.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <NumPair
+                  label="Duration"
+                  value={clip.transitionIn?.duration ?? 0.5}
+                  min={0.1} max={3} step={0.1} suffix="s"
+                  onChange={(v) => update({ transitionIn: { type: clip.transitionIn?.type ?? "none", duration: v } })}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Blends with the previous clip on the same track during the first {(clip.transitionIn?.duration ?? 0.5).toFixed(1)}s.
+                </p>
+              </Section>
+
+              <Separator />
+
               <Section title="Animation In">
                 <Select value={clip.animationIn} onValueChange={(v) => update({ animationIn: v })}>
                   <SelectTrigger className="h-7 text-xs" data-testid="select-animation-in">

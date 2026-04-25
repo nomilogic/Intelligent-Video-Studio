@@ -34,6 +34,12 @@ A professional browser-based video editor with AI instruction processing, multi-
 - `markers[]` — colored ruler markers (id, time, label, color)
 - `tool` — `"select" | "blade"` for the timeline tool mode
 
+### CapCut-Style Features
+- **Per-clip Transition In** (`transitionIn: { type, duration }`) — Fade, Slide L/R/U/D, Zoom, Blur, Wipe. During the first `duration` seconds of a clip, if a previous clip on the same track ends within ~0.1s, that prev clip is "ghost-rendered" with the outgoing side of the same transition. No timeline overlap required. UI: Anim tab → "Transition In" section.
+- **Stackable Visual Effects** (`effects: Effect[]` per clip) — Vignette (radial dark gradient), Glow (color drop-shadow), Shake (deterministic sin/cos wobble), Scanlines (horizontal line overlay), Tint (color blend), Soft Blur. Each effect has 0–1 intensity; tint/glow take a color. UI: Effects tab → "Visual Effects" section (chips toggle, intensity slider per active effect).
+- **Project Templates** (`lib/templates.ts`) — 4 starter layouts (Social Reel 9:16, Photo Slideshow 16:9, Square Promo 1:1, Cinematic Title 16:9). Apply via Media panel → Templates tab. Replaces timeline + canvas size while preserving the user's imported assets, zoom, and AI history. Slots are blank color blocks that the user replaces with their own media.
+- Both transitions and effects render identically in the live canvas preview AND the export pipeline (`use-export.ts`), so what you see is what you save.
+
 ### Pro Features
 - **Video playback** — frame-accurate seek when paused (drift threshold 0.03s), permissive while playing (0.25s). videoTime correctly maps timeline → source via `trimStart + localTime * speed`.
 - **On-canvas transform** — anchor-based resize keeps the opposite edge/corner pinned (no position drift). Per-clip **Lock Ratio** toggle (link icon in Inspector header), Shift = one-off ratio lock, Alt = scale from center. Inspector W/H sliders also obey the ratio lock.

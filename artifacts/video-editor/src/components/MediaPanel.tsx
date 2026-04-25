@@ -1,10 +1,11 @@
 import { useRef, useState } from "react";
-import { Plus, Trash2, Film, Music, Image as ImageIcon, Type, Square, Sparkles } from "lucide-react";
+import { Plus, Trash2, Film, Music, Image as ImageIcon, Type, Square, Sparkles, Layout } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { EditorState, EditorAction, MediaAsset, DEFAULT_TEXT_STYLE } from "../lib/types";
 import { makeClip } from "../lib/reducer";
+import { TEMPLATES } from "../lib/templates";
 import { cn } from "@/lib/utils";
 
 const CLIP_COLORS = ["#3b82f6", "#8b5cf6", "#f59e0b", "#10b981", "#f43f5e", "#06b6d4", "#f97316", "#ec4899"];
@@ -34,7 +35,7 @@ async function probeDuration(src: string, type: "video" | "audio"): Promise<numb
 
 export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [activeTab, setActiveTab] = useState<"media" | "text" | "shapes">("media");
+  const [activeTab, setActiveTab] = useState<"media" | "text" | "shapes" | "templates">("media");
   const [textInput, setTextInput] = useState("Your title here");
 
   const addAssetToTimeline = (asset: MediaAsset) => {
@@ -135,6 +136,7 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
           { key: "media" as const, label: "Media" },
           { key: "text" as const, label: "Text" },
           { key: "shapes" as const, label: "Stock" },
+          { key: "templates" as const, label: "Templates" },
         ].map((t) => (
           <button
             key={t.key}
@@ -363,6 +365,58 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
           <div className="text-[10px] text-muted-foreground p-2 leading-relaxed">
             <p className="font-medium mb-1 flex items-center gap-1"><Sparkles className="w-3 h-3" /> Pro Tip</p>
             <p>Use the AI bar at the top to generate effects, animations, transitions, and more with natural language.</p>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "templates" && (
+        <div className="flex flex-col flex-1 overflow-y-auto p-2 space-y-2">
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Project Templates</p>
+          <p className="text-[10px] text-muted-foreground leading-relaxed">
+            Start from a ready-made layout. This <strong>replaces your current timeline</strong> — your imported media stays in the library so you can drop it into the empty slots.
+          </p>
+          <div className="space-y-1.5">
+            {TEMPLATES.map((tpl) => {
+              const aspect = tpl.canvasWidth / tpl.canvasHeight;
+              const aspectLabel = aspect > 1.1 ? "16:9" : aspect < 0.9 ? "9:16" : "1:1";
+              return (
+                <button
+                  key={tpl.key}
+                  className="w-full flex items-start gap-2 p-2 rounded-md border border-border bg-muted/20 hover:bg-muted/40 hover:border-primary/40 text-left transition-colors group"
+                  onClick={() => {
+                    if (state.clips.length > 0) {
+                      const ok = window.confirm(`Apply "${tpl.name}" template? This will replace your current timeline (your media library is kept).`);
+                      if (!ok) return;
+                    }
+                    dispatch({ type: "APPLY_TEMPLATE", payload: { templateKey: tpl.key } });
+                  }}
+                  data-testid={`template-${tpl.key}`}
+                  title={tpl.description}
+                >
+                  <div
+                    className="shrink-0 w-12 rounded bg-gradient-to-br from-primary/30 to-primary/10 border border-white/10 flex items-center justify-center text-lg"
+                    style={{
+                      aspectRatio: `${tpl.canvasWidth}/${tpl.canvasHeight}`,
+                      maxHeight: 56,
+                    }}
+                  >
+                    <span aria-hidden>{tpl.emoji}</span>
+                  </div>
+                  <div className="flex-1 min-w-0 space-y-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <Layout className="w-3 h-3 text-primary shrink-0" />
+                      <span className="text-xs font-medium text-foreground truncate">{tpl.name}</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground leading-snug line-clamp-2">{tpl.description}</p>
+                    <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground">
+                      <span className="px-1 py-px rounded bg-white/5">{aspectLabel}</span>
+                      <span>·</span>
+                      <span>{tpl.duration}s</span>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}

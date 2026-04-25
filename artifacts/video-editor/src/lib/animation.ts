@@ -1,4 +1,4 @@
-import type { Clip, ClipFilters, EasingType, Keyframe } from "./types";
+import type { Clip, ClipFilters, ClipTransition, EasingType, Effect, Keyframe, TransitionType } from "./types";
 import TWEEN from "@tweenjs/tween.js";
 
 const E = TWEEN.Easing;
@@ -277,3 +277,240 @@ export function resolveClip(
     videoTime,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Transitions
+// A "transitionIn" lives on a clip and modulates the first `duration` seconds
+// of that clip. If a previous clip on the same track ends within ~50ms before
+// this clip starts, that prev clip is also re-rendered during the window with
+// the OUTGOING side of the same transition, so the two clips visually blend.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface TransitionMod {
+  opacityMul: number;     // multiplied into clip opacity
+  translateXPct: number;  // percent of clip width
+  translateYPct: number;  // percent of clip height
+  scaleMul: number;       // multiplied into clip scale
+  blurExtra: number;      // extra px of CSS blur to apply
+  clipInsetRight: number; // wipe — fraction (0..1) inset from the right
+  clipInsetLeft: number;  // wipe — fraction (0..1) inset from the left
+}
+
+export const NO_TRANSITION: TransitionMod = {
+  opacityMul: 1,
+  translateXPct: 0,
+  translateYPct: 0,
+  scaleMul: 1,
+  blurExtra: 0,
+  clipInsetRight: 0,
+  clipInsetLeft: 0,
+};
+
+export function getTransitionForClip(clip: Clip): ClipTransition {
+  return clip.transitionIn ?? { type: "none", duration: 0.5 };
+}
+
+/**
+ * Find the prev clip on the same track that ends just before `clip` starts.
+ * Returns null if no such clip exists (or distance > 50ms).
+ */
+export function findPrevClipOnTrack(allClips: Clip[], clip: Clip): Clip | null {
+  let best: Clip | null = null;
+  let bestEnd = -Infinity;
+  for (const c of allClips) {
+    if (c.id === clip.id) continue;
+    if (c.trackIndex !== clip.trackIndex) continue;
+    const end = c.startTime + c.duration;
+    if (end <= clip.startTime + 0.05 && end > bestEnd) {
+      bestEnd = end;
+      best = c;
+    }
+  }
+  if (!best) return null;
+  // Only consider it adjacent if the gap is small (<= 0.1s).
+  if (clip.startTime - bestEnd > 0.1) return null;
+  return best;
+}
+
+/**
+ * Compute the transition modulation for the incoming or outgoing side of a
+ * transition. Progress p is in [0, 1] across the transition window.
+ *   side = "in"  → modulates the upcoming (current) clip
+ *   side = "out" → modulates the previous (outgoing) clip
+ */
+export function getTransitionMod(
+  type: TransitionType,
+  p: number,
+  side: "in" | "out",
+): TransitionMod {
+  const m: TransitionMod = { ...NO_TRANSITION };
+  if (type === "none") return m;
+  const ip = Math.max(0, Math.min(1, p));
+  const inv = 1 - ip;
+  switch (type) {
+    case "fade":
+      m.opacityMul = side === "in" ? ip : inv;
+      break;
+    case "slideLeft":
+      // incoming enters from the right, outgoing exits to the left
+      m.translateXPct = side === "in" ? inv * 100 : -ip * 100;
+      break;
+    case "slideRight":
+      m.translateXPct = side === "in" ? -inv * 100 : ip * 100;
+      break;
+    case "slideUp":
+      m.translateYPct = side === "in" ? inv * 100 : -ip * 100;
+      break;
+    case "slideDown":
+      m.translateYPct = side === "in" ? -inv * 100 : ip * 100;
+      break;
+    case "zoom":
+      // incoming starts small and grows; outgoing grows past 1 and fades
+      if (side === "in") { m.scaleMul = 0.7 + 0.3 * ip; m.opacityMul = ip; }
+      else { m.scaleMul = 1 + 0.3 * ip; m.opacityMul = inv; }
+      break;
+    case "blur":
+      if (side === "in") { m.blurExtra = inv * 16; m.opacityMul = ip; }
+      else { m.blurExtra = ip * 16; m.opacityMul = inv; }
+      break;
+    case "wipeLeft":
+      // incoming reveals from the right, outgoing is masked off from the left
+      if (side === "in") m.clipInsetRight = inv;
+      else m.clipInsetLeft = ip;
+      break;
+  }
+  return m;
+}
+
+/**
+ * Returns the transition state for `clip` at `time`, or null if not in a
+ * transition window.
+ *   `incoming` = mod to apply to clip itself (it's coming IN).
+ *   `outgoing` = mod to apply to the prev clip on the same track (going OUT).
+ *   `prevClip` = the prev clip to also render during the window, or null.
+ */
+export function getActiveTransition(
+  clip: Clip,
+  allClips: Clip[],
+  time: number,
+): { incoming: TransitionMod; outgoing: TransitionMod; prevClip: Clip | null; progress: number } | null {
+  const tr = getTransitionForClip(clip);
+  if (tr.type === "none" || tr.duration <= 0) return null;
+  const local = time - clip.startTime;
+  if (local < 0 || local > tr.duration) return null;
+  const p = local / tr.duration;
+  const eased = easeFn(p, "easeInOut");
+  const prev = findPrevClipOnTrack(allClips, clip);
+  return {
+    incoming: getTransitionMod(tr.type, eased, "in"),
+    outgoing: getTransitionMod(tr.type, eased, "out"),
+    prevClip: prev,
+    progress: eased,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Effects
+// Effects are stacked per-clip and contribute to: extra CSS filter, extra
+// transform shake, and extra overlay layers (vignette / scanlines / tint).
+// The renderer uses these helpers to keep behavior identical between the
+// preview canvas and the export pipeline.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface EffectImpact {
+  shakeXPct: number; // additional translateX as % of clip width
+  shakeYPct: number; // additional translateY as % of clip height
+  extraFilter: string; // appended to the clip's filter CSS
+  overlays: EffectOverlay[]; // drawn on top of the clip content
+}
+
+export interface EffectOverlay {
+  kind: "vignette" | "scanlines" | "tint";
+  intensity: number;
+  color?: string;
+}
+
+export const NO_EFFECT_IMPACT: EffectImpact = {
+  shakeXPct: 0,
+  shakeYPct: 0,
+  extraFilter: "",
+  overlays: [],
+};
+
+export function effectsOf(clip: Clip): Effect[] {
+  return clip.effects ?? [];
+}
+
+/**
+ * Compute combined effect impact for a clip at the given time. Time-driven
+ * effects (shake) use absolute time so the wobble is deterministic across
+ * preview & export.
+ */
+export function getEffectImpact(clip: Clip, time: number): EffectImpact {
+  const list = effectsOf(clip);
+  if (list.length === 0) return NO_EFFECT_IMPACT;
+
+  let shakeXPct = 0;
+  let shakeYPct = 0;
+  const filters: string[] = [];
+  const overlays: EffectOverlay[] = [];
+
+  for (const fx of list) {
+    const i = Math.max(0, Math.min(1, fx.intensity));
+    if (i <= 0) continue;
+    switch (fx.type) {
+      case "shake": {
+        // Smooth pseudo-random wobble with two frequencies so it doesn't loop.
+        const t = time;
+        shakeXPct += Math.sin(t * 31.7) * Math.cos(t * 17.3) * 6 * i;
+        shakeYPct += Math.cos(t * 27.1) * Math.sin(t * 13.9) * 6 * i;
+        break;
+      }
+      case "glow": {
+        // Drop-shadow gives a glow halo. Scaled to intensity.
+        const color = fx.color || "#ffffff";
+        const blur = Math.round(8 + 32 * i);
+        // 2 stacked drop-shadows for a richer glow
+        filters.push(`drop-shadow(0 0 ${blur}px ${hexWithAlpha(color, 0.9)})`);
+        filters.push(`drop-shadow(0 0 ${Math.round(blur * 1.6)}px ${hexWithAlpha(color, 0.5)})`);
+        break;
+      }
+      case "blurMore": {
+        filters.push(`blur(${Math.round(2 + 18 * i)}px)`);
+        break;
+      }
+      case "vignette":
+        overlays.push({ kind: "vignette", intensity: i });
+        break;
+      case "scanlines":
+        overlays.push({ kind: "scanlines", intensity: i });
+        break;
+      case "tint":
+        overlays.push({ kind: "tint", intensity: i, color: fx.color || "#ff00aa" });
+        break;
+    }
+  }
+  return { shakeXPct, shakeYPct, extraFilter: filters.join(" "), overlays };
+}
+
+/** Combine the base filter CSS with any effect-driven additions. */
+export function combineFilterCss(baseCss: string, extra: string, blurExtra: number): string {
+  const parts: string[] = [];
+  if (baseCss && baseCss !== "none") parts.push(baseCss);
+  if (extra) parts.push(extra);
+  if (blurExtra > 0) parts.push(`blur(${blurExtra.toFixed(1)}px)`);
+  return parts.join(" ") || "none";
+}
+
+function hexWithAlpha(hex: string, alpha: number): string {
+  // Allow already-rgba/hsl strings to pass through unchanged.
+  if (!hex.startsWith("#")) return hex;
+  let h = hex.slice(1);
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+export { hexWithAlpha };

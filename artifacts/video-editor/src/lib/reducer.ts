@@ -9,6 +9,7 @@ import {
   DEFAULT_FILTERS,
   DEFAULT_TEXT_STYLE,
 } from "./types";
+import { getTemplateByKey } from "./templates";
 
 const HISTORY_LIMIT = 50;
 
@@ -89,6 +90,8 @@ export function makeClip(partial: Partial<Clip> & { id?: string }): Clip {
     locked: partial.locked ?? false,
     hidden: partial.hidden ?? false,
     color: partial.color ?? "#3b82f6",
+    effects: partial.effects ?? [],
+    transitionIn: partial.transitionIn ?? { type: "none", duration: 0.5 },
   };
 }
 
@@ -683,6 +686,26 @@ function presentReducer(state: EditorState, action: EditorAction): EditorState {
       return applyOps(state, action.payload);
     case "REPLACE_STATE":
       return { ...action.payload, isPlaying: false };
+    case "APPLY_TEMPLATE": {
+      const tpl = getTemplateByKey(action.payload.templateKey);
+      if (!tpl) return state;
+      const built = tpl.build();
+      return {
+        ...state,
+        ...built,
+        // Reset the playhead and selection so the template plays cleanly.
+        currentTime: 0,
+        isPlaying: false,
+        selectedClipIds: [],
+        // Preserve user-imported assets; templates use only blank placeholders.
+        assets: state.assets,
+        // Preserve UI prefs that are unrelated to the project content.
+        zoom: state.zoom,
+        snapEnabled: state.snapEnabled,
+        tool: state.tool,
+        aiHistory: state.aiHistory,
+      };
+    }
     case "RESET":
       return initialState;
     default:

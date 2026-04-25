@@ -38,6 +38,37 @@ export interface TextStyle {
   underline: boolean;
 }
 
+export type EffectType =
+  | "vignette"
+  | "glow"
+  | "shake"
+  | "scanlines"
+  | "tint"
+  | "blurMore";
+
+export interface Effect {
+  id: string;
+  type: EffectType;
+  intensity: number; // 0..1
+  color?: string;    // used by tint / glow
+}
+
+export type TransitionType =
+  | "none"
+  | "fade"
+  | "slideLeft"
+  | "slideRight"
+  | "slideUp"
+  | "slideDown"
+  | "zoom"
+  | "blur"
+  | "wipeLeft";
+
+export interface ClipTransition {
+  type: TransitionType;
+  duration: number;
+}
+
 export interface Clip {
   id: string;
   label: string;
@@ -78,6 +109,9 @@ export interface Clip {
   locked: boolean;
   hidden: boolean;
   color: string;
+  // CapCut-style additions (optional for backward compatibility with older state)
+  effects?: Effect[];
+  transitionIn?: ClipTransition;
 }
 
 export interface Transition {
@@ -197,6 +231,7 @@ export type EditorAction =
   | { type: "RIPPLE_DELETE"; payload: string }
   | { type: "APPLY_OPERATIONS"; payload: any[] }
   | { type: "REPLACE_STATE"; payload: EditorState }
+  | { type: "APPLY_TEMPLATE"; payload: { templateKey: string } }
   | { type: "UNDO" }
   | { type: "REDO" }
   | { type: "RESET" };
