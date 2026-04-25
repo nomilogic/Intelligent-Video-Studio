@@ -488,6 +488,84 @@ const MediaContent = memo(MediaContentBase, (prev, next) => {
 });
 
 /**
+ * Inline text editor for text clips on the canvas. Activated by double-clicking
+ * a text clip. Mirrors the visual style of the rendered text so the editor is
+ * "in place" rather than a separate overlay. Commits on blur or Enter (without
+ * Shift, which inserts a newline). Esc cancels.
+ */
+function TextEditor({
+  clip,
+  onCommit,
+  onCancel,
+}: {
+  clip: Clip;
+  onCommit: (text: string) => void;
+  onCancel: () => void;
+}) {
+  const ts = clip.textStyle!;
+  const [value, setValue] = useState(clip.text || "");
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const autoScale = clip.textAutoScale !== false;
+  const fontSizeStyle = autoScale
+    ? `${ts.fontSize / 10}cqw`
+    : `calc(var(--canvas-w, 100cqw) * ${ts.fontSize / 1000})`;
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+  }, []);
+
+  return (
+    <div
+      className="w-full h-full flex px-2 py-1"
+      style={{
+        background: ts.background === "transparent" ? "transparent" : ts.background,
+        alignItems: "center",
+        justifyContent:
+          ts.align === "left" ? "flex-start" : ts.align === "right" ? "flex-end" : "center",
+        overflow: "hidden",
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <textarea
+        ref={ref}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => onCommit(value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            onCancel();
+          } else if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            onCommit(value);
+          }
+        }}
+        spellCheck={false}
+        className="bg-transparent border-none outline-none resize-none p-0 m-0 w-full"
+        style={{
+          fontFamily: ts.fontFamily,
+          fontSize: fontSizeStyle,
+          fontWeight: ts.fontWeight,
+          color: ts.color,
+          textAlign: ts.align,
+          fontStyle: ts.italic ? "italic" : "normal",
+          textDecoration: ts.underline ? "underline" : "none",
+          textShadow: ts.shadow ? "0 2px 12px rgba(0,0,0,0.6), 0 0 4px rgba(0,0,0,0.4)" : "none",
+          lineHeight: 1.1,
+          height: "100%",
+          caretColor: ts.color,
+          overflow: "hidden",
+        }}
+        data-testid={`canvas-text-editor-${clip.id}`}
+      />
+    </div>
+  );
+}
+
+/**
  * Renders the per-clip post-effect overlays (vignette, scanlines, tint).
  * These are stacked inset divs that sit on top of the clip's media. Effects
  * that translate to CSS filters / transforms are applied at the wrapper level
@@ -548,6 +626,16 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
   const [drag, setDrag] = useState<DragMode | null>(null);
   const [snapGuides, setSnapGuides] = useState<{ x?: number; y?: number }>({});
   const [fitSize, setFitSize] = useState({ w: 960, h: 540 });
+  const [editingTextId, setEditingTextId] = useState<string | null>(null);
+
+  // Exit inline text editing whenever the user selects something else, deletes
+  // the clip being edited, or switches into crop mode.
+  useEffect(() => {
+    if (!editingTextId) return;
+    const stillExists = state.clips.some((c) => c.id === editingTextId);
+    const stillSelected = state.selectedClipIds.includes(editingTextId);
+    if (!stillExists || !stillSelected || isCropping) setEditingTextId(null);
+  }, [editingTextId, state.clips, state.selectedClipIds, isCropping]);
 
   // Measure available space and compute the "fit" size at zoom=1
   useEffect(() => {
@@ -1060,14 +1148,22 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
           }
 
           // 2. The clip itself (with incoming transition + effects).
+          const isEditingText = editingTextId === clip.id && clip.mediaType === "text";
           nodes.push(
             <div
               key={clip.id}
               data-testid={`canvas-clip-${clip.id}`}
               className={cn(
                 "absolute overflow-hidden",
-                clip.locked ? "cursor-not-allowed" : cropThis ? "cursor-default" : "cursor-grab active:cursor-grabbing",
+                clip.locked
+                  ? "cursor-not-allowed"
+                  : cropThis
+                  ? "cursor-default"
+                  : isEditingText
+                  ? "cursor-text"
+                  : "cursor-grab active:cursor-grabbing",
                 isSelected && !cropThis && "outline outline-2 outline-primary outline-offset-0",
+                isEditingText && "outline outline-2 outline-primary outline-offset-0 ring-2 ring-primary/30",
               )}
               style={{
                 left: `${r.x * 100}%`,
@@ -1087,9 +1183,39 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
                 containerType: "size",
                 ...buildMaskStyle(clip.mask),
               }}
-              onMouseDown={cropThis ? undefined : (e) => startDrag(e, clip, "move")}
+              onMouseDown={
+                cropThis || isEditingText ? undefined : (e) => startDrag(e, clip, "move")
+              }
+              onDoubleClick={
+                clip.mediaType === "text" && !clip.locked && !cropThis
+                  ? (e) => {
+                      e.stopPropagation();
+                      dispatch({ type: "SELECT_CLIP", payload: clip.id });
+                      setEditingTextId(clip.id);
+                    }
+                  : undefined
+              }
             >
-              <MediaContent clip={clip} videoTime={r.videoTime} isPlaying={state.isPlaying} showFullSource={cropThis} />
+              {isEditingText ? (
+                <TextEditor
+                  clip={clip}
+                  onCommit={(text) => {
+                    dispatch({
+                      type: "UPDATE_CLIP",
+                      payload: { id: clip.id, updates: { text } },
+                    });
+                    setEditingTextId(null);
+                  }}
+                  onCancel={() => setEditingTextId(null)}
+                />
+              ) : (
+                <MediaContent
+                  clip={clip}
+                  videoTime={r.videoTime}
+                  isPlaying={state.isPlaying}
+                  showFullSource={cropThis}
+                />
+              )}
               <EffectOverlays overlays={fxImpact.overlays} />
             </div>,
           );
