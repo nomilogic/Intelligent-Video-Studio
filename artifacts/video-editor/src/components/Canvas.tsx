@@ -668,12 +668,28 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
     return () => el.removeEventListener("wheel", onWheel);
   }, [canvasZoom, onCanvasZoomChange]);
 
+  // Tracks marked hidden via the eye icon in the timeline header should
+  // disappear from the canvas entirely — not just dim in the timeline.
+  const hiddenTrackIndices = useMemo(
+    () =>
+      new Set(
+        state.tracks
+          .map((t, i) => (t.hidden ? i : -1))
+          .filter((i) => i >= 0),
+      ),
+    [state.tracks],
+  );
   const visibleClips = useMemo(
     () =>
       state.clips
-        .filter((c) => clipVisibleAt(c, state.currentTime) && !c.hidden)
+        .filter(
+          (c) =>
+            clipVisibleAt(c, state.currentTime) &&
+            !c.hidden &&
+            !hiddenTrackIndices.has(c.trackIndex),
+        )
         .sort((a, b) => b.trackIndex - a.trackIndex),
-    [state.clips, state.currentTime],
+    [state.clips, state.currentTime, hiddenTrackIndices],
   );
 
   // Split visible clips by role: "media" clips (regular content), "maskLayer"
