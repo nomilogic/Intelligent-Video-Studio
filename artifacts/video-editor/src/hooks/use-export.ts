@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { Muxer as Mp4Muxer, ArrayBufferTarget as Mp4Target } from "mp4-muxer";
 import { Muxer as WebMMuxer, ArrayBufferTarget as WebMTarget } from "webm-muxer";
-import { EditorState, Clip } from "../lib/types";
+import { EditorState, Clip, ClipMask } from "../lib/types";
 import {
   resolveClip,
   clipVisibleAt,
@@ -109,6 +109,32 @@ function objectCoverSourceRect(
   }
 }
 
+function computeMaskTargetRect(
+  mask: ClipMask, mw: number, mh: number, pw: number, ph: number,
+): { dx: number; dy: number; dw: number; dh: number } {
+  const scale = Math.max(0.05, mask.scale ?? 1);
+  let fitW: number;
+  let fitH: number;
+  if (mask.fit === "stretch") {
+    fitW = pw; fitH = ph;
+  } else {
+    const boxAspect = pw / Math.max(1e-6, ph);
+    const imgAspect = mw / Math.max(1e-6, mh);
+    if (mask.fit === "contain") {
+      if (imgAspect > boxAspect) { fitW = pw; fitH = pw / imgAspect; }
+      else { fitH = ph; fitW = ph * imgAspect; }
+    } else { // cover
+      if (imgAspect > boxAspect) { fitH = ph; fitW = ph * imgAspect; }
+      else { fitW = pw; fitH = pw / imgAspect; }
+    }
+  }
+  const dw = fitW * scale;
+  const dh = fitH * scale;
+  const dx = -dw / 2 + (mask.offsetX || 0) * pw;
+  const dy = -dh / 2 + (mask.offsetY || 0) * ph;
+  return { dx, dy, dw, dh };
+}
+
 function drawClipToCanvas(
   ctx: CanvasRenderingContext2D,
   clip: Clip,
@@ -119,6 +145,7 @@ function drawClipToCanvas(
   resScale: number,
   mod: TransitionMod = NO_TRANSITION,
   fx: EffectImpact = NO_EFFECT_IMPACT,
+  maskCanvas: HTMLCanvasElement | null = null,
 ) {
   ctx.save();
   ctx.globalAlpha = Math.max(0, Math.min(1, resolved.opacity * mod.opacityMul));
@@ -198,7 +225,11 @@ function drawClipToCanvas(
     }
   } else if (clip.mediaType === "text") {
     const ts = clip.textStyle!;
-    const fontSize = Math.max(1, (pw * (ts.fontSize || 64)) / 1000);
+    // Match Canvas.tsx: auto = font scales with clip width; fixed = font scales
+    // with the canvas width (so the box can be resized independently).
+    const autoScale = clip.textAutoScale !== false;
+    const sizeRef = autoScale ? pw : W;
+    const fontSize = Math.max(1, (sizeRef * (ts.fontSize || 64)) / 1000);
     const fontStyle = ts.italic ? "italic " : "";
     const fontStr = `${fontStyle}${ts.fontWeight || 700} ${fontSize}px ${ts.fontFamily || "sans-serif"}`;
 
@@ -269,19 +300,114 @@ function drawClipToCanvas(
     }
   }
 
+  // ─── Apply per-clip mask (still inside the clip's transform, so the mask
+  //      moves/rotates/scales with the clip). The caller renders this clip
+  //      to a fresh per-clip offscreen canvas when a mask is present, so
+  //      destination-in here only erases pixels of THIS clip — never of any
+  //      other clip already drawn to the main canvas. ─────────────────────
+  if (clip.mask && maskCanvas) {
+    ctx.filter = "none";
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "destination-in";
+    const r = computeMaskTargetRect(clip.mask, maskCanvas.width, maskCanvas.height, pw, ph);
+    ctx.drawImage(maskCanvas, r.dx, r.dy, r.dw, r.dh);
+  }
+
   ctx.restore();
+}
+
+// Render a single clip with optional mask. When a mask is present the clip is
+// drawn to a per-frame offscreen canvas first so destination-in compositing
+// only affects this clip's pixels, then the result is layered onto the main
+// composite.
+function drawClipWithMask(
+  mainCtx: CanvasRenderingContext2D,
+  clip: Clip,
+  resolved: ReturnType<typeof resolveClip>,
+  mediaEl: HTMLVideoElement | HTMLImageElement | null,
+  maskCanvas: HTMLCanvasElement | null,
+  W: number,
+  H: number,
+  resScale: number,
+  mod: TransitionMod = NO_TRANSITION,
+  fx: EffectImpact = NO_EFFECT_IMPACT,
+) {
+  if (!clip.mask || !maskCanvas) {
+    drawClipToCanvas(mainCtx, clip, resolved, mediaEl, W, H, resScale, mod, fx, null);
+    return;
+  }
+  const off = document.createElement("canvas");
+  off.width = mainCtx.canvas.width;
+  off.height = mainCtx.canvas.height;
+  const ox = off.getContext("2d");
+  if (!ox) {
+    drawClipToCanvas(mainCtx, clip, resolved, mediaEl, W, H, resScale, mod, fx, null);
+    return;
+  }
+  drawClipToCanvas(ox, clip, resolved, mediaEl, W, H, resScale, mod, fx, maskCanvas);
+  mainCtx.drawImage(off, 0, 0);
 }
 
 interface PreloadedMedia {
   videoEls: Map<string, HTMLVideoElement>;
   imageEls: Map<string, HTMLImageElement>;
+  // Per-clip prepared mask canvas. RGB is white; alpha encodes the mask
+  // strength according to the clip's mask.mode/invert settings.
+  maskEls: Map<string, HTMLCanvasElement>;
+}
+
+async function loadImageEl(src: string): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+function prepareMaskCanvas(img: HTMLImageElement, mask: ClipMask): HTMLCanvasElement {
+  const w = Math.max(1, img.naturalWidth || 1);
+  const h = Math.max(1, img.naturalHeight || 1);
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const cx = c.getContext("2d")!;
+  cx.drawImage(img, 0, 0);
+  const data = cx.getImageData(0, 0, w, h);
+  const px = data.data;
+  const opacity = Math.max(0, Math.min(1, mask.opacity ?? 1));
+  for (let i = 0; i < px.length; i += 4) {
+    let a: number;
+    if (mask.mode === "luminance") {
+      // Standard Rec.601 luminance.
+      a = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+    } else {
+      a = px[i + 3];
+    }
+    if (mask.invert) a = 255 - a;
+    a = a * opacity;
+    px[i] = 255;
+    px[i + 1] = 255;
+    px[i + 2] = 255;
+    px[i + 3] = Math.max(0, Math.min(255, a));
+  }
+  cx.putImageData(data, 0, 0);
+  return c;
 }
 
 async function preloadMedia(s: EditorState): Promise<PreloadedMedia> {
   const videoEls = new Map<string, HTMLVideoElement>();
   const imageEls = new Map<string, HTMLImageElement>();
+  const maskEls = new Map<string, HTMLCanvasElement>();
   await Promise.all(
     s.clips.map(async (clip) => {
+      // Preload masks for any clip type.
+      if (clip.mask?.src) {
+        const mImg = await loadImageEl(clip.mask.src);
+        if (mImg) maskEls.set(clip.id, prepareMaskCanvas(mImg, clip.mask));
+      }
       if (!clip.src) return;
       if (clip.mediaType === "video") {
         const v = document.createElement("video");
@@ -308,7 +434,7 @@ async function preloadMedia(s: EditorState): Promise<PreloadedMedia> {
       }
     }),
   );
-  return { videoEls, imageEls };
+  return { videoEls, imageEls, maskEls };
 }
 
 async function renderFrame(
@@ -373,7 +499,8 @@ async function renderFrame(
           ? (media.imageEls.get(prev.id) ?? null)
           : null;
       const pFx = getEffectImpact(prev, time);
-      drawClipToCanvas(ctx, prev, pr, prevMediaEl, W, H, scale, trans.outgoing, pFx);
+      const prevMask = media.maskEls.get(prev.id) ?? null;
+      drawClipWithMask(ctx, prev, pr, prevMediaEl, prevMask, W, H, scale, trans.outgoing, pFx);
     }
 
     const mediaEl = clip.mediaType === "video"
@@ -381,7 +508,8 @@ async function renderFrame(
       : clip.mediaType === "image"
         ? (media.imageEls.get(clip.id) ?? null)
         : null;
-    drawClipToCanvas(ctx, clip, resolved, mediaEl, W, H, scale, incomingMod, fxImpact);
+    const clipMask = media.maskEls.get(clip.id) ?? null;
+    drawClipWithMask(ctx, clip, resolved, mediaEl, clipMask, W, H, scale, incomingMod, fxImpact);
   }
 }
 

@@ -144,17 +144,21 @@ export const initialRootState: RootState = {
 
 function applyClipUpdate(state: EditorState, ids: string[], updates: Partial<Clip>): EditorState {
   const ensureFilters = (c: Clip): Clip => {
+    let next: Clip = { ...c, ...updates };
     if (updates.filters) {
-      return { ...c, ...updates, filters: { ...c.filters, ...updates.filters } };
+      next = { ...next, filters: { ...c.filters, ...updates.filters } };
     }
     if (updates.textStyle) {
-      return {
-        ...c,
-        ...updates,
-        textStyle: { ...(c.textStyle ?? DEFAULT_TEXT_STYLE), ...updates.textStyle },
-      };
+      next = { ...next, textStyle: { ...(c.textStyle ?? DEFAULT_TEXT_STYLE), ...updates.textStyle } };
     }
-    return { ...c, ...updates };
+    // Mask is a partial-merge as well, but `null` explicitly clears it.
+    if (updates.mask === null as any) {
+      const { mask: _drop, ...rest } = next;
+      next = rest as Clip;
+    } else if (updates.mask) {
+      next = { ...next, mask: { ...(c.mask ?? {} as any), ...updates.mask } };
+    }
+    return next;
   };
 
   // When a clip's startTime changes, its keyframes (stored as absolute project

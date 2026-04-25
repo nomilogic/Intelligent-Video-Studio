@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect, useMemo, memo } from "react";
-import { EditorState, EditorAction, Clip } from "../lib/types";
+import { EditorState, EditorAction, Clip, ClipMask } from "../lib/types";
 import {
   resolveClip,
   clipVisibleAt,
@@ -162,6 +162,13 @@ function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false }
 
   if (clip.mediaType === "text") {
     const ts = clip.textStyle!;
+    // textAutoScale: true (default) → font scales with the clip box (cqw).
+    // textAutoScale: false → font stays sized to the canvas (--canvas-w),
+    // so resizing the clip box only resizes the box; text size is invariant.
+    const autoScale = clip.textAutoScale !== false;
+    const fontSizeStyle = autoScale
+      ? `${ts.fontSize / 10}cqw`
+      : `calc(var(--canvas-w, 100cqw) * ${ts.fontSize / 1000})`;
     return (
       <div
         className="w-full h-full flex pointer-events-none px-2 py-1"
@@ -170,12 +177,13 @@ function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false }
           alignItems: "center",
           justifyContent:
             ts.align === "left" ? "flex-start" : ts.align === "right" ? "flex-end" : "center",
+          overflow: "hidden",
         }}
       >
         <span
           style={{
             fontFamily: ts.fontFamily,
-            fontSize: `${ts.fontSize / 10}cqw`,
+            fontSize: fontSizeStyle,
             fontWeight: ts.fontWeight,
             color: ts.color,
             textAlign: ts.align,
@@ -184,9 +192,10 @@ function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false }
             textShadow: ts.shadow ? "0 2px 12px rgba(0,0,0,0.6), 0 0 4px rgba(0,0,0,0.4)" : "none",
             lineHeight: 1.1,
             wordBreak: "break-word",
+            whiteSpace: "pre-wrap",
           }}
         >
-          {clip.text}
+          {clip.text || ""}
         </span>
       </div>
     );
@@ -207,6 +216,64 @@ function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false }
   );
 }
 
+// Build CSS mask styles for a clip from its ClipMask config. Works on both
+// the live preview and any element this is spread onto.
+function buildMaskStyle(mask: ClipMask | undefined): React.CSSProperties {
+  if (!mask || !mask.src) return {};
+  const fitToSize: Record<ClipMask["fit"], string> = {
+    stretch: "100% 100%",
+    contain: "contain",
+    cover: "cover",
+  };
+  const baseSize = fitToSize[mask.fit] || "100% 100%";
+  // Scale wraps fit by transforming via background-size when stretch, or by
+  // applying a scale via mask-size for contain/cover.
+  const scale = Math.max(0.05, mask.scale || 1);
+  const scaledSize =
+    mask.fit === "stretch"
+      ? `${100 * scale}% ${100 * scale}%`
+      : `calc(${scale * 100}%)`;
+  // Center plus offset (offset is fraction of clip dim → percentage)
+  const px = 50 + (mask.offsetX || 0) * 100;
+  const py = 50 + (mask.offsetY || 0) * 100;
+  const position = `${px}% ${py}%`;
+  const url = `url("${mask.src}")`;
+  const modeCSS = mask.mode === "luminance" ? "luminance" : "alpha";
+  // CSS `mask-image` + `-webkit-mask-image` for compat. Webkit doesn't honor
+  // mask-mode on older builds — but modern Chromium (Replit preview) does.
+  const style: React.CSSProperties = {
+    WebkitMaskImage: url,
+    maskImage: url,
+    WebkitMaskRepeat: "no-repeat",
+    maskRepeat: "no-repeat",
+    WebkitMaskSize: mask.fit === "stretch" ? scaledSize : baseSize,
+    maskSize: mask.fit === "stretch" ? scaledSize : baseSize,
+    WebkitMaskPosition: position,
+    maskPosition: position,
+    maskMode: modeCSS as any,
+  };
+  if (mask.invert) {
+    // CSS doesn't have a built-in mask-invert. Approximate via filter on the
+    // mask image is not directly supported either. We invert by composing
+    // with a stacked `mask-composite: exclude` against a 100%-coverage image.
+    // Practical workaround: prepend a solid-white mask layer at full size and
+    // exclude the user's mask. We use `mask-image` with two layers.
+    const white =
+      "linear-gradient(#fff,#fff)";
+    style.WebkitMaskImage = `${white}, ${url}`;
+    style.maskImage = `${white}, ${url}`;
+    style.WebkitMaskRepeat = "no-repeat, no-repeat";
+    style.maskRepeat = "no-repeat, no-repeat";
+    style.WebkitMaskSize = `100% 100%, ${mask.fit === "stretch" ? scaledSize : baseSize}`;
+    style.maskSize = `100% 100%, ${mask.fit === "stretch" ? scaledSize : baseSize}`;
+    style.WebkitMaskPosition = `0% 0%, ${position}`;
+    style.maskPosition = `0% 0%, ${position}`;
+    (style as any).maskComposite = "exclude";
+    (style as any).WebkitMaskComposite = "xor";
+  }
+  return style;
+}
+
 // Memoize MediaContent so video/image clips don't re-render on every playhead
 // tick. Native <video> elements play independently of React; re-rendering them
 // 30+ times per second is pure waste and causes visible playback jitter.
@@ -214,6 +281,9 @@ const MediaContent = memo(MediaContentBase, (prev, next) => {
   if (prev.clip !== next.clip) return false;
   if (prev.isPlaying !== next.isPlaying) return false;
   if (prev.showFullSource !== next.showFullSource) return false;
+  // Text clips have no native playback element — always re-render on prop changes
+  // so live text/style edits show immediately, even while playing.
+  if (next.clip.mediaType === "text") return false;
   // While playing, the browser advances the video natively — skip re-renders
   // triggered solely by changes in `videoTime`.
   if (next.isPlaying) return true;
@@ -663,6 +733,8 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
             height: displayH,
             background: state.background,
             containerType: "size",
+            // Exposed for fixed-mode text sizing inside clip containers.
+            ["--canvas-w" as any]: `${displayW}px`,
           }}
           onMouseDown={onCanvasMouseDown}
         >
@@ -755,6 +827,7 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
                     ? `inset(0 ${(incomingMod.clipInsetRight * 100).toFixed(2)}% 0 0)`
                     : undefined,
                 containerType: "size",
+                ...buildMaskStyle(clip.mask),
               }}
               onMouseDown={cropThis ? undefined : (e) => startDrag(e, clip, "move")}
             >

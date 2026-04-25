@@ -1,4 +1,4 @@
-import { EditorState, EditorAction, Clip, DEFAULT_FILTERS, EasingType, Effect, EffectType, TransitionType } from "../lib/types";
+import { EditorState, EditorAction, Clip, ClipMask, DEFAULT_FILTERS, EasingType, Effect, EffectType, TransitionType } from "../lib/types";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
@@ -168,6 +168,191 @@ function NumPair({
       </div>
       <Slider value={[value]} min={min} max={max} step={step} onValueChange={([v]) => onChange(v)} />
     </div>
+  );
+}
+
+// Built-in mask presets: each is a small SVG data URL with a white shape on
+// transparent background, well-suited for "alpha" mode out of the box. With
+// "luminance" mode the white shape produces full opacity and transparency
+// becomes black → also fully visible. So we provide both shape masks and
+// gradient masks.
+const MASK_PRESETS: Array<{ label: string; src: string; mode: ClipMask["mode"] }> = [
+  {
+    label: "Circle",
+    mode: "alpha",
+    src: "data:image/svg+xml;utf8," + encodeURIComponent(
+      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='white'/></svg>`,
+    ),
+  },
+  {
+    label: "Rounded",
+    mode: "alpha",
+    src: "data:image/svg+xml;utf8," + encodeURIComponent(
+      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='4' y='4' width='92' height='92' rx='18' fill='white'/></svg>`,
+    ),
+  },
+  {
+    label: "Heart",
+    mode: "alpha",
+    src: "data:image/svg+xml;utf8," + encodeURIComponent(
+      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><path d='M50 88 L12 50 C-4 34 14 8 36 22 L50 36 L64 22 C86 8 104 34 88 50 Z' fill='white'/></svg>`,
+    ),
+  },
+  {
+    label: "Star",
+    mode: "alpha",
+    src: "data:image/svg+xml;utf8," + encodeURIComponent(
+      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><polygon points='50,5 61,38 96,38 68,58 78,92 50,72 22,92 32,58 4,38 39,38' fill='white'/></svg>`,
+    ),
+  },
+  {
+    label: "Fade ↓",
+    mode: "luminance",
+    src: "data:image/svg+xml;utf8," + encodeURIComponent(
+      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0' x2='0' y1='0' y2='1'><stop offset='0' stop-color='white'/><stop offset='1' stop-color='black'/></linearGradient></defs><rect width='100' height='100' fill='url(%23g)'/></svg>`,
+    ),
+  },
+  {
+    label: "Fade →",
+    mode: "luminance",
+    src: "data:image/svg+xml;utf8," + encodeURIComponent(
+      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><linearGradient id='g' x1='0' x2='1' y1='0' y2='0'><stop offset='0' stop-color='white'/><stop offset='1' stop-color='black'/></linearGradient></defs><rect width='100' height='100' fill='url(%23g)'/></svg>`,
+    ),
+  },
+  {
+    label: "Radial",
+    mode: "luminance",
+    src: "data:image/svg+xml;utf8," + encodeURIComponent(
+      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><radialGradient id='g' cx='50%' cy='50%' r='50%'><stop offset='0' stop-color='white'/><stop offset='1' stop-color='black'/></radialGradient></defs><rect width='100' height='100' fill='url(%23g)'/></svg>`,
+    ),
+  },
+  {
+    label: "Vignette",
+    mode: "luminance",
+    src: "data:image/svg+xml;utf8," + encodeURIComponent(
+      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><defs><radialGradient id='g' cx='50%' cy='50%' r='65%'><stop offset='0.55' stop-color='white'/><stop offset='1' stop-color='black'/></radialGradient></defs><rect width='100' height='100' fill='url(%23g)'/></svg>`,
+    ),
+  },
+];
+
+const DEFAULT_MASK: ClipMask = {
+  src: "",
+  mode: "alpha",
+  invert: false,
+  fit: "contain",
+  scale: 1,
+  offsetX: 0,
+  offsetY: 0,
+  opacity: 1,
+};
+
+function MaskSection({
+  clip, dispatch,
+}: {
+  clip: Clip;
+  dispatch: React.Dispatch<EditorAction>;
+}) {
+  const m = clip.mask;
+  const setMask = (patch: Partial<ClipMask> | null) => {
+    if (patch === null) {
+      // Clear the mask entirely.
+      dispatch({ type: "UPDATE_CLIP", payload: { id: clip.id, updates: { mask: null as any } } });
+      return;
+    }
+    const next: ClipMask = { ...DEFAULT_MASK, ...(m ?? {}), ...patch };
+    dispatch({ type: "UPDATE_CLIP", payload: { id: clip.id, updates: { mask: next } } });
+  };
+  const onUpload = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setMask({ src: reader.result });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+  return (
+    <Section title="Mask" action={
+      m ? (
+        <Button variant="ghost" size="icon" className="w-5 h-5" onClick={() => setMask(null)} title="Remove mask">
+          <Trash2 className="w-3 h-3" />
+        </Button>
+      ) : undefined
+    }>
+      {!m ? (
+        <p className="text-[10px] text-muted-foreground">Pick a preset or upload an image. Black is hidden, white is visible.</p>
+      ) : null}
+      <div className="grid grid-cols-4 gap-1">
+        {MASK_PRESETS.map((p) => {
+          const active = m?.src === p.src;
+          return (
+            <button
+              key={p.label}
+              type="button"
+              onClick={() => setMask({ src: p.src, mode: p.mode })}
+              className={`group relative aspect-square rounded border ${active ? "border-primary" : "border-white/10 hover:border-white/30"} bg-black/40 overflow-hidden`}
+              title={p.label}
+              data-testid={`mask-preset-${p.label}`}
+            >
+              <img src={p.src} alt={p.label} className="w-full h-full object-contain pointer-events-none" />
+              <span className="absolute bottom-0 inset-x-0 text-[8px] leading-3 text-white/80 bg-black/50 text-center">{p.label}</span>
+            </button>
+          );
+        })}
+      </div>
+      <label className="block">
+        <span className="text-[10px] text-muted-foreground">Custom image</span>
+        <input
+          type="file"
+          accept="image/*"
+          className="block w-full text-[10px] mt-0.5 file:mr-2 file:px-2 file:py-1 file:rounded file:border-0 file:bg-muted/40 file:text-xs"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onUpload(f);
+            e.currentTarget.value = "";
+          }}
+        />
+      </label>
+      {m && (
+        <>
+          <div className="grid grid-cols-2 gap-1.5">
+            <div>
+              <Label className="text-[10px] text-muted-foreground">Mode</Label>
+              <Select value={m.mode} onValueChange={(v: any) => setMask({ mode: v })}>
+                <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="alpha" className="text-xs">Alpha (transparency)</SelectItem>
+                  <SelectItem value="luminance" className="text-xs">Luminance (B/W)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-[10px] text-muted-foreground">Fit</Label>
+              <Select value={m.fit} onValueChange={(v: any) => setMask({ fit: v })}>
+                <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="stretch" className="text-xs">Stretch</SelectItem>
+                  <SelectItem value="contain" className="text-xs">Contain</SelectItem>
+                  <SelectItem value="cover" className="text-xs">Cover</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <NumPair label="Scale" value={m.scale} min={0.1} max={3} step={0.05} onChange={(v) => setMask({ scale: v })} />
+          <NumPair label="Offset X" value={m.offsetX} min={-1} max={1} step={0.01} onChange={(v) => setMask({ offsetX: v })} />
+          <NumPair label="Offset Y" value={m.offsetY} min={-1} max={1} step={0.01} onChange={(v) => setMask({ offsetY: v })} />
+          <NumPair label="Opacity" value={m.opacity} min={0} max={1} step={0.05} onChange={(v) => setMask({ opacity: v })} />
+          <Button
+            variant={m.invert ? "secondary" : "outline"}
+            size="sm"
+            className="w-full h-7 text-xs"
+            onClick={() => setMask({ invert: !m.invert })}
+          >
+            {m.invert ? "Inverted" : "Invert mask"}
+          </Button>
+        </>
+      )}
+    </Section>
   );
 }
 
@@ -764,6 +949,7 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
 
             <TabsContent value="effects" className="m-0">
               <EffectsSection clip={clip} dispatch={dispatch} />
+              <MaskSection clip={clip} dispatch={dispatch} />
 
               <Separator />
 
@@ -1036,12 +1222,32 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
               <TabsContent value="text" className="m-0">
                 <Section title="Text">
                   <textarea
+                    key={clip.id}
                     value={clip.text || ""}
                     onChange={(e) => update({ text: e.target.value })}
                     className="w-full text-xs p-2 bg-muted/20 border border-border rounded resize-none"
                     rows={3}
                     placeholder="Enter text..."
+                    data-testid="text-content-input"
                   />
+                  <div className="flex items-center gap-2 rounded border border-white/10 bg-black/20 px-2 py-1.5">
+                    <input
+                      id="text-auto-scale"
+                      type="checkbox"
+                      className="w-3.5 h-3.5 accent-primary"
+                      checked={clip.textAutoScale !== false}
+                      onChange={(e) => update({ textAutoScale: e.target.checked })}
+                      data-testid="text-auto-scale-toggle"
+                    />
+                    <label htmlFor="text-auto-scale" className="text-[10px] flex-1 cursor-pointer">
+                      <span className="font-medium">Resize scales text</span>
+                      <span className="block text-muted-foreground">
+                        {clip.textAutoScale !== false
+                          ? "Text grows/shrinks with the box."
+                          : "Only the box resizes; text stays the same size."}
+                      </span>
+                    </label>
+                  </div>
                   <div className="grid grid-cols-2 gap-1.5">
                     <div>
                       <Label className="text-[10px] text-muted-foreground">Font Size</Label>

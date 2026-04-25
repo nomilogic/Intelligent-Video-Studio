@@ -69,6 +69,19 @@ export interface ClipTransition {
   duration: number;
 }
 
+export type MaskMode = "luminance" | "alpha";
+
+export interface ClipMask {
+  src: string;          // image URL (data: URLs supported)
+  mode: MaskMode;       // luminance = use grayscale (B/W gradients), alpha = use transparency
+  invert: boolean;      // invert mask values
+  fit: "stretch" | "contain" | "cover";
+  scale: number;        // 0.1..3 (multiplier on top of fit)
+  offsetX: number;      // -1..1 (fraction of clip width)
+  offsetY: number;      // -1..1 (fraction of clip height)
+  opacity: number;      // 0..1 — blends mask result with full opacity
+}
+
 export interface Clip {
   id: string;
   label: string;
@@ -112,6 +125,10 @@ export interface Clip {
   // CapCut-style additions (optional for backward compatibility with older state)
   effects?: Effect[];
   transitionIn?: ClipTransition;
+  mask?: ClipMask;
+  // Text-only: when true (default), font scales with the clip box (current behavior).
+  // When false, font stays at a fixed size relative to the canvas — only the box scales.
+  textAutoScale?: boolean;
 }
 
 export interface Transition {
