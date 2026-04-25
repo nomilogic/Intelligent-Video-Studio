@@ -44,7 +44,7 @@ function defaultClipKeyframes(clip: Clip): Keyframe[] {
     time: clip.startTime,
     property: prop,
     value: (clip as any)[prop] as number,
-    easing: "step" as EasingType,
+    easing: "easeInOut" as EasingType,
   }));
 }
 
@@ -425,7 +425,7 @@ function applyOps(state: EditorState, ops: any[]): EditorState {
                 time: p.time,
                 property: p.property,
                 value: p.value,
-                easing: p.easing || "linear",
+                easing: p.easing || "easeInOut",
               },
             ],
           };

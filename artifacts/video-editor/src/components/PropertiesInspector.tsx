@@ -67,23 +67,6 @@ function NumPair({
       <div className="flex justify-between text-xs">
         <Label className="text-muted-foreground flex items-center gap-1">
           {label}
-          {onKeyframe && (
-            <button
-              onClick={onKeyframe}
-              title={isAtKeyframe ? "Keyframe set at playhead" : hasKeyframe ? "Update keyframe at playhead" : "Add keyframe at playhead"}
-              className="rounded px-0.5 py-0.5 hover:bg-yellow-400/20 transition-colors"
-            >
-              <Diamond
-                className={`w-3 h-3 transition-colors ${
-                  isAtKeyframe
-                    ? "text-yellow-300 fill-yellow-300"
-                    : hasKeyframe
-                      ? "text-yellow-400 fill-yellow-400/50"
-                      : "text-yellow-400/60 fill-yellow-400/10 hover:text-yellow-400 hover:fill-yellow-400/30"
-                }`}
-              />
-            </button>
-          )}
           {onToggleTween && (
             <button
               onClick={onToggleTween}
@@ -212,7 +195,7 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
     // silently turn animation on. If no keyframes exist yet for this property,
     // default to "step" (Adobe Animate / Flash style — explicit opt-in).
     const existing = state.keyframes.find((k) => k.clipId === clip.id && k.property === property);
-    const easing: EasingType = existing ? existing.easing : "step";
+    const easing: EasingType = existing ? existing.easing : "easeInOut";
     dispatch({
       type: "ADD_KEYFRAME",
       payload: { clipId: clip.id, time: state.currentTime, property, value, easing },
@@ -247,9 +230,9 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
     : false;
 
   // Tween state for a property = "is this property animated between keyframes?"
-  // Adobe Animate / Flash style: a property is "tweened" when its keyframes
-  // use a smooth easing (i.e. NOT "step"). Newly added clips default to "step"
-  // so values just hold/snap until the user explicitly turns animation on.
+  // A property is "tweened" when its keyframes use a smooth easing (NOT "step").
+  // New keyframes default to "easeInOut" so animation is on by default; the user
+  // can flip the toggle to "step" to make values hold/snap instead.
   const isTweened = (property: string) => clip
     ? state.keyframes.some(
         (k) => k.clipId === clip.id && k.property === property && k.easing !== "step",
