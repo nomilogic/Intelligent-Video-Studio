@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Undo2, Redo2, Save, ZoomIn, ZoomOut, Film, Loader2, Keyboard, Settings2, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -6,9 +6,10 @@ import { Progress } from "@/components/ui/progress";
 import { EditorState, EditorAction } from "../lib/types";
 import { useUpdateProject } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
-import { useExport } from "../hooks/use-export";
+import { useExport, computeScale, type ExportConfig } from "../hooks/use-export";
 import { useAuth } from "@/lib/auth-context";
-import { useDiamonds } from "@/lib/diamonds-context";
+import { useDiamonds, useGatedRequest } from "@/lib/diamonds-context";
+import { apiFetch } from "@/lib/api-client";
 import { AccountDropdown } from "./AccountDropdown";
 import { DiamondPill } from "./DiamondPill";
 import {
@@ -53,7 +54,8 @@ export default function Toolbar({ state, dispatch, projectId, projectName: initi
   const { toast } = useToast();
   const updateProject = useUpdateProject();
   const { user } = useAuth();
-  const { promptLoginRequired } = useDiamonds();
+  const { promptLoginRequired, refresh: refreshDiamonds } = useDiamonds();
+  const gatedRequest = useGatedRequest();
   const [projectName, setProjectName] = useState(initialProjectName ?? "Untitled Project");
   useEffect(() => {
     if (initialProjectName) setProjectName(initialProjectName);
@@ -61,6 +63,77 @@ export default function Toolbar({ state, dispatch, projectId, projectName: initi
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
 
   const { exportStatus, startVideoExport, startAudioExport, cancel, reset } = useExport(state);
+
+  // Server-authoritative export gate. Charges diamonds (export vs export_hd
+  // depending on height) BEFORE the local encoder runs. If preflight returns
+  // 401 the auth modal opens; on 402 the insufficient-diamonds modal opens.
+  // If the local encoder later errors, we hit /exports/refund with the
+  // returned transactionId so the user is made whole.
+  type Preflight = { transactionId?: number; charged: number; balance: number };
+  async function preflight(width: number, height: number, format: "mp4" | "webm" | "gif" | "audio", fps?: number) {
+    if (!user) {
+      promptLoginRequired({ featureKey: "export" });
+      return null;
+    }
+    const result = await gatedRequest<Preflight>(
+      () => apiFetch<Preflight>("/exports/preflight", {
+        method: "POST",
+        body: { width, height, format, fps },
+      }),
+      "export",
+    );
+    return result;
+  }
+  async function refundExport(transactionId: number, reason: string) {
+    try {
+      await apiFetch("/exports/refund", { method: "POST", body: { transactionId, reason } });
+      await refreshDiamonds();
+    } catch (err) {
+      console.warn("export refund failed", err);
+    }
+  }
+  async function gatedStartVideoExport(config: ExportConfig) {
+    const scale = computeScale(config.resolution, state.canvasWidth, state.canvasHeight);
+    const width = Math.round(state.canvasWidth * scale);
+    const height = Math.round(state.canvasHeight * scale);
+    const pre = await preflight(width, height, config.format, config.fps);
+    if (!pre) return;
+    try {
+      await Promise.resolve(startVideoExport(config));
+    } catch (err) {
+      if (pre.transactionId) {
+        await refundExport(pre.transactionId, (err as Error)?.message ?? "Local export failed");
+      }
+      throw err;
+    }
+  }
+  async function gatedStartAudioExport() {
+    // Audio export always counts as a standard (SD) export charge.
+    const pre = await preflight(state.canvasWidth, state.canvasHeight, "audio");
+    if (!pre) return;
+    try {
+      await Promise.resolve(startAudioExport());
+    } catch (err) {
+      if (pre.transactionId) {
+        await refundExport(pre.transactionId, (err as Error)?.message ?? "Local audio export failed");
+      }
+      throw err;
+    }
+  }
+  // If the local encoder reports an error AFTER preflight succeeded
+  // (i.e. async failure), the useEffect on exportStatus.phase below shows
+  // a toast — refund the most recent preflight charge in that path.
+  const lastPreflightTxRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (exportStatus.phase === "error" && lastPreflightTxRef.current != null) {
+      const txId = lastPreflightTxRef.current;
+      lastPreflightTxRef.current = null;
+      void refundExport(txId, exportStatus.errorMsg ?? "Local export failed");
+    }
+    if (exportStatus.phase === "done") {
+      lastPreflightTxRef.current = null;
+    }
+  }, [exportStatus.phase, exportStatus.errorMsg]);
 
   const isExporting = exportStatus.phase === "loading" || exportStatus.phase === "rendering";
   const exportingInBackground = isExporting && !exportDialogOpen;
@@ -379,8 +452,8 @@ export default function Toolbar({ state, dispatch, projectId, projectName: initi
         open={exportDialogOpen}
         onOpenChange={setExportDialogOpen}
         exportStatus={exportStatus}
-        onStart={startVideoExport}
-        onAudioExport={startAudioExport}
+        onStart={gatedStartVideoExport}
+        onAudioExport={gatedStartAudioExport}
         onCancel={cancel}
         onReset={reset}
       />

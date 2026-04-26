@@ -8,6 +8,7 @@ import diamondsRouter from "./diamonds";
 import cloudRouter from "./cloud";
 import adminRouter from "./admin";
 import subtitlesRouter from "./subtitles";
+import exportsRouter from "./exports";
 
 const router: IRouter = Router();
 
@@ -19,6 +20,7 @@ router.use(assetsRouter);
 router.use(diamondsRouter);
 router.use(cloudRouter);
 router.use(subtitlesRouter);
+router.use(exportsRouter);
 router.use(adminRouter);
 
 export default router;

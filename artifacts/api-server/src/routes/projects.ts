@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { eq, and, isNull, desc, or } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { db, projectsTable } from "@workspace/db";
 import { z } from "zod/v4";
-import { optionalAuth, requireAuth } from "../middlewares/auth";
+import { requireAuth } from "../middlewares/auth";
 
 const router = Router();
 
@@ -69,20 +69,19 @@ router.post("/projects", requireAuth, async (req, res) => {
   res.status(201).json(serialize(project));
 });
 
-router.get("/projects/:id", optionalAuth, async (req, res) => {
+// Strict owner-only project access. Anonymous editing happens entirely
+// in localStorage on the client (see EditorPage), so the API never needs
+// to expose null-owned rows. Legacy `userId IS NULL` rows from previous
+// single-tenant seeds are treated as inaccessible — admins can adopt or
+// purge them via the admin panel.
+router.get("/projects/:id", requireAuth, async (req, res) => {
   const { id } = IdParam.parse(req.params);
   const [project] = await db
     .select()
     .from(projectsTable)
     .where(eq(projectsTable.id, id));
-  if (!project) {
+  if (!project || project.userId !== req.user!.id) {
     res.status(404).json({ error: "Project not found" });
-    return;
-  }
-  // Owner-scoped access. Legacy null-owner projects are accessible to anyone
-  // but not editable without auth.
-  if (project.userId !== null && project.userId !== req.user?.id) {
-    res.status(403).json({ error: "Forbidden" });
     return;
   }
   res.json(serialize(project));
@@ -95,12 +94,8 @@ router.put("/projects/:id", requireAuth, async (req, res) => {
     .select({ userId: projectsTable.userId })
     .from(projectsTable)
     .where(eq(projectsTable.id, id));
-  if (!existing) {
+  if (!existing || existing.userId !== req.user!.id) {
     res.status(404).json({ error: "Project not found" });
-    return;
-  }
-  if (existing.userId !== null && existing.userId !== req.user!.id) {
-    res.status(403).json({ error: "Forbidden" });
     return;
   }
   const [project] = await db
@@ -108,8 +103,6 @@ router.put("/projects/:id", requireAuth, async (req, res) => {
     .set({
       ...body,
       updatedAt: new Date(),
-      // Adopt orphan project on update.
-      userId: existing.userId ?? req.user!.id,
     })
     .where(eq(projectsTable.id, id))
     .returning();
@@ -122,12 +115,8 @@ router.delete("/projects/:id", requireAuth, async (req, res) => {
     .select({ userId: projectsTable.userId })
     .from(projectsTable)
     .where(eq(projectsTable.id, id));
-  if (!existing) {
+  if (!existing || existing.userId !== req.user!.id) {
     res.status(404).json({ error: "Project not found" });
-    return;
-  }
-  if (existing.userId !== null && existing.userId !== req.user!.id) {
-    res.status(403).json({ error: "Forbidden" });
     return;
   }
   await db.delete(projectsTable).where(eq(projectsTable.id, id));
@@ -140,12 +129,8 @@ router.post("/projects/:id/duplicate", requireAuth, async (req, res) => {
     .select()
     .from(projectsTable)
     .where(eq(projectsTable.id, id));
-  if (!src) {
+  if (!src || src.userId !== req.user!.id) {
     res.status(404).json({ error: "Project not found" });
-    return;
-  }
-  if (src.userId !== null && src.userId !== req.user!.id) {
-    res.status(403).json({ error: "Forbidden" });
     return;
   }
   const [copy] = await db
