@@ -877,6 +877,119 @@ export function getEffectImpact(clip: Clip, time: number): EffectImpact {
       case "mirrorV":         /* True mirror needs a separate pass — leave as no-op so the picker still lists it. */ break;
       case "edgeDetect":      filters.push(`grayscale(1) contrast(${(1.5 + 1.5 * i).toFixed(3)}) brightness(${(1 + 0.4 * i).toFixed(3)})`); break;
       case "emboss":          filters.push(`grayscale(1) contrast(${(1.4).toFixed(3)})`); break;
+
+      // ── Phase-3: 100 new looks ────────────────────────────────────────
+      // Cinematic LUTs (20)
+      case "tealOrange":     filters.push(`saturate(${(1 + 0.3 * i).toFixed(3)}) contrast(${(1 + 0.15 * i).toFixed(3)}) hue-rotate(${Math.round(-10 * i)}deg)`); overlays.push({ kind: "tint", intensity: i * 0.25, color: "#ea580c" }); overlays.push({ kind: "tint", intensity: i * 0.15, color: "#0891b2" }); break;
+      case "bleachBypass":   filters.push(`saturate(${(1 - 0.6 * i).toFixed(3)}) contrast(${(1 + 0.5 * i).toFixed(3)}) brightness(${(1 + 0.05 * i).toFixed(3)})`); break;
+      case "goldenHour":     filters.push(`brightness(${(1 + 0.1 * i).toFixed(3)}) saturate(${(1 + 0.3 * i).toFixed(3)}) contrast(${(1 + 0.05 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.35, color: "#fb923c" }); break;
+      case "moonlight":      filters.push(`brightness(${(1 - 0.2 * i).toFixed(3)}) saturate(${(1 - 0.4 * i).toFixed(3)}) contrast(${(1 + 0.1 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.4, color: "#3b82f6" }); break;
+      case "sunset":         filters.push(`saturate(${(1 + 0.4 * i).toFixed(3)}) contrast(${(1 + 0.15 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.3, color: "#f43f5e" }); break;
+      case "desert":         filters.push(`sepia(${(0.3 * i).toFixed(3)}) saturate(${(1 + 0.2 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.25, color: "#d97706" }); break;
+      case "arctic":         filters.push(`brightness(${(1 + 0.15 * i).toFixed(3)}) contrast(${(1 + 0.1 * i).toFixed(3)}) saturate(${(1 - 0.3 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.25, color: "#bfdbfe" }); break;
+      case "jungle":         filters.push(`saturate(${(1 + 0.5 * i).toFixed(3)}) contrast(${(1 + 0.1 * i).toFixed(3)}) hue-rotate(${Math.round(8 * i)}deg)`); overlays.push({ kind: "tint", intensity: i * 0.2, color: "#16a34a" }); break;
+      case "noir":           filters.push(`grayscale(${i.toFixed(3)}) contrast(${(1 + 0.4 * i).toFixed(3)}) brightness(${(1 - 0.05 * i).toFixed(3)})`); overlays.push({ kind: "vignette", intensity: i * 0.7 }); break;
+      case "highKey":        filters.push(`brightness(${(1 + 0.2 * i).toFixed(3)}) contrast(${(1 - 0.15 * i).toFixed(3)}) saturate(${(1 - 0.1 * i).toFixed(3)})`); break;
+      case "lowKey":         filters.push(`brightness(${(1 - 0.25 * i).toFixed(3)}) contrast(${(1 + 0.3 * i).toFixed(3)})`); overlays.push({ kind: "vignette", intensity: i * 0.6 }); break;
+      case "mutedRetro":     filters.push(`saturate(${(1 - 0.4 * i).toFixed(3)}) contrast(${(1 - 0.1 * i).toFixed(3)}) sepia(${(0.15 * i).toFixed(3)})`); break;
+      case "kodakChrome":    filters.push(`saturate(${(1 + 0.35 * i).toFixed(3)}) contrast(${(1 + 0.2 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.15, color: "#fbbf24" }); break;
+      case "polaroid79":     filters.push(`brightness(${(1 + 0.1 * i).toFixed(3)}) saturate(${(1 - 0.25 * i).toFixed(3)}) sepia(${(0.2 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.2, color: "#fcd34d" }); overlays.push({ kind: "vignette", intensity: i * 0.4 }); break;
+      case "filmKodak":      filters.push(`saturate(${(1 + 0.25 * i).toFixed(3)}) contrast(${(1 + 0.1 * i).toFixed(3)}) sepia(${(0.1 * i).toFixed(3)})`); overlays.push({ kind: "filmGrain", intensity: i * 0.5 }); break;
+      case "kodakGold":      filters.push(`saturate(${(1 + 0.4 * i).toFixed(3)}) brightness(${(1 + 0.05 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.25, color: "#facc15" }); break;
+      case "ektarVibrant":   filters.push(`saturate(${(1 + 0.7 * i).toFixed(3)}) contrast(${(1 + 0.2 * i).toFixed(3)})`); break;
+      case "portra":         filters.push(`saturate(${(1 - 0.1 * i).toFixed(3)}) brightness(${(1 + 0.05 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.15, color: "#fda4af" }); break;
+      case "ektachromeBlue": filters.push(`saturate(${(1 + 0.3 * i).toFixed(3)}) contrast(${(1 + 0.15 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.2, color: "#0ea5e9" }); break;
+      case "vhs":            filters.push(`saturate(${(1 - 0.2 * i).toFixed(3)}) contrast(${(1 + 0.2 * i).toFixed(3)}) hue-rotate(${Math.round(-5 * i)}deg)`); overlays.push({ kind: "scanlines", intensity: i * 0.6 }); overlays.push({ kind: "noise", intensity: i * 0.3 }); break;
+
+      // Color grades (20)
+      case "warmBoost":   overlays.push({ kind: "tint", intensity: i * 0.3, color: "#fb923c" }); break;
+      case "coolShade":   overlays.push({ kind: "tint", intensity: i * 0.3, color: "#3b82f6" }); break;
+      case "amberGlow":   overlays.push({ kind: "tint", intensity: i * 0.35, color: "#f59e0b" }); break;
+      case "magentaShift":filters.push(`hue-rotate(${Math.round(20 * i)}deg) saturate(${(1 + 0.2 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.25, color: "#d946ef" }); break;
+      case "greenLift":   overlays.push({ kind: "tint", intensity: i * 0.25, color: "#22c55e" }); break;
+      case "skyBlue":     overlays.push({ kind: "tint", intensity: i * 0.3, color: "#0ea5e9" }); break;
+      case "redShift":    overlays.push({ kind: "tint", intensity: i * 0.3, color: "#ef4444" }); break;
+      case "oliveTone":   filters.push(`saturate(${(1 - 0.1 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.3, color: "#65a30d" }); break;
+      case "mintFresh":   overlays.push({ kind: "tint", intensity: i * 0.25, color: "#86efac" }); break;
+      case "roseGold":    overlays.push({ kind: "tint", intensity: i * 0.3, color: "#fda4af" }); break;
+      case "peachSoft":   overlays.push({ kind: "tint", intensity: i * 0.3, color: "#fed7aa" }); break;
+      case "matcha":      overlays.push({ kind: "tint", intensity: i * 0.3, color: "#a3e635" }); break;
+      case "navyDeep":    filters.push(`brightness(${(1 - 0.1 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.3, color: "#1e3a8a" }); break;
+      case "coralPop":    filters.push(`saturate(${(1 + 0.3 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.3, color: "#fb7185" }); break;
+      case "emeraldDeep": filters.push(`saturate(${(1 + 0.2 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.3, color: "#059669" }); break;
+      case "rubyRich":    filters.push(`saturate(${(1 + 0.3 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.3, color: "#9f1239" }); break;
+      case "amethystHaze":overlays.push({ kind: "tint", intensity: i * 0.3, color: "#a78bfa" }); break;
+      case "topazWarm":   overlays.push({ kind: "tint", intensity: i * 0.3, color: "#fbbf24" }); break;
+      case "onyxDeep":    filters.push(`brightness(${(1 - 0.2 * i).toFixed(3)}) contrast(${(1 + 0.2 * i).toFixed(3)})`); break;
+      case "ivoryClean":  filters.push(`brightness(${(1 + 0.1 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.15, color: "#fef3c7" }); break;
+
+      // Light / atmosphere (15)
+      case "morningHaze": filters.push(`brightness(${(1 + 0.1 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.25, color: "#fef3c7" }); break;
+      case "fogDense":    filters.push(`contrast(${(1 - 0.3 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.45, color: "#e5e7eb" }); break;
+      case "mistLight":   filters.push(`contrast(${(1 - 0.15 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.25, color: "#f3f4f6" }); break;
+      case "rainAmbient": overlays.push({ kind: "tint", intensity: i * 0.3, color: "#3b82f6" }); overlays.push({ kind: "scanlinesVertical", intensity: i * 0.3 }); break;
+      case "dustyAir":    overlays.push({ kind: "tint", intensity: i * 0.25, color: "#fcd34d" }); overlays.push({ kind: "noise", intensity: i * 0.4 }); break;
+      case "sunBeams":    glow(fx.color || "#fef08a", i, 12, 3); overlays.push({ kind: "tint", intensity: i * 0.2, color: "#fef9c3" }); break;
+      case "starryNight": filters.push(`brightness(${(1 - 0.3 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.4, color: "#1e3a8a" }); overlays.push({ kind: "noise", intensity: i * 0.2 }); break;
+      case "neonNight":   filters.push(`saturate(${(1 + 0.5 * i).toFixed(3)}) contrast(${(1 + 0.2 * i).toFixed(3)})`); glow(fx.color || "#ec4899", i * 0.6, 6, 2); overlays.push({ kind: "tint", intensity: i * 0.2, color: "#1e1b4b" }); break;
+      case "blueHour":    filters.push(`brightness(${(1 - 0.1 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.4, color: "#3730a3" }); break;
+      case "magicHour":   filters.push(`saturate(${(1 + 0.3 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.3, color: "#fb923c" }); overlays.push({ kind: "tint", intensity: i * 0.15, color: "#a855f7" }); break;
+      case "backlitGlow": glow(fx.color || "#fff7d6", i, 16, 3); break;
+      case "rimLight":    glow(fx.color || "#ffffff", i, 6, 2); break;
+      case "softGlow":    glow(fx.color || "#fef3c7", i * 0.7, 14, 2); filters.push(`brightness(${(1 + 0.05 * i).toFixed(3)})`); break;
+      case "hardGlow":    glow(fx.color || "#ffffff", i, 4, 4); break;
+      case "candleLight": glow(fx.color || "#fbbf24", i * (0.7 + 0.3 * Math.sin(time * 6)), 10, 3); overlays.push({ kind: "tint", intensity: i * 0.25, color: "#f59e0b" }); break;
+
+      // Stylized art (20)
+      case "anime":        filters.push(`saturate(${(1 + 0.5 * i).toFixed(3)}) contrast(${(1 + 0.3 * i).toFixed(3)})`); break;
+      case "comicBook":    filters.push(`saturate(${(1 + 0.4 * i).toFixed(3)}) contrast(${(1 + 0.6 * i).toFixed(3)})`); break;
+      case "oilPaint":     filters.push(`saturate(${(1 + 0.3 * i).toFixed(3)}) blur(${(0.5 * i).toFixed(2)}px) contrast(${(1 + 0.15 * i).toFixed(3)})`); break;
+      case "watercolor":   filters.push(`blur(${(1 * i).toFixed(2)}px) saturate(${(1 - 0.2 * i).toFixed(3)}) brightness(${(1 + 0.1 * i).toFixed(3)})`); break;
+      case "pencilSketch": filters.push(`grayscale(${i.toFixed(3)}) contrast(${(1 + 0.5 * i).toFixed(3)}) brightness(${(1 + 0.2 * i).toFixed(3)})`); break;
+      case "inkDrawing":   filters.push(`grayscale(${i.toFixed(3)}) contrast(${(1 + 1 * i).toFixed(3)})`); break;
+      case "popArt":       filters.push(`saturate(${(1 + 0.8 * i).toFixed(3)}) contrast(${(1 + 0.4 * i).toFixed(3)}) hue-rotate(${Math.round(15 * i)}deg)`); break;
+      case "mosaic":       filters.push(`contrast(${(1 + 0.3 * i).toFixed(3)}) saturate(${(1 + 0.4 * i).toFixed(3)})`); overlays.push({ kind: "halftone", intensity: i * 0.5 }); break;
+      case "cartoon":      filters.push(`saturate(${(1 + 0.6 * i).toFixed(3)}) contrast(${(1 + 0.5 * i).toFixed(3)})`); break;
+      case "manga":        filters.push(`grayscale(${i.toFixed(3)}) contrast(${(1 + 0.7 * i).toFixed(3)})`); overlays.push({ kind: "halftone", intensity: i * 0.6 }); break;
+      case "gameboy":      filters.push(`grayscale(${i.toFixed(3)}) contrast(${(1 + 0.4 * i).toFixed(3)}) sepia(${(0.5 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.3, color: "#65a30d" }); break;
+      case "console":      filters.push(`saturate(${(1 - 0.3 * i).toFixed(3)}) contrast(${(1 + 0.4 * i).toFixed(3)})`); overlays.push({ kind: "scanlines", intensity: i * 0.6 }); break;
+      case "arcade":       filters.push(`saturate(${(1 + 0.6 * i).toFixed(3)}) contrast(${(1 + 0.5 * i).toFixed(3)})`); overlays.push({ kind: "scanlinesCRT", intensity: i }); break;
+      case "pixel8":       filters.push(`saturate(${(1 + 0.4 * i).toFixed(3)}) contrast(${(1 + 0.6 * i).toFixed(3)})`); break;
+      case "pixel16":      filters.push(`saturate(${(1 + 0.5 * i).toFixed(3)}) contrast(${(1 + 0.4 * i).toFixed(3)})`); break;
+      case "hologram":     glow(fx.color || "#22d3ee", i, 6, 3); filters.push(`saturate(${(1 + 0.3 * i).toFixed(3)})`); overlays.push({ kind: "scanlines", intensity: i * 0.5 }); break;
+      case "disco":        filters.push(`saturate(${(1 + 0.8 * i).toFixed(3)}) hue-rotate(${Math.round(time * 60 % 360 * i)}deg)`); break;
+      case "rainbow":      filters.push(`saturate(${(1 + 0.7 * i).toFixed(3)}) hue-rotate(${Math.round(time * 30 % 360)}deg)`); break;
+      case "psychedelic":  filters.push(`saturate(${(1 + 1 * i).toFixed(3)}) contrast(${(1 + 0.3 * i).toFixed(3)}) hue-rotate(${Math.round(time * 90 % 360)}deg)`); break;
+      case "infrared":     filters.push(`hue-rotate(${Math.round(120 + 60 * i)}deg) saturate(${(1 + 0.5 * i).toFixed(3)}) contrast(${(1 + 0.3 * i).toFixed(3)})`); break;
+
+      // Distort (10)
+      case "waveWarp":     { const s = shakeAt(time * 0.5, false, true, 4 * i); shakeYPct += s.y; break; }
+      case "rippleStrong": { const s = shakeAt(time * 1.2, true, true, 8 * i); shakeXPct += s.x; shakeYPct += s.y; break; }
+      case "vortex":       filters.push(`hue-rotate(${Math.round(time * 30 % 360)}deg) saturate(${(1 + 0.3 * i).toFixed(3)})`); break;
+      case "earthquake":   { const s = shakeAt(time * 2, true, true, 18 * i); shakeXPct += s.x; shakeYPct += s.y; break; }
+      case "wobble":       { const s = shakeAt(time * 0.8, true, true, 5 * i); shakeXPct += s.x; shakeYPct += s.y; break; }
+      case "drunkard":     { const s = shakeAt(time * 0.3, true, true, 10 * i); shakeXPct += s.x; shakeYPct += s.y; filters.push(`blur(${(1 * i).toFixed(2)}px)`); break; }
+      case "heatwave":     { const s = shakeAt(time * 1.5, false, true, 3 * i); shakeYPct += s.y; filters.push(`brightness(${(1 + 0.05 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.15, color: "#f97316" }); break; }
+      case "fishEye":      filters.push(`saturate(${(1 + 0.2 * i).toFixed(3)})`); overlays.push({ kind: "vignetteOval", intensity: i * 0.4 }); break;
+      case "bubbleLens":   filters.push(`brightness(${(1 + 0.1 * i).toFixed(3)})`); overlays.push({ kind: "vignetteSoft", intensity: i * 0.5 }); break;
+      case "twirl":        filters.push(`hue-rotate(${Math.round(time * 45 % 360)}deg)`); { const s = shakeAt(time * 0.4, true, true, 2 * i); shakeXPct += s.x; shakeYPct += s.y; } break;
+
+      // Retro / textures (15)
+      case "paperGrain":     overlays.push({ kind: "filmGrain", intensity: i * 0.7 }); overlays.push({ kind: "tint", intensity: i * 0.1, color: "#fef3c7" }); break;
+      case "bokehSparkle":   glow(fx.color || "#ffffff", i * 0.4, 18, 2); overlays.push({ kind: "noise", intensity: i * 0.2 }); break;
+      case "confettiTint":   overlays.push({ kind: "tint", intensity: i * 0.15, color: "#ec4899" }); overlays.push({ kind: "tint", intensity: i * 0.15, color: "#22c55e" }); overlays.push({ kind: "noise", intensity: i * 0.3 }); break;
+      case "glitter":        overlays.push({ kind: "noise", intensity: i * 0.5 }); glow(fx.color || "#ffffff", i * 0.3, 8, 2); break;
+      case "rainOverlay":    overlays.push({ kind: "scanlinesVertical", intensity: i * 0.4 }); overlays.push({ kind: "tint", intensity: i * 0.2, color: "#1e40af" }); break;
+      case "snowOverlay":    overlays.push({ kind: "noise", intensity: i * 0.5 }); overlays.push({ kind: "tint", intensity: i * 0.2, color: "#dbeafe" }); break;
+      case "fireGlow":       glow(fx.color || "#f97316", i, 14, 3); overlays.push({ kind: "tint", intensity: i * 0.3, color: "#dc2626" }); break;
+      case "emberPulse":     { const pulse = 0.5 + 0.5 * Math.sin(time * 5); glow(fx.color || "#ef4444", i * pulse, 12, 3); overlays.push({ kind: "tint", intensity: i * pulse * 0.3, color: "#7c2d12" }); break; }
+      case "smokeHaze":      filters.push(`contrast(${(1 - 0.2 * i).toFixed(3)}) brightness(${(1 - 0.1 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.3, color: "#9ca3af" }); break;
+      case "fogOverlay":     filters.push(`contrast(${(1 - 0.25 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.4, color: "#e5e7eb" }); break;
+      case "starsOverlay":   filters.push(`brightness(${(1 - 0.3 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.4, color: "#1e1b4b" }); overlays.push({ kind: "noise", intensity: i * 0.3 }); break;
+      case "meteorTrail":    glow(fx.color || "#fef3c7", i * 0.6, 14, 3); { const s = shakeAt(time * 1.5, true, false, 3 * i); shakeXPct += s.x; } break;
+      case "cometTail":      glow(fx.color || "#67e8f9", i * 0.7, 18, 4); break;
+      case "auroraBorealis": filters.push(`saturate(${(1 + 0.4 * i).toFixed(3)}) hue-rotate(${Math.round(time * 20 % 360)}deg)`); glow(fx.color || "#22d3ee", i * 0.4, 10, 2); overlays.push({ kind: "tint", intensity: i * 0.2, color: "#10b981" }); break;
+      case "vintage70s":     filters.push(`sepia(${(0.4 * i).toFixed(3)}) saturate(${(1 + 0.3 * i).toFixed(3)}) contrast(${(1 - 0.05 * i).toFixed(3)})`); overlays.push({ kind: "tint", intensity: i * 0.25, color: "#ea580c" }); overlays.push({ kind: "filmGrain", intensity: i * 0.5 }); break;
     }
   }
   return { shakeXPct, shakeYPct, extraFilter: filters.join(" "), overlays };

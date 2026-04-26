@@ -13,6 +13,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import ExportDialog from "./ExportDialog";
+import SettingsDialog from "./SettingsDialog";
 
 interface ToolbarProps {
   state: EditorState;
@@ -213,6 +214,9 @@ export default function Toolbar({ state, dispatch, projectId, canUndo, canRedo, 
             </div>
           </DialogContent>
         </Dialog>
+
+        {/* App Settings (BYO API keys) */}
+        <SettingsDialog />
 
         {/* Project Settings */}
         <Dialog>

@@ -570,6 +570,30 @@ function drawClipToCanvas(
         ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
       }
     }
+  } else if (clip.mediaType === "drawing") {
+    // Drawing clip — replay each stroke into Canvas2D using the same
+    // normalized 0..1 coordinate space as the SVG renderer.
+    const paths = clip.paths ?? [];
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (const p of paths) {
+      if (!p.points || p.points.length < 2) continue;
+      // Width is authored relative to a 1080-wide canvas; scale to the clip
+      // box and the export resolution so strokes match preview thickness.
+      ctx.strokeStyle = p.color;
+      ctx.globalAlpha = (p.opacity ?? 1);
+      ctx.lineWidth = (p.width / 1080) * pw;
+      ctx.beginPath();
+      p.points.forEach((pt, i) => {
+        const x = -pw / 2 + pt.x * pw;
+        const y = -ph / 2 + pt.y * ph;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+    ctx.restore();
   } else if (clip.mediaType === "specialLayer") {
     // Special layer overlay — paint a CSS-style background using Canvas2D
     // primitives based on the preset kind.

@@ -2,8 +2,12 @@ import { useRef, useCallback, useState, useEffect, useMemo } from "react";
 import {
   Play, Pause, Square, Plus, ChevronRight, Scissors, Magnet,
   Eye, EyeOff, Volume2, VolumeX, Lock, Unlock, Trash2, SkipBack, SkipForward,
-  MousePointer2, Flag, ZoomIn, ZoomOut, Diamond,
+  MousePointer2, Flag, ZoomIn, ZoomOut, Diamond, Pen, Settings,
 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Slider } from "@/components/ui/slider";
+import { Label } from "@/components/ui/label";
+import { DRAW_BRUSHES } from "../lib/draw-library";
 import { Button } from "@/components/ui/button";
 import { EditorState, EditorAction, Clip } from "../lib/types";
 import { cn } from "@/lib/utils";
@@ -326,7 +330,8 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
     dispatch({ type: "SET_TIME", payload: state.currentTime + dir * (1 / FPS) });
   };
 
-  const setTool = (t: "select" | "blade") => dispatch({ type: "SET_TOOL", payload: t });
+  const setTool = (t: "select" | "blade" | "draw") => dispatch({ type: "SET_TOOL", payload: t });
+  const brush = state.drawBrush;
 
   return (
     <div data-testid="timeline" className="flex flex-col flex-1 overflow-hidden bg-card">
@@ -398,7 +403,93 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
           >
             <Scissors className="w-3 h-3" /> Blade
           </button>
+          <button
+            className={cn(
+              "px-2 py-1 text-xs flex items-center gap-1.5 transition-colors border-l border-border",
+              state.tool === "draw" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/40",
+            )}
+            onClick={() => setTool("draw")}
+            title="Draw tool — free-hand brush on the canvas"
+            data-testid="button-draw"
+          >
+            <Pen className="w-3 h-3" /> Draw
+          </button>
         </div>
+
+        {/* Brush picker — only shown when the draw tool is active. */}
+        {state.tool === "draw" && (
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-7 h-7"
+                title="Brush settings"
+                data-testid="button-brush-settings"
+              >
+                <Settings className="w-3.5 h-3.5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64 space-y-3" align="start">
+              <div className="space-y-1.5">
+                <Label className="text-[10px] text-muted-foreground uppercase">Brush</Label>
+                <div className="grid grid-cols-2 gap-1">
+                  {DRAW_BRUSHES.map((b) => (
+                    <button
+                      key={b.kind}
+                      className={cn(
+                        "px-2 py-1.5 text-xs rounded border text-left transition-colors",
+                        brush.kind === b.kind
+                          ? "border-primary bg-primary/10 text-foreground"
+                          : "border-border text-muted-foreground hover:bg-muted/40",
+                      )}
+                      onClick={() => dispatch({ type: "SET_DRAW_BRUSH", payload: { kind: b.kind, width: b.width, opacity: b.opacity } })}
+                    >
+                      {b.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-[10px] text-muted-foreground uppercase">Color</Label>
+                  <input
+                    type="color"
+                    value={brush.color}
+                    onChange={(e) => dispatch({ type: "SET_DRAW_BRUSH", payload: { color: e.target.value } })}
+                    className="w-8 h-6 rounded border border-border bg-transparent"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-[10px] text-muted-foreground uppercase">Width</Label>
+                  <span className="text-xs tabular-nums">{brush.width}px</span>
+                </div>
+                <Slider
+                  value={[brush.width]}
+                  min={1}
+                  max={200}
+                  step={1}
+                  onValueChange={(v) => dispatch({ type: "SET_DRAW_BRUSH", payload: { width: v[0] } })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-[10px] text-muted-foreground uppercase">Opacity</Label>
+                  <span className="text-xs tabular-nums">{Math.round(brush.opacity * 100)}%</span>
+                </div>
+                <Slider
+                  value={[brush.opacity * 100]}
+                  min={5}
+                  max={100}
+                  step={1}
+                  onValueChange={(v) => dispatch({ type: "SET_DRAW_BRUSH", payload: { opacity: v[0] / 100 } })}
+                />
+              </div>
+            </PopoverContent>
+          </Popover>
+        )}
 
         <Button
           variant="ghost"

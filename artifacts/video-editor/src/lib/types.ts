@@ -13,6 +13,9 @@ export type MediaType =
   // star, arrow, badge, etc). The shape kind comes from clip.shapeKind and
   // the fill from clip.fill (solid color or gradient).
   | "shape"
+  // Free-hand drawing clip. Strokes are normalized 0..1 in clip-local space
+  // and rendered as SVG `<path>` elements in Canvas + canvas2d on export.
+  | "drawing"
   // Special-overlay clip — full-canvas tinted/textured overlays like
   // light leaks, film grain, vignettes, scanlines, lens flares. Driven
   // by clip.specialKind and a few intensity knobs. Always renders on
@@ -166,7 +169,38 @@ export type EffectType =
   | "emboss"
   | "vintage" | "lomo" | "polaroid"
   | "neon" | "cyberpunk"
-  | "matrixGreen" | "horror" | "dreamy" | "underwater";
+  | "matrixGreen" | "horror" | "dreamy" | "underwater"
+  // ── Phase-3: 100 new looks. All implemented as compositions of the
+  // existing primitives (CSS filter chains + vignette / tint / grain /
+  // scanlines overlays + glow drop-shadows). Adding a string here MUST be
+  // matched by a render branch in `animation.ts` → `getEffectImpact` and
+  // an entry in `effect-library.ts`.
+  // Cinematic LUTs (20)
+  | "tealOrange" | "bleachBypass" | "goldenHour" | "moonlight" | "sunset"
+  | "desert" | "arctic" | "jungle" | "noir" | "highKey"
+  | "lowKey" | "mutedRetro" | "kodakChrome" | "polaroid79" | "filmKodak"
+  | "kodakGold" | "ektarVibrant" | "portra" | "ektachromeBlue" | "vhs"
+  // Color grades (20)
+  | "warmBoost" | "coolShade" | "amberGlow" | "magentaShift" | "greenLift"
+  | "skyBlue" | "redShift" | "oliveTone" | "mintFresh" | "roseGold"
+  | "peachSoft" | "matcha" | "navyDeep" | "coralPop" | "emeraldDeep"
+  | "rubyRich" | "amethystHaze" | "topazWarm" | "onyxDeep" | "ivoryClean"
+  // Light / atmosphere (15)
+  | "morningHaze" | "fogDense" | "mistLight" | "rainAmbient" | "dustyAir"
+  | "sunBeams" | "starryNight" | "neonNight" | "blueHour" | "magicHour"
+  | "backlitGlow" | "rimLight" | "softGlow" | "hardGlow" | "candleLight"
+  // Stylized (20)
+  | "anime" | "comicBook" | "oilPaint" | "watercolor" | "pencilSketch"
+  | "inkDrawing" | "popArt" | "mosaic" | "cartoon" | "manga"
+  | "gameboy" | "console" | "arcade" | "pixel8" | "pixel16"
+  | "hologram" | "disco" | "rainbow" | "psychedelic" | "infrared"
+  // Distortion (10)
+  | "waveWarp" | "rippleStrong" | "vortex" | "earthquake" | "wobble"
+  | "drunkard" | "heatwave" | "fishEye" | "bubbleLens" | "twirl"
+  // Texture / overlay (15)
+  | "paperGrain" | "bokehSparkle" | "confettiTint" | "glitter" | "rainOverlay"
+  | "snowOverlay" | "fireGlow" | "emberPulse" | "smokeHaze" | "fogOverlay"
+  | "starsOverlay" | "meteorTrail" | "cometTail" | "auroraBorealis" | "vintage70s";
 
 export interface Effect {
   id: string;
@@ -320,6 +354,22 @@ export interface Clip {
   specialKind?: string;
   specialIntensity?: number;
   specialColor?: string;
+  // drawing clip type: list of strokes. Each point is in 0..1 clip-local
+  // space so the drawing scales with the clip rectangle. The brush picker
+  // chooses `width` (1..40 px on a 1080-wide canvas), `color`, and `opacity`.
+  paths?: DrawPath[];
+  // For Lottie/Iconify imports we keep a hint about the original asset so
+  // we know how to render it. `assetKind` is "lottie" / "icon" / undefined.
+  assetKind?: "lottie" | "icon";
+}
+
+export interface DrawPath {
+  id: string;
+  color: string;
+  width: number;     // canvas-relative px on a 1080-wide canvas
+  opacity: number;   // 0..1
+  /** Normalized 0..1 in clip-local space. */
+  points: { x: number; y: number }[];
 }
 
 export interface Transition {
@@ -364,7 +414,26 @@ export interface AIMessage {
   timestamp: number;
 }
 
-export type ToolMode = "select" | "blade";
+export type ToolMode = "select" | "blade" | "draw";
+
+/**
+ * Active brush settings for the draw tool. Stored on EditorState so the
+ * picker remembers the user's last choice across strokes.
+ */
+export interface DrawBrush {
+  color: string;
+  width: number;
+  opacity: number;
+  /** "marker" = solid round, "pencil" = textured thin, "highlighter" = wide low-opacity. */
+  kind: "marker" | "pencil" | "highlighter" | "neon";
+}
+
+export const DEFAULT_DRAW_BRUSH: DrawBrush = {
+  color: "#ffffff",
+  width: 6,
+  opacity: 1,
+  kind: "marker",
+};
 
 export interface Marker {
   id: string;
@@ -389,6 +458,8 @@ export interface EditorState {
   zoom: number;
   snapEnabled: boolean;
   tool: ToolMode;
+  /** Active brush settings for the draw tool. */
+  drawBrush: DrawBrush;
   aiHistory: AIMessage[];
   background: string;
 }
@@ -431,6 +502,7 @@ export type EditorAction =
   | { type: "REMOVE_ASSET"; payload: string }
   | { type: "ADD_AI_MESSAGE"; payload: AIMessage }
   | { type: "SET_TOOL"; payload: ToolMode }
+  | { type: "SET_DRAW_BRUSH"; payload: Partial<DrawBrush> }
   | { type: "ADD_MARKER"; payload: { time: number; label?: string; color?: string } }
   | { type: "DELETE_MARKER"; payload: string }
   | { type: "CLEAR_MARKERS" }

@@ -6,6 +6,7 @@ import { Sparkles, Loader2, Wand2, ChevronDown, ChevronUp } from "lucide-react";
 import { EditorState, EditorAction } from "../lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { buildAiSchemaMarkdown } from "../lib/ai-schema";
+import { loadAiKeys, generateWithProvider, PROVIDERS } from "../lib/ai-providers";
 
 // Cache the schema once — it's static across renders.
 const AI_SCHEMA_MD = buildAiSchemaMarkdown();
@@ -30,10 +31,51 @@ export default function AIInstructionBar({
 }) {
   const [instruction, setInstruction] = useState("");
   const [showHistory, setShowHistory] = useState(false);
+  const [byoLoading, setByoLoading] = useState(false);
   const processInstruction = useProcessInstruction();
   const { toast } = useToast();
 
-  const send = (prompt: string) => {
+  const handleResult = (
+    operations: unknown,
+    explanation: string,
+    promptKey: string,
+  ) => {
+    if (Array.isArray(operations) && operations.length > 0) {
+      // The reducer's APPLY_OPERATIONS expects the same op shape as the
+      // server returns. We pass it through unchanged.
+      dispatch({ type: "APPLY_OPERATIONS", payload: operations as never });
+    }
+    dispatch({
+      type: "ADD_AI_MESSAGE",
+      payload: {
+        id: `m-${Date.now()}-r-${promptKey}`,
+        role: "assistant",
+        text: explanation || "Done.",
+        timestamp: Date.now(),
+      },
+    });
+    setInstruction("");
+    toast({
+      title: `AI applied ${(operations as unknown[] | undefined)?.length ?? 0} ops`,
+      description: explanation,
+    });
+  };
+
+  const handleError = (err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    dispatch({
+      type: "ADD_AI_MESSAGE",
+      payload: {
+        id: `m-${Date.now()}-e`,
+        role: "assistant",
+        text: `Error: ${msg}`,
+        timestamp: Date.now(),
+      },
+    });
+    toast({ title: "AI request failed", description: msg, variant: "destructive" });
+  };
+
+  const send = async (prompt: string) => {
     if (!prompt.trim()) return;
     dispatch({
       type: "ADD_AI_MESSAGE",
@@ -42,48 +84,42 @@ export default function AIInstructionBar({
     // Prepend the schema markdown so the model knows what shapes /
     // effects / transitions / templates / fonts / special layers and
     // reducer actions are available in this build.
-    const enriched = `${AI_SCHEMA_MD}\n\n## User instruction\n${prompt}`;
-    processInstruction.mutate(
-      { data: { instruction: enriched, currentState: JSON.stringify(state) } },
-      {
-        onSuccess: (result) => {
-          if (result.operations && result.operations.length > 0) {
-            dispatch({ type: "APPLY_OPERATIONS", payload: result.operations });
-          }
-          dispatch({
-            type: "ADD_AI_MESSAGE",
-            payload: {
-              id: `m-${Date.now()}-r`,
-              role: "assistant",
-              text: result.explanation || "Done.",
-              timestamp: Date.now(),
-            },
-          });
-          setInstruction("");
-          toast({
-            title: "AI applied " + (result.operations?.length || 0) + " ops",
-            description: result.explanation,
-          });
+    const enriched = `${AI_SCHEMA_MD}\n\n## User instruction\n${prompt}\n\n## Current editor state (JSON)\n${JSON.stringify(state)}\n\nReply with JSON: {"operations": [...], "explanation": "..."}.`;
+
+    const cfg = loadAiKeys();
+    if (cfg.provider === "replit") {
+      // Default path — Gemini via Replit AI Integration.
+      processInstruction.mutate(
+        { data: { instruction: `${AI_SCHEMA_MD}\n\n## User instruction\n${prompt}`, currentState: JSON.stringify(state) } },
+        {
+          onSuccess: (result: any) => handleResult(result.operations, result.explanation || "Done.", "replit"),
+          onError: (err: any) => handleError(err),
         },
-        onError: (err) => {
-          dispatch({
-            type: "ADD_AI_MESSAGE",
-            payload: {
-              id: `m-${Date.now()}-e`,
-              role: "assistant",
-              text: `Error: ${err}`,
-              timestamp: Date.now(),
-            },
-          });
-          toast({
-            title: "AI request failed",
-            description: String(err),
-            variant: "destructive",
-          });
-        },
-      },
-    );
+      );
+      return;
+    }
+
+    // BYO provider — call client-side, parse JSON, apply ops.
+    try {
+      setByoLoading(true);
+      const { text } = await generateWithProvider(cfg, enriched);
+      const cleaned = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+      let parsed: { operations?: unknown[]; explanation?: string } = {};
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch {
+        throw new Error(`Provider returned non-JSON output: ${cleaned.slice(0, 200)}…`);
+      }
+      handleResult(parsed.operations ?? [], parsed.explanation ?? "Done.", "byo");
+    } catch (err) {
+      handleError(err);
+    } finally {
+      setByoLoading(false);
+    }
   };
+
+  const isPending = processInstruction.isPending || byoLoading;
+  const activeProvider = PROVIDERS.find((p) => p.id === loadAiKeys().provider);
 
   return (
     <div className="border-b border-border bg-gradient-to-b from-muted/30 to-muted/10">
@@ -94,18 +130,18 @@ export default function AIInstructionBar({
               value={instruction}
               onChange={(e) => setInstruction(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && send(instruction)}
-              placeholder="Tell AI what to do — e.g. 'Make the logo smaller, fade in the title, add a cinematic look'"
+              placeholder={`Ask ${activeProvider?.label ?? "AI"} — e.g. 'fade in the title, add a cinematic look'`}
               className="w-full bg-background border-border pl-9 h-9 text-sm focus-visible:ring-primary"
-              disabled={processInstruction.isPending}
+              disabled={isPending}
             />
             <Sparkles className="w-4 h-4 text-primary absolute left-3 top-1/2 -translate-y-1/2" />
           </div>
           <Button
             onClick={() => send(instruction)}
-            disabled={processInstruction.isPending || !instruction.trim()}
+            disabled={isPending || !instruction.trim()}
             className="w-24 shrink-0 h-9 bg-primary"
           >
-            {processInstruction.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : (
+            {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : (
               <><Wand2 className="w-3.5 h-3.5 mr-1.5" /> Run</>
             )}
           </Button>

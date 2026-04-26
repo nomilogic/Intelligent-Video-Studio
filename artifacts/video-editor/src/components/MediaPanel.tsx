@@ -10,6 +10,7 @@ import { TEMPLATES } from "../lib/templates";
 import { SHAPE_LIBRARY } from "../lib/shape-library";
 import { SPECIAL_LAYERS } from "../lib/special-layers";
 import { loadPresets, deletePreset, type CustomPreset } from "../lib/custom-library";
+import { TEXT_PRESETS as ALL_TEXT_PRESETS, TEXT_PRESET_CATEGORIES, type TextPreset, type TextPresetCategory } from "../lib/text-presets";
 import { cn } from "@/lib/utils";
 
 const CLIP_COLORS = ["#3b82f6", "#8b5cf6", "#f59e0b", "#10b981", "#f43f5e", "#06b6d4", "#f97316", "#ec4899"];
@@ -39,8 +40,39 @@ async function probeDuration(src: string, type: "video" | "audio"): Promise<numb
 
 export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [activeTab, setActiveTab] = useState<"media" | "text" | "shapes" | "templates" | "saved">("media");
+  const [activeTab, setActiveTab] = useState<"media" | "text" | "shapes" | "assets" | "templates" | "saved">("media");
+  // Asset library tab state
+  const [assetProvider, setAssetProvider] = useState<"giphy" | "pexels" | "iconify" | "lottie">("giphy");
+  const [assetQuery, setAssetQuery] = useState("");
+  const [assetResults, setAssetResults] = useState<Array<{ id: string; thumb: string; src: string; title: string; kind: "image" | "lottie" }>>([]);
+  const [assetLoading, setAssetLoading] = useState(false);
+  const [assetError, setAssetError] = useState<string | null>(null);
+
+  const searchAssets = async (q?: string) => {
+    const query = (q ?? assetQuery).trim();
+    if (!query) return;
+    setAssetLoading(true);
+    setAssetError(null);
+    try {
+      const res = await fetch(`/api/assets/search?provider=${assetProvider}&q=${encodeURIComponent(query)}`);
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(txt || `Search failed (${res.status})`);
+      }
+      const data = await res.json();
+      setAssetResults(Array.isArray(data.items) ? data.items : []);
+    } catch (e: any) {
+      setAssetError(e?.message || "Search failed");
+      setAssetResults([]);
+    } finally {
+      setAssetLoading(false);
+    }
+  };
   const [textInput, setTextInput] = useState("Your title here");
+  const [textPresetCategory, setTextPresetCategory] = useState<TextPresetCategory | "All">("All");
+  const filteredTextPresets: TextPreset[] = textPresetCategory === "All"
+    ? ALL_TEXT_PRESETS
+    : ALL_TEXT_PRESETS.filter((p) => p.category === textPresetCategory);
   // `presets` is a localStorage-backed list of user-saved clip styling.
   // We re-read it whenever the Saved tab gains focus so changes from the
   // PropertiesInspector show up immediately.
@@ -277,6 +309,7 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
           { key: "media" as const, label: "Media" },
           { key: "text" as const, label: "Text" },
           { key: "shapes" as const, label: "Stock" },
+          { key: "assets" as const, label: "Assets" },
           { key: "templates" as const, label: "Templates" },
           { key: "saved" as const, label: "Saved" },
         ].map((t) => (
@@ -392,8 +425,24 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
           <Separator />
 
           <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Presets</p>
+          <div className="flex flex-wrap gap-1">
+            {(["All", ...TEXT_PRESET_CATEGORIES] as const).map((c) => (
+              <button
+                key={c}
+                onClick={() => setTextPresetCategory(c as TextPresetCategory | "All")}
+                className={cn(
+                  "text-[10px] px-1.5 py-0.5 rounded border transition-colors",
+                  textPresetCategory === c
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-border text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
           <div className="grid grid-cols-1 gap-1.5">
-            {TEXT_PRESETS.map((p) => {
+            {filteredTextPresets.map((p) => {
               const merged = { ...DEFAULT_TEXT_STYLE, ...p.style } as TextStyle;
               const previewSize = Math.min((merged.fontSize || 40) / 4, 22);
               const containerStyle = textContainerStyle(merged);
@@ -622,6 +671,100 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
           <div className="text-[10px] text-muted-foreground p-2 leading-relaxed">
             <p className="font-medium mb-1 flex items-center gap-1"><Sparkles className="w-3 h-3" /> Pro Tip</p>
             <p>Use the AI bar at the top to generate effects, animations, transitions, and more with natural language.</p>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "assets" && (
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <div className="p-2 space-y-2 border-b border-border">
+            <div className="grid grid-cols-4 gap-1">
+              {(["giphy", "pexels", "iconify", "lottie"] as const).map((p) => (
+                <button
+                  key={p}
+                  className={cn(
+                    "text-[10px] py-1 rounded border capitalize",
+                    assetProvider === p
+                      ? "border-primary bg-primary/10 text-foreground"
+                      : "border-border text-muted-foreground hover:bg-muted/40",
+                  )}
+                  onClick={() => {
+                    setAssetProvider(p);
+                    setAssetResults([]);
+                  }}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                searchAssets();
+              }}
+              className="flex gap-1"
+            >
+              <input
+                value={assetQuery}
+                onChange={(e) => setAssetQuery(e.target.value)}
+                placeholder={`Search ${assetProvider}…`}
+                className="flex-1 h-7 text-xs px-2 rounded border border-border bg-background"
+              />
+              <button
+                type="submit"
+                disabled={assetLoading || !assetQuery.trim()}
+                className="h-7 px-2 text-xs rounded bg-primary text-primary-foreground disabled:opacity-50"
+              >
+                {assetLoading ? "…" : "Go"}
+              </button>
+            </form>
+            <p className="text-[10px] text-muted-foreground leading-snug">
+              Click any result to add it to the timeline as an image clip.
+              {assetProvider === "giphy" && " Requires GIPHY_API_KEY on the server."}
+              {assetProvider === "pexels" && " Requires PEXELS_API_KEY on the server."}
+            </p>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2">
+            {assetError && (
+              <div className="text-[10px] text-destructive bg-destructive/10 border border-destructive/30 rounded p-2 mb-2">
+                {assetError}
+              </div>
+            )}
+            {assetResults.length === 0 && !assetLoading && !assetError && (
+              <div className="text-[10px] text-muted-foreground text-center py-8">
+                Search to see results.
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              {assetResults.map((r) => (
+                <button
+                  key={r.id}
+                  className="aspect-square rounded border border-border bg-muted/30 overflow-hidden hover:border-primary transition-colors group relative"
+                  title={r.title}
+                  onClick={() => {
+                    const colorIdx = state.clips.length % CLIP_COLORS.length;
+                    const clip = makeClip({
+                      label: r.title || "Asset",
+                      mediaType: "image",
+                      src: r.src,
+                      color: CLIP_COLORS[colorIdx],
+                      duration: 5,
+                      start: state.currentTime,
+                      trackId: state.tracks[0]?.id,
+                      assetKind: r.kind === "lottie" ? "lottie" : (assetProvider === "iconify" ? "icon" : undefined),
+                    } as any);
+                    dispatch({ type: "ADD_CLIP", payload: clip });
+                  }}
+                >
+                  <img
+                    src={r.thumb}
+                    alt={r.title}
+                    className="w-full h-full object-contain"
+                    loading="lazy"
+                  />
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}

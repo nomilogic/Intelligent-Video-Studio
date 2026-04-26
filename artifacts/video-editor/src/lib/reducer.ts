@@ -8,6 +8,7 @@ import {
   EasingType,
   DEFAULT_FILTERS,
   DEFAULT_TEXT_STYLE,
+  DEFAULT_DRAW_BRUSH,
 } from "./types";
 import { getTemplateByKey } from "./templates";
 
@@ -146,6 +147,7 @@ export const initialState: EditorState = {
   zoom: 1,
   snapEnabled: true,
   tool: "select",
+  drawBrush: { ...DEFAULT_DRAW_BRUSH },
   aiHistory: [],
   background: "#000000",
 };
@@ -687,6 +689,8 @@ function presentReducer(state: EditorState, action: EditorAction): EditorState {
       return { ...state, aiHistory: [...state.aiHistory, action.payload].slice(-20) };
     case "SET_TOOL":
       return { ...state, tool: action.payload };
+    case "SET_DRAW_BRUSH":
+      return { ...state, drawBrush: { ...state.drawBrush, ...action.payload } };
     case "ADD_MARKER": {
       const m: Marker = {
         id: uid("mk"),

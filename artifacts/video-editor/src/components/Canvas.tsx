@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback, useEffect, useMemo, memo } from "react";
 import { EditorState, EditorAction, Clip, ClipMask } from "../lib/types";
+import { makeClip } from "../lib/reducer";
 import {
   resolveClip,
   clipVisibleAt,
@@ -517,6 +518,43 @@ function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false }
     return <div className="w-full h-full pointer-events-none" style={{ background: fillCss }} />;
   }
 
+  if (clip.mediaType === "drawing") {
+    // Drawing clip: SVG with normalized coords (0..1 → 0..100 viewBox units).
+    const paths = clip.paths ?? [];
+    return (
+      <svg
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+        className="w-full h-full pointer-events-none"
+        style={{ transform: flipTransform(clip) }}
+      >
+        {paths.map((p) => {
+          if (p.points.length === 0) return null;
+          const d = p.points
+            .map((pt, i) => `${i === 0 ? "M" : "L"}${(pt.x * 100).toFixed(2)} ${(pt.y * 100).toFixed(2)}`)
+            .join(" ");
+          // Stroke width is canvas-relative; we scale to a 100-unit viewBox.
+          // 1080 = canvas reference width → strokeWidth/1080*100 viewBox units.
+          const sw = (p.width / 1080) * 100;
+          return (
+            <path
+              key={p.id}
+              d={d}
+              fill="none"
+              stroke={p.color}
+              strokeOpacity={p.opacity}
+              strokeWidth={sw}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+              style={{ paintOrder: "stroke" }}
+            />
+          );
+        })}
+      </svg>
+    );
+  }
+
   if (clip.mediaType === "specialLayer") {
     const def = getSpecialLayer(clip.specialKind);
     const intensity = clip.specialIntensity ?? def?.intensity ?? 0.6;
@@ -973,6 +1011,10 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
   const [snapGuides, setSnapGuides] = useState<{ x?: number; y?: number }>({});
   const [fitSize, setFitSize] = useState({ w: 960, h: 540 });
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
+  // Active free-hand stroke while the draw tool is held. Coordinates are
+  // normalized 0..1 against the canvas (NOT the clip), since drawing clips
+  // currently always span the full canvas.
+  const [activeStroke, setActiveStroke] = useState<{ x: number; y: number }[] | null>(null);
 
   // Exit inline text editing whenever the user selects something else, deletes
   // the clip being edited, or switches into crop mode.
@@ -1453,6 +1495,77 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
           }}
           onMouseDown={onCanvasMouseDown}
         >
+        {/* Draw-tool overlay — sits on top of everything when the pen is
+            active and captures pointer events into a stroke buffer. */}
+        {state.tool === "draw" && (
+          <div
+            className="absolute inset-0 z-40 cursor-crosshair"
+            onMouseDown={(e) => {
+              if (e.button !== 0) return;
+              e.stopPropagation();
+              const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+              const x = (e.clientX - rect.left) / rect.width;
+              const y = (e.clientY - rect.top) / rect.height;
+              setActiveStroke([{ x, y }]);
+            }}
+            onMouseMove={(e) => {
+              if (!activeStroke) return;
+              const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+              const x = (e.clientX - rect.left) / rect.width;
+              const y = (e.clientY - rect.top) / rect.height;
+              setActiveStroke((s) => (s ? [...s, { x, y }] : s));
+            }}
+            onMouseUp={() => {
+              if (!activeStroke || activeStroke.length < 2) {
+                setActiveStroke(null);
+                return;
+              }
+              const brush = state.drawBrush;
+              const path = {
+                id: `pth_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+                color: brush.color,
+                width: brush.width,
+                opacity: brush.opacity,
+                kind: brush.kind,
+                points: activeStroke,
+              };
+              const newClip: Clip = makeClip({
+                mediaType: "drawing",
+                label: "Drawing",
+                color: brush.color,
+                startTime: state.currentTime,
+                duration: 5,
+                trackIndex: 0,
+                paths: [path],
+              });
+              dispatch({ type: "ADD_CLIP", payload: newClip });
+              setActiveStroke(null);
+            }}
+            onMouseLeave={() => setActiveStroke(null)}
+          >
+            {activeStroke && activeStroke.length > 0 && (
+              <svg
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                className="w-full h-full pointer-events-none"
+              >
+                <path
+                  d={activeStroke
+                    .map((pt, i) => `${i === 0 ? "M" : "L"}${(pt.x * 100).toFixed(2)} ${(pt.y * 100).toFixed(2)}`)
+                    .join(" ")}
+                  fill="none"
+                  stroke={state.drawBrush.color}
+                  strokeOpacity={state.drawBrush.opacity}
+                  strokeWidth={(state.drawBrush.width / 1080) * 100}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
+                />
+              </svg>
+            )}
+          </div>
+        )}
+
         {/* Subtle grid */}
         <div
           className="absolute inset-0 pointer-events-none opacity-50"
