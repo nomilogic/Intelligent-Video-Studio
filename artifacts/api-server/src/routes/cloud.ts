@@ -2,7 +2,7 @@ import { Router } from "express";
 import { eq } from "drizzle-orm";
 import { z } from "zod/v4";
 import { db, oauthStatesTable, userConnectionsTable } from "@workspace/db";
-import { requireAuth } from "../middlewares/auth";
+import { requireAuth, requireDiamonds } from "../middlewares/auth";
 import {
   ALL_PROVIDERS,
   CloudProvider,
@@ -187,7 +187,7 @@ const ExportBody = z.object({
   base64: z.string().min(1),
 });
 
-router.post("/cloud/:provider/export", requireAuth, async (req, res) => {
+router.post("/cloud/:provider/export", requireAuth, requireDiamonds("export"), async (req, res) => {
   const provider = parseProvider(req.params["provider"] as string);
   if (!provider) {
     res.status(400).json({ error: "Unknown provider" });

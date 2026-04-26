@@ -136,16 +136,30 @@ router.post("/diamonds/checkout", requireAuth, async (req, res) => {
   const baseUrl =
     process.env["PUBLIC_BASE_URL"] ??
     (process.env["REPLIT_DEV_DOMAIN"] ? `https://${process.env["REPLIT_DEV_DOMAIN"]}` : "http://localhost:5000");
+  // Propagate the userId/sessionId/packageId metadata onto the underlying
+  // PaymentIntent (and therefore the Charge) too — `charge.refunded`
+  // webhooks only see Charge metadata, not Checkout Session metadata, so
+  // without this the refund handler can't locate the original purchase.
+  const checkoutMetadata = {
+    userId: String(req.user!.id),
+    packageId: String(pkg.id),
+    diamonds: String(pkg.diamonds + pkg.bonusDiamonds),
+  };
   const session = await s.checkout.sessions.create({
     mode: "payment",
     success_url: `${baseUrl}/diamonds?success=1&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${baseUrl}/diamonds?canceled=1`,
     customer_email: req.user!.email,
     client_reference_id: String(req.user!.id),
-    metadata: {
-      userId: String(req.user!.id),
-      packageId: String(pkg.id),
-      diamonds: String(pkg.diamonds + pkg.bonusDiamonds),
+    metadata: checkoutMetadata,
+    payment_intent_data: {
+      metadata: {
+        ...checkoutMetadata,
+        // The webhook refund handler keys on `sessionId` to find the
+        // original purchase row in `diamond_transactions.stripeSessionId`.
+        // Stripe substitutes the real id at session-creation time.
+        sessionId: "{CHECKOUT_SESSION_ID}",
+      },
     },
     line_items: [
       {

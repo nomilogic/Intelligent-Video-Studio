@@ -85,8 +85,12 @@ export function requireAdmin(
  * diamond balance before invoking the route handler. If the feature is
  * disabled or the user can't afford it, returns 402 / 403.
  *
- * The handler runs only if the spend succeeds, and the spend is rolled back
- * via `req.refundOnError(reason)` if the handler throws.
+ * **Auto-refund on failure.** We hook `res.on("close")` so that whenever
+ * the response finishes with a 4xx/5xx status code (or the connection
+ * is closed before the handler ever sent a response), the spend is
+ * automatically refunded via a compensating ledger entry. This means a
+ * downstream provider failure (Gemini outage, cloud upload error, etc.)
+ * never silently consumes the user's diamonds.
  */
 export function requireDiamonds(featureKey: string) {
   return async (req: Request, res: Response, next: NextFunction) => {
@@ -120,10 +124,41 @@ export function requireDiamonds(featureKey: string) {
             featureKey,
             reason: `Used ${flag.label}`,
           });
-          (req as any).__spendTxId = tx.id;
-          (req as any).__spendCost = flag.costDiamonds;
           res.setHeader("X-Diamond-Spent", String(flag.costDiamonds));
           res.setHeader("X-Diamond-Balance", String(tx.balanceAfter));
+
+          // Compensating refund on handler failure / non-2xx response.
+          const userId = req.user.id;
+          const cost = flag.costDiamonds;
+          const label = flag.label;
+          const spentTxId = tx.id;
+          let refunded = false;
+          const maybeRefund = async () => {
+            if (refunded) return;
+            // Only refund on error responses (4xx/5xx) or aborted requests.
+            // 2xx/3xx means the handler succeeded — keep the spend.
+            const status = res.statusCode;
+            if (status >= 200 && status < 400 && res.writableEnded) return;
+            refunded = true;
+            try {
+              await applyLedger({
+                userId,
+                amount: cost,
+                kind: "refund",
+                featureKey,
+                reason: `Auto-refund for failed ${label} (status ${status})`,
+                refundedTransactionId: spentTxId,
+              });
+            } catch (err) {
+              req.log?.error(
+                { err, userId, featureKey, spentTxId },
+                "auto-refund failed",
+              );
+            }
+          };
+          res.on("close", () => {
+            void maybeRefund();
+          });
         } catch (err) {
           if (err instanceof InsufficientDiamondsError) {
             const balance = await getBalance(req.user.id);

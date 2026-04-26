@@ -1,7 +1,74 @@
 import { Router } from "express";
 import { ai } from "@workspace/integrations-gemini-ai";
 import { z } from "zod/v4";
+import { lookup as dnsLookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { requireAuth, requireDiamonds } from "../middlewares/auth";
+
+/**
+ * SSRF guard for user-supplied http(s) URLs. Resolves the hostname and
+ * rejects anything pointing at a private / loopback / link-local /
+ * cloud-metadata address, plus rejects non-default ports and
+ * non-http(s) schemes outright. Throws an Error with a user-safe
+ * message on any policy violation.
+ */
+async function assertSafePublicUrl(rawUrl: string): Promise<URL> {
+  const u = new URL(rawUrl);
+  if (u.protocol !== "http:" && u.protocol !== "https:") {
+    throw new Error("Only http(s) URLs are allowed");
+  }
+  // Reject explicit credentials in the URL.
+  if (u.username || u.password) {
+    throw new Error("Credentials in URL are not allowed");
+  }
+  // Reject odd ports — only standard 80/443 are allowed.
+  if (u.port && u.port !== "80" && u.port !== "443") {
+    throw new Error("Only ports 80 and 443 are allowed");
+  }
+  // Resolve all A/AAAA records and reject any private range.
+  const hostname = u.hostname;
+  // If the hostname is itself a literal IP, validate it directly; otherwise
+  // resolve via DNS and check every returned address.
+  const literal = isIP(hostname);
+  const addresses: { address: string; family: number }[] = literal
+    ? [{ address: hostname, family: literal }]
+    : await dnsLookup(hostname, { all: true });
+  for (const a of addresses) {
+    if (isPrivateAddress(a.address)) {
+      throw new Error("URL resolves to a non-public address");
+    }
+  }
+  return u;
+}
+
+function isPrivateAddress(addr: string): boolean {
+  // IPv4 ranges
+  if (isIP(addr) === 4) {
+    const parts = addr.split(".").map(Number);
+    if (parts.length !== 4 || parts.some((p) => Number.isNaN(p))) return true;
+    const [a, b] = parts as [number, number, number, number];
+    if (a === 10) return true;                       // 10.0.0.0/8
+    if (a === 127) return true;                      // loopback
+    if (a === 0) return true;                        // 0.0.0.0/8
+    if (a === 169 && b === 254) return true;         // link-local + AWS metadata
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16/12
+    if (a === 192 && b === 168) return true;          // 192.168/16
+    if (a === 192 && b === 0) return true;            // 192.0.0.0/24 incl 192.0.2 docs
+    if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking
+    if (a >= 224) return true;                       // multicast / reserved
+    return false;
+  }
+  // IPv6 — block loopback / link-local / unique-local + IPv4-mapped private
+  const lower = addr.toLowerCase();
+  if (lower === "::" || lower === "::1") return true;
+  if (lower.startsWith("fe80:")) return true;       // link-local
+  if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // ULA
+  if (lower.startsWith("ff")) return true;          // multicast
+  // IPv4-mapped (::ffff:a.b.c.d) — check the embedded v4
+  const m = lower.match(/^::ffff:([0-9.]+)$/);
+  if (m && isPrivateAddress(m[1]!)) return true;
+  return false;
+}
 
 const router = Router();
 
@@ -57,7 +124,9 @@ router.post(
         mimeType = m[1]!;
         bytes = Buffer.from(m[2]!, "base64");
       } else if (/^https?:\/\//.test(body.src)) {
-        const r = await fetch(body.src);
+        // SSRF guard — refuse to fetch private/loopback/metadata addresses.
+        const safeUrl = await assertSafePublicUrl(body.src);
+        const r = await fetch(safeUrl.toString(), { redirect: "error" });
         if (!r.ok) throw new Error(`Source fetch failed: ${r.status}`);
         const ct = r.headers.get("content-type");
         if (ct) mimeType = ct.split(";")[0]!.trim();
