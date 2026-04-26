@@ -135,8 +135,9 @@ router.post(
         res.status(400).json({ error: "Unsupported src URL scheme" });
         return;
       }
-    } catch (err: any) {
-      res.status(400).json({ error: `Failed to load audio: ${err?.message ?? err}` });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(400).json({ error: `Failed to load audio: ${msg}` });
       return;
     }
 
@@ -176,35 +177,44 @@ router.post(
         },
       });
 
+      interface RawSegment { start?: unknown; end?: unknown; text?: unknown }
+      interface ParsedTranscript { segments?: RawSegment[]; language?: unknown }
+      interface CleanSegment { start: number; end: number; text: string }
       const content = response.text ?? "{}";
-      let parsed: any;
+      let parsed: ParsedTranscript;
       try {
-        parsed = JSON.parse(content);
+        parsed = JSON.parse(content) as ParsedTranscript;
       } catch {
         const m = content.match(/\{[\s\S]*\}/);
-        parsed = m ? JSON.parse(m[0]) : { segments: [] };
+        parsed = m ? (JSON.parse(m[0]) as ParsedTranscript) : { segments: [] };
       }
-      const segments = Array.isArray(parsed?.segments) ? parsed.segments : [];
+      const rawSegments: RawSegment[] = Array.isArray(parsed.segments)
+        ? parsed.segments
+        : [];
       const offset = body.startOffset ?? 0;
-      const cleaned = segments
-        .map((s: any) => ({
+      const cleaned: CleanSegment[] = rawSegments
+        .map((s): CleanSegment => ({
           start: Math.max(0, Number(s.start) || 0) + offset,
           end: Math.max(0, Number(s.end) || 0) + offset,
           text: String(s.text ?? "").trim(),
         }))
-        .filter((s: any) => s.text && s.end > s.start)
-        .filter((s: any) =>
+        .filter((s) => s.text && s.end > s.start)
+        .filter((s) =>
           body.maxDuration ? s.start - offset < body.maxDuration : true,
         );
 
       res.json({
         segments: cleaned,
-        language: parsed?.language ?? body.language ?? "en",
+        language:
+          typeof parsed.language === "string"
+            ? parsed.language
+            : body.language ?? "en",
         trackIndex: body.trackIndex ?? 0,
       });
-    } catch (err: any) {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       req.log?.error({ err }, "subtitles failed");
-      res.status(500).json({ error: err?.message ?? "Subtitle generation failed" });
+      res.status(500).json({ error: msg || "Subtitle generation failed" });
     }
   },
 );

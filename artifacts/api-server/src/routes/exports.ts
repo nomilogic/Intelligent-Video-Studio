@@ -31,7 +31,10 @@ const PreflightBody = z.object({
  */
 router.post("/exports/preflight", requireAuth, async (req, res) => {
   const body = PreflightBody.parse(req.body);
-  const isHd = body.height > 720;
+  // Audio-only export is always counted as a standard "export" charge —
+  // the canvas dimensions don't apply to a sound file. For video, output
+  // height >720p escalates to the "export_hd" flag.
+  const isHd = body.format !== "audio" && body.height > 720;
   const featureKey = isHd ? "export_hd" : "export";
   const flag = await getFlag(featureKey);
   if (!flag) {

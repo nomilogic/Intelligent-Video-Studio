@@ -92,17 +92,24 @@ export default function Toolbar({ state, dispatch, projectId, projectName: initi
       console.warn("export refund failed", err);
     }
   }
+  // Tracks the most-recent preflight transactionId so the
+  // exportStatus.phase==="error" effect (below) can refund async encoder
+  // failures. Cleared on done/idle.
+  const lastPreflightTxRef = useRef<number | null>(null);
   async function gatedStartVideoExport(config: ExportConfig) {
     const scale = computeScale(config.resolution, state.canvasWidth, state.canvasHeight);
     const width = Math.round(state.canvasWidth * scale);
     const height = Math.round(state.canvasHeight * scale);
     const pre = await preflight(width, height, config.format, config.fps);
     if (!pre) return;
+    lastPreflightTxRef.current = pre.transactionId ?? null;
     try {
       await Promise.resolve(startVideoExport(config));
     } catch (err) {
-      if (pre.transactionId) {
-        await refundExport(pre.transactionId, (err as Error)?.message ?? "Local export failed");
+      const txId = lastPreflightTxRef.current;
+      lastPreflightTxRef.current = null;
+      if (txId != null) {
+        await refundExport(txId, (err as Error)?.message ?? "Local export failed");
       }
       throw err;
     }
@@ -111,26 +118,27 @@ export default function Toolbar({ state, dispatch, projectId, projectName: initi
     // Audio export always counts as a standard (SD) export charge.
     const pre = await preflight(state.canvasWidth, state.canvasHeight, "audio");
     if (!pre) return;
+    lastPreflightTxRef.current = pre.transactionId ?? null;
     try {
       await Promise.resolve(startAudioExport());
     } catch (err) {
-      if (pre.transactionId) {
-        await refundExport(pre.transactionId, (err as Error)?.message ?? "Local audio export failed");
+      const txId = lastPreflightTxRef.current;
+      lastPreflightTxRef.current = null;
+      if (txId != null) {
+        await refundExport(txId, (err as Error)?.message ?? "Local audio export failed");
       }
       throw err;
     }
   }
-  // If the local encoder reports an error AFTER preflight succeeded
-  // (i.e. async failure), the useEffect on exportStatus.phase below shows
-  // a toast — refund the most recent preflight charge in that path.
-  const lastPreflightTxRef = useRef<number | null>(null);
+  // Async encoder failure (the encoder resolved its returned promise but
+  // later flipped exportStatus to "error"): refund the recorded charge.
   useEffect(() => {
     if (exportStatus.phase === "error" && lastPreflightTxRef.current != null) {
       const txId = lastPreflightTxRef.current;
       lastPreflightTxRef.current = null;
       void refundExport(txId, exportStatus.errorMsg ?? "Local export failed");
     }
-    if (exportStatus.phase === "done") {
+    if (exportStatus.phase === "done" || exportStatus.phase === "idle") {
       lastPreflightTxRef.current = null;
     }
   }, [exportStatus.phase, exportStatus.errorMsg]);
