@@ -4,6 +4,8 @@ import { TRANSITION_LIBRARY as TRANSITION_CATALOG, TRANSITION_CATEGORIES } from 
 import { SHAPE_LIBRARY } from "../lib/shape-library";
 import { SPECIAL_LAYERS } from "../lib/special-layers";
 import { savePreset, loadPresets, deletePreset, type CustomPreset } from "../lib/custom-library";
+import { useAuth } from "@/lib/auth-context";
+import { useDiamonds } from "@/lib/diamonds-context";
 import ColorGradientPicker from "./ColorGradientPicker";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -1083,6 +1085,8 @@ function ChromaKeySection({
   clip: Clip;
   dispatch: React.Dispatch<EditorAction>;
 }) {
+  const { user } = useAuth();
+  const { promptLoginRequired } = useDiamonds();
   const ck = clip.chromaKey ?? {
     enabled: false,
     color: "#00ff21",
@@ -1096,6 +1100,14 @@ function ChromaKeySection({
       payload: { id: clip.id, updates: { chromaKey: { ...ck, ...patch } } },
     });
   };
+  const tryToggle = () => {
+    if (!user && !ck.enabled) {
+      // Enabling chroma key is a premium action — gate behind sign in.
+      promptLoginRequired({ featureKey: "chroma_key" });
+      return;
+    }
+    setCk({ enabled: !ck.enabled });
+  };
   return (
     <Section
       title="Green Screen / Chroma Key"
@@ -1104,7 +1116,7 @@ function ChromaKeySection({
           variant={ck.enabled ? "secondary" : "ghost"}
           size="sm"
           className="h-6 px-2 text-[10px]"
-          onClick={() => setCk({ enabled: !ck.enabled })}
+          onClick={tryToggle}
           data-testid="toggle-chromakey"
         >
           {ck.enabled ? "On" : "Off"}

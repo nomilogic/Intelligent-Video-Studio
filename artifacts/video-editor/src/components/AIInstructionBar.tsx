@@ -7,6 +7,8 @@ import { EditorState, EditorAction } from "../lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { buildAiSchemaMarkdown } from "../lib/ai-schema";
 import { loadAiKeys, generateWithProvider, PROVIDERS } from "../lib/ai-providers";
+import { useAuth } from "@/lib/auth-context";
+import { useDiamonds } from "@/lib/diamonds-context";
 
 // Cache the schema once — it's static across renders.
 const AI_SCHEMA_MD = buildAiSchemaMarkdown();
@@ -34,6 +36,8 @@ export default function AIInstructionBar({
   const [byoLoading, setByoLoading] = useState(false);
   const processInstruction = useProcessInstruction();
   const { toast } = useToast();
+  const { user } = useAuth();
+  const { promptLoginRequired } = useDiamonds();
 
   const handleResult = (
     operations: unknown,
@@ -77,6 +81,13 @@ export default function AIInstructionBar({
 
   const send = async (prompt: string) => {
     if (!prompt.trim()) return;
+    const cfgPrecheck = loadAiKeys();
+    if (!user && cfgPrecheck.provider === "replit") {
+      // Anonymous AI calls hit the server's gated endpoint and would 401.
+      // Open the login modal up-front so the user understands.
+      promptLoginRequired({ featureKey: "ai_instruction" });
+      return;
+    }
     dispatch({
       type: "ADD_AI_MESSAGE",
       payload: { id: `m-${Date.now()}`, role: "user", text: prompt, timestamp: Date.now() },

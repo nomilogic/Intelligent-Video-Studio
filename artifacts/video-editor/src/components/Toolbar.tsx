@@ -7,6 +7,10 @@ import { EditorState, EditorAction } from "../lib/types";
 import { useUpdateProject } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
 import { useExport } from "../hooks/use-export";
+import { useAuth } from "@/lib/auth-context";
+import { useDiamonds } from "@/lib/diamonds-context";
+import { AccountDropdown } from "./AccountDropdown";
+import { DiamondPill } from "./DiamondPill";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
@@ -19,6 +23,7 @@ interface ToolbarProps {
   state: EditorState;
   dispatch: React.Dispatch<EditorAction>;
   projectId?: number;
+  projectName?: string;
   canUndo: boolean;
   canRedo: boolean;
   canvasZoom: number;
@@ -44,10 +49,15 @@ const SHORTCUTS: [string, string][] = [
 
 const FPS_OPTIONS = [24, 25, 30, 50, 60];
 
-export default function Toolbar({ state, dispatch, projectId, canUndo, canRedo, canvasZoom, onCanvasZoomChange }: ToolbarProps) {
+export default function Toolbar({ state, dispatch, projectId, projectName: initialProjectName, canUndo, canRedo, canvasZoom, onCanvasZoomChange }: ToolbarProps) {
   const { toast } = useToast();
   const updateProject = useUpdateProject();
-  const [projectName, setProjectName] = useState("Untitled Project");
+  const { user } = useAuth();
+  const { promptLoginRequired } = useDiamonds();
+  const [projectName, setProjectName] = useState(initialProjectName ?? "Untitled Project");
+  useEffect(() => {
+    if (initialProjectName) setProjectName(initialProjectName);
+  }, [initialProjectName]);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
 
   const { exportStatus, startVideoExport, startAudioExport, cancel, reset } = useExport(state);
@@ -343,13 +353,24 @@ export default function Toolbar({ state, dispatch, projectId, canUndo, canRedo, 
           variant="default"
           size="sm"
           className="h-8 gap-1.5 text-xs bg-primary"
-          onClick={() => setExportDialogOpen(true)}
+          onClick={() => {
+            if (!user) {
+              promptLoginRequired({ featureKey: "export" });
+              return;
+            }
+            setExportDialogOpen(true);
+          }}
+          data-testid="button-export"
         >
           {isExporting
             ? <Loader2 className="w-3 h-3 animate-spin" />
             : <Download className="w-3 h-3" />}
           Export
         </Button>
+
+        <Separator orientation="vertical" className="h-6 mx-1" />
+        <DiamondPill onSignInRequired={() => promptLoginRequired({ featureKey: "diamonds" })} />
+        <AccountDropdown onSignIn={() => promptLoginRequired({})} />
       </div>
 
       {/* Managed export dialog — persists between open/close so background export continues */}

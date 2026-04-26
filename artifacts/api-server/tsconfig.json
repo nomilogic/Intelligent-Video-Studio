@@ -3,21 +3,8 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
-    "types": ["node"]
+    "types": ["node"],
+    "noUnusedLocals": false
   },
-  "include": ["src"],
-  "references": [
-    {
-      "path": "../../lib/db"
-    },
-    {
-      "path": "../../lib/api-zod"
-    },
-    {
-      "path": "../../lib/integrations-openai-ai-server"
-    },
-    {
-      "path": "../../lib/integrations-gemini-ai"
-    }
-  ]
+  "include": ["src"]
 }

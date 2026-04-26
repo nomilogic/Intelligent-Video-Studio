@@ -1,0 +1,143 @@
+import { Router } from "express";
+import { ai } from "@workspace/integrations-gemini-ai";
+import { z } from "zod/v4";
+import { requireAuth, requireDiamonds } from "../middlewares/auth";
+
+const router = Router();
+
+const GenerateBody = z.object({
+  // URL of the audio/video clip to transcribe. May be a publicly fetchable URL,
+  // a data URL, or a path under /api/cloud/.../download/ (in which case we
+  // forward the user's session cookie).
+  src: z.string().min(1),
+  language: z.string().optional(),
+  startOffset: z.number().min(0).optional(),
+  // Optional duration cap (seconds) so very long videos don't run away.
+  maxDuration: z.number().min(0).optional(),
+  // Where on the timeline to place the resulting captions.
+  trackIndex: z.number().int().nonnegative().optional(),
+});
+
+const SYSTEM_PROMPT = `You are an expert speech-to-text transcriber. Listen to the supplied audio carefully and return SRT-like timed segments as STRICT JSON.
+
+Output schema:
+{
+  "segments": [
+    { "start": 0.0, "end": 2.4, "text": "Welcome to the show." },
+    ...
+  ],
+  "language": "en"
+}
+
+Rules:
+- Each segment is 1–8 seconds long.
+- Use natural sentence breaks; never split mid-word.
+- Use punctuation and capitalization.
+- Times are seconds with up to one decimal.
+- Return ONLY the JSON, no markdown.
+`;
+
+router.post(
+  "/subtitles/generate",
+  requireAuth,
+  requireDiamonds("auto_subtitles"),
+  async (req, res) => {
+    const body = GenerateBody.parse(req.body);
+
+    // Fetch the audio bytes. We support http(s):// and data: URLs only here
+    // for safety — never let a user trigger fetches against arbitrary local
+    // resources. (Cloud-imported files should be downloaded by the client
+    // first or assigned a public URL in advance.)
+    let bytes: Buffer;
+    let mimeType = "audio/mpeg";
+    try {
+      if (body.src.startsWith("data:")) {
+        const m = body.src.match(/^data:([^;]+);base64,(.*)$/);
+        if (!m) throw new Error("Invalid data URL");
+        mimeType = m[1]!;
+        bytes = Buffer.from(m[2]!, "base64");
+      } else if (/^https?:\/\//.test(body.src)) {
+        const r = await fetch(body.src);
+        if (!r.ok) throw new Error(`Source fetch failed: ${r.status}`);
+        const ct = r.headers.get("content-type");
+        if (ct) mimeType = ct.split(";")[0]!.trim();
+        bytes = Buffer.from(await r.arrayBuffer());
+      } else {
+        res.status(400).json({ error: "Unsupported src URL scheme" });
+        return;
+      }
+    } catch (err: any) {
+      res.status(400).json({ error: `Failed to load audio: ${err?.message ?? err}` });
+      return;
+    }
+
+    // Cap at 25 MB (~25 min of mp3 at 128kbps) to keep Gemini happy.
+    if (bytes.length > 25 * 1024 * 1024) {
+      res.status(413).json({
+        error: "Audio too large for transcription. Max 25MB; trim the clip first.",
+      });
+      return;
+    }
+
+    try {
+      const langHint = body.language
+        ? `\nTranscribe in ${body.language}.`
+        : "";
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: `Please transcribe this audio.${langHint}` },
+              {
+                inlineData: {
+                  mimeType,
+                  data: bytes.toString("base64"),
+                },
+              },
+            ],
+          },
+        ],
+        config: {
+          systemInstruction: SYSTEM_PROMPT,
+          responseMimeType: "application/json",
+          maxOutputTokens: 8192,
+          temperature: 0.2,
+        },
+      });
+
+      const content = response.text ?? "{}";
+      let parsed: any;
+      try {
+        parsed = JSON.parse(content);
+      } catch {
+        const m = content.match(/\{[\s\S]*\}/);
+        parsed = m ? JSON.parse(m[0]) : { segments: [] };
+      }
+      const segments = Array.isArray(parsed?.segments) ? parsed.segments : [];
+      const offset = body.startOffset ?? 0;
+      const cleaned = segments
+        .map((s: any) => ({
+          start: Math.max(0, Number(s.start) || 0) + offset,
+          end: Math.max(0, Number(s.end) || 0) + offset,
+          text: String(s.text ?? "").trim(),
+        }))
+        .filter((s: any) => s.text && s.end > s.start)
+        .filter((s: any) =>
+          body.maxDuration ? s.start - offset < body.maxDuration : true,
+        );
+
+      res.json({
+        segments: cleaned,
+        language: parsed?.language ?? body.language ?? "en",
+        trackIndex: body.trackIndex ?? 0,
+      });
+    } catch (err: any) {
+      req.log?.error({ err }, "subtitles failed");
+      res.status(500).json({ error: err?.message ?? "Subtitle generation failed" });
+    }
+  },
+);
+
+export default router;

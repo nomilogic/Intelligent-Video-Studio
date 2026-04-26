@@ -120,3 +120,70 @@ A professional browser-based video editor with AI instruction processing, multi-
 - **Draw tool.** New `tool: "draw"` mode plus `mediaType: "drawing"` clip with `paths: { id, color, width, opacity, kind, points }[]`. Draw overlay sits above the canvas when active and captures pointer strokes (normalized 0..1 coords). 4 brush presets in `lib/draw-library.ts` (Marker / Pencil / Highlighter / Neon). Rendered as inline SVG in preview, replayed via Canvas2D `stroke()` in export. Brush picker popover in the Timeline tool toggle.
 - **Asset Libraries.** New `/api/assets/search?provider=...&q=...` route in `artifacts/api-server/src/routes/assets.ts` proxies Giphy, Pexels (require server `GIPHY_API_KEY` / `PEXELS_API_KEY`), Iconify (keyless), and Lottiefiles (keyless with fallback). MediaPanel "Assets" tab: provider switcher + search + 2-col results grid; clicking a result drops it as an `image` clip with an optional `assetKind` hint (`"lottie" | "icon"`).
 - **BYO AI Keys.** `lib/ai-providers.ts` defines six providers (Replit / Gemini / OpenAI / Groq / Pollinations / HuggingFace) plus a keyless Pollinations image-URL helper. `components/SettingsDialog.tsx` (gear icon in the Toolbar) lets users paste API keys + pick models. Keys persist in `localStorage["ai-keys-v1"]`. `AIInstructionBar.tsx` calls the user-selected provider client-side and only falls back to `/api/ai/process-instruction` (Gemini via Replit AI) when the "Replit (default)" provider is chosen.
+
+## Phase-4 Updates (April 2026) — Multi-tenant platform
+
+The single-tenant editor was transformed into a multi-user SaaS-style platform.
+Anonymous use is still allowed for the editor itself, but premium actions
+(export, AI when using the Replit-default provider, chroma-key, etc.) are
+gated behind sign-in.
+
+### New schema (lib/db)
+- `users` (email, passwordHash via argon2, googleId, name, avatarUrl, role `user|admin`, isBanned, emailVerified)
+- `sessions` (token, userId, expiresAt) — opaque session token in an HTTP-only cookie
+- `email_verification_tokens`, `password_reset_tokens`, `login_grants`
+- `diamond_balances` (userId, balance) — single row per user
+- `diamond_transactions` (userId, delta, kind: `signup|daily|referral|purchase|spend|refund|admin_grant`, featureKey, stripeRef)
+- `diamond_packages` (label, diamonds, priceCents, stripePriceId)
+- `feature_flags` (key, label, requiresAuth, requiresDiamonds, costDiamonds, settings JSON)
+- `user_connections` (userId, provider: `google_drive|dropbox|onedrive|terabox`, encrypted access/refresh tokens via AES-GCM)
+- `referrals` (referrerId, referredUserId, grantedDiamonds)
+- `admin_audit_log` (adminId, action, targetType, targetId, payload JSON)
+- `projects.user_id` made **nullable** so anonymous projects keep working.
+
+### Server foundation (artifacts/api-server/src/lib)
+- `auth.ts` — argon2 password hash + verify; opaque session token gen/verify.
+- `sessions.ts` — set/clear HTTP-only `sid` cookie; resolve user from cookie.
+- `email.ts` — Nodemailer SMTP transport (`SMTP_HOST/PORT/USER/PASS/FROM`); dev fallback prints emails to the server log.
+- `encryption.ts` — AES-256-GCM helpers using `ENCRYPTION_KEY` (base64). Used to encrypt cloud OAuth tokens at rest.
+- `diamonds.ts` — atomic `grantDiamonds`, `spendDiamonds` (throws `InsufficientDiamondsError`), `purchaseDiamonds`, `refundTransaction` inside a single Drizzle transaction.
+- `cloud-providers.ts` — per-provider OAuth start URL + token exchange + refresh + list/import/export helpers for Google Drive, Dropbox, OneDrive. TeraBox marked "coming soon" (UI only).
+- `admin-audit.ts` — `auditAdmin(adminId, action, target, payload)` writes one row per mutation.
+- `feature-flags.ts` — DB-backed flag/cost lookup with bootstrap defaults.
+- Middlewares: `requireAuth`, `optionalAuth` (sets `req.user` if cookie present), `requireAdmin`, `requireDiamonds(featureKey)` (looks up cost from `feature_flags`, spends in same tx, sets `x-diamond-balance` response header).
+
+### Server routes
+- `routes/auth.ts` — `POST /signup`, `POST /login`, `POST /logout`, `GET /me`, `PATCH /me`, `GET /verify`, `POST /forgot`, `POST /reset`, `GET /google` (OAuth start), `GET /google/callback`.
+- `routes/diamonds.ts` — `GET /me`, `GET /transactions`, `GET /packages`, `POST /claim-daily`, `POST /redeem-referral`, `POST /checkout` (Stripe Checkout Session), `POST /webhook` (Stripe → grants diamonds, idempotent on `stripeRef`).
+- `routes/cloud.ts` — `GET /providers`, `GET /:provider/connect`, `GET /:provider/callback`, `POST /:provider/disconnect`, `GET /:provider/list`, `POST /:provider/import`, `POST /:provider/export`. TeraBox returns "coming soon".
+- `routes/admin.ts` — dashboard stats, users CRUD with `balance` + ban toggle, projects CRUD, diamond-packages CRUD, feature-flags CRUD, transactions, audit log, analytics (daily users, daily diamonds-spent by feature). Every mutation writes an `admin_audit_log` row.
+- `routes/subtitles.ts` — Gemini-powered caption generation (`POST /generate` with audio URL → returns time-stamped caption clips). Premium (auth required, costs diamonds).
+- `routes/projects.ts` updated — projects scoped by `userId`; anonymous reads/writes still allowed but only for projects with `userId IS NULL`. Adds `POST /:id/duplicate`, thumbnail support.
+
+### Bootstrap + seed
+- On cold start: `bootstrap.ts` ensures the default `feature_flags` rows (export, ai_instruction, auto_subtitles, chroma_key, etc.), default `diamond_packages` (Starter / Plus / Pro), and an admin user from `ADMIN_EMAIL` + `ADMIN_PASSWORD` (argon2-hashed). Logs an `[admin-bootstrap]` line so first-cold-start visibility is obvious.
+
+### Frontend (artifacts/video-editor)
+- **Routing.** `App.tsx` rewritten on `wouter` with a base of `BASE_URL` and `AuthProvider` + `DiamondsProvider`. Routes: `/`, `/projects`, `/diamonds`, `/account`, `/editor/:id`, `/editor` (anonymous passthrough), `/verify`, `/reset`, `/oauth/callback`, `/admin/:rest*`. `GlobalModals` mounts `InsufficientDiamondsModal` and `LoginRequiredModal` (which opens `AuthModal`).
+- **Auth context.** `lib/auth-context.tsx` — fetches `/auth/me` on mount, exposes `user`, `login`, `signup`, `logout`, `refresh`. Cookies are `credentials: "include"`.
+- **API client.** `lib/api-client.ts` — `apiFetch<T>(path, init)` wraps `fetch` with credentials, JSON, throws typed `ApiError` (status + body), and feeds responses to `useDiamonds().applyHeaderHints` so the diamond pill stays in sync after a spend.
+- **Diamonds context.** `lib/diamonds-context.tsx` — `useDiamonds()` for balance + claim-daily + insufficient/login modal helpers. `useGatedRequest()` wraps any API call so 402 → insufficient-diamonds modal, 401 → login modal.
+- **Editor extracted.** `components/Editor.tsx` accepts `projectId / projectName / initialEditorState` and dispatches `REPLACE_STATE` to hydrate. `pages/EditorPage.tsx` fetches `/projects/:id`, parses the JSON state with `initialState` defaults (so older projects don't crash on missing newer fields), and handles 401/403/404. `/editor` (no id) renders an anonymous local-storage editor.
+- **Toolbar.** Adds `DiamondPill` + `AccountDropdown` to the right of Save/Export. Export button gates anonymous users to `LoginRequiredModal`. AI instruction send pre-checks for the Replit provider + anonymous user and prompts sign-in instead of hitting a 401. Chroma-key toggle in the inspector also gates anonymous users.
+- **Pages.** `HomePage`, `ProjectsPage` (grid: thumbnail/title/duration/last-modified, new/rename/duplicate/delete), `DiamondsPage` (packages + earn-free tab), `AccountPage` (profile + cloud Connections via `/cloud/providers` + disconnect via `POST /cloud/:provider/disconnect`), `AuthModal`, `VerifyEmailPage`, `ResetPasswordPage`, `OAuthCallbackPage`.
+- **Admin panel.** `AdminLayout` with sidebar + 7 sub-pages — Dashboard (`users.{total,today,thisWeek,thisMonth}`, projects total, top users), Users (balance + Ban toggle), Projects, Diamonds (`email` field), Features (`requiresAuth`/`requiresDiamonds`/`costDiamonds`/settings record), Analytics (`dailyUsers` + `dailyDiamondsByFeature`), System.
+
+### Environment variables (additions)
+- `ADMIN_EMAIL`, `ADMIN_PASSWORD` — bootstrap admin (required)
+- `ENCRYPTION_KEY` — base64 32-byte key for AES-GCM cloud-token encryption (required)
+- `SESSION_SECRET` — already present; signs session tokens
+- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` — diamond purchases
+- `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` — Google sign-in + Drive
+- `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET` — Dropbox cloud
+- `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` — OneDrive cloud
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` — transactional email
+- `PUBLIC_BASE_URL` — used in email links and OAuth redirect URIs
+
+Any of the cloud/email/OAuth secrets that are missing simply mark the
+provider as "Configure" in the UI rather than failing the boot — the
+single-tenant editor still works without them.
