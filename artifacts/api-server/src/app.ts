@@ -3,7 +3,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes";
-import diamondsRouter from "./routes/diamonds";
+import { webhookRouter as diamondsWebhookRouter } from "./routes/diamonds";
 import { logger } from "./lib/logger";
 import { optionalAuth } from "./middlewares/auth";
 import { errorHandler, notFoundHandler } from "./middlewares/error";
@@ -42,9 +42,12 @@ app.use(
 app.use(cookieParser());
 
 // IMPORTANT: Stripe webhook needs the raw body for signature verification.
-// Mount the webhook route BEFORE express.json() so the body parser doesn't
-// consume the stream first. The webhook route itself uses express.raw().
-app.use("/api", diamondsRouter);
+// Mount ONLY the webhook route BEFORE express.json() so the body parser
+// doesn't consume the stream first. The webhook handler itself uses
+// express.raw(). All the other diamond routes are mounted via the main
+// `router` AFTER express.json() and optionalAuth so they have a parsed
+// body and `req.user` populated.
+app.use("/api", diamondsWebhookRouter);
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));

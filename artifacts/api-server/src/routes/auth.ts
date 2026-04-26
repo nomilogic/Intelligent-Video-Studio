@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import {
   db,
   usersTable,
@@ -202,13 +202,18 @@ router.post("/auth/verify", async (req, res) => {
     res.status(400).json({ error: "Invalid or expired verification link" });
     return;
   }
+  // Atomic false→true transition. If the user is already verified, the
+  // update affects 0 rows and we skip the referral grant — that prevents
+  // a second valid verification token from re-granting the bonus.
   const [user] = await db
     .update(usersTable)
     .set({ emailVerified: true })
-    .where(eq(usersTable.id, userId))
+    .where(and(eq(usersTable.id, userId), eq(usersTable.emailVerified, false)))
     .returning();
 
-  // Referral bonus on first verification
+  // Referral bonus on first verification only — guarded by the atomic
+  // false→true update above. If the email was already verified, the
+  // update affects no rows and `user` is undefined, so we skip the grant.
   if (user?.referredBy) {
     const bonus = await getNumberSetting(
       SETTING_KEYS.REFERRAL_BONUS,
@@ -221,12 +226,14 @@ router.post("/auth/verify", async (req, res) => {
           amount: bonus,
           kind: "referral",
           reason: "Referral bonus (you joined via a referral)",
+          metadata: { referralGrantUserId: user.id },
         });
         await applyLedger({
           userId: user.referredBy,
           amount: bonus,
           kind: "referral_bonus",
           reason: `Referral bonus (you referred ${user.email})`,
+          metadata: { referralGrantUserId: user.id },
         });
       } catch (err) {
         req.log?.warn({ err }, "referral bonus failed");

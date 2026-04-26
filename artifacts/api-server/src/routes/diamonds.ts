@@ -24,7 +24,7 @@ import { dailyClaimsTable, diamondTransactionsTable } from "@workspace/db";
 import { and } from "drizzle-orm";
 import { logger } from "../lib/logger";
 
-const router = Router();
+const router: Router = Router();
 
 let _stripe: Stripe | null = null;
 function stripe(): Stripe | null {
@@ -165,9 +165,12 @@ router.post("/diamonds/checkout", requireAuth, async (req, res) => {
 });
 
 // IMPORTANT: Stripe webhooks need the raw body for signature verification.
-// We mount this route with `express.raw` BEFORE the JSON body parser is
-// applied (see app.ts).
-router.post(
+// The webhook is exported separately and mounted in app.ts BEFORE the JSON
+// body parser so the raw bytes survive intact. The rest of the diamond
+// routes are mounted normally on the main router (after express.json + the
+// optionalAuth middleware).
+export const webhookRouter: Router = Router();
+webhookRouter.post(
   "/diamonds/webhook",
   raw({ type: "application/json" }),
   async (req, res) => {

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { ai } from "@workspace/integrations-gemini-ai";
 import { ProcessInstructionBody } from "@workspace/api-zod";
+import { requireAuth, requireDiamonds } from "../middlewares/auth";
 
 const router = Router();
 
@@ -71,7 +72,11 @@ Return ONLY valid JSON, no markdown fences, no commentary:
 
 Now process the user's instruction.`;
 
-router.post("/ai/process-instruction", async (req, res) => {
+router.post(
+  "/ai/process-instruction",
+  requireAuth,
+  requireDiamonds("ai_instruction"),
+  async (req, res) => {
   const body = ProcessInstructionBody.parse(req.body);
 
   let userMessage = body.instruction;
@@ -146,6 +151,7 @@ router.post("/ai/process-instruction", async (req, res) => {
       confidence: 0,
     });
   }
-});
+  },
+);
 
 export default router;
