@@ -85,7 +85,7 @@ interface CanvasProps {
 
 type DragMode =
   | { kind: "move"; clipId: string; startX: number; startY: number; origX: number; origY: number }
-  | { kind: "resize"; clipId: string; handle: string; startX: number; startY: number; origX: number; origY: number; origW: number; origH: number }
+  | { kind: "resize"; clipId: string; handle: string; startX: number; startY: number; origX: number; origY: number; origW: number; origH: number; origFontSize?: number; scaleText?: boolean }
   | { kind: "rotate"; clipId: string; centerX: number; centerY: number; startAngle: number; origRotation: number }
   | { kind: "cropMove"; clipId: string; startX: number; startY: number; origCx: number; origCy: number }
   | { kind: "cropResize"; clipId: string; handle: string; startX: number; startY: number; origCx: number; origCy: number; origCw: number; origCh: number };
@@ -419,13 +419,12 @@ function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false }
 
   if (clip.mediaType === "text") {
     const ts = clip.textStyle!;
-    // textAutoScale: true (default) → font scales with the clip box (cqw).
-    // textAutoScale: false → font stays sized to the canvas (--canvas-w),
-    // so resizing the clip box only resizes the box; text size is invariant.
-    const autoScale = clip.textAutoScale !== false;
-    const fontSizeStyle = autoScale
-      ? `${ts.fontSize / 10}cqw`
-      : `calc(var(--canvas-w, 100cqw) * ${ts.fontSize / 1000})`;
+    // Font is ALWAYS canvas-relative (no cqw). The "Resize scales text"
+    // toggle only changes whether dragging the clip handles also scales
+    // ts.fontSize (handled in Canvas resize-drag logic). Using a single
+    // formula prevents the visual jump that used to happen when toggling
+    // the checkbox or when the clip wasn't full-canvas-width.
+    const fontSizeStyle = `calc(var(--canvas-w, 100cqw) * ${ts.fontSize / 1000})`;
     const containerStyle = textContainerStyle(ts);
     const elStyle = textElementStyle(ts, fontSizeStyle);
     const curve = ts.curve || 0;
@@ -831,10 +830,9 @@ function TextEditor({
   const ts = clip.textStyle!;
   const [value, setValue] = useState(clip.text || "");
   const ref = useRef<HTMLTextAreaElement>(null);
-  const autoScale = clip.textAutoScale !== false;
-  const fontSizeStyle = autoScale
-    ? `${ts.fontSize / 10}cqw`
-    : `calc(var(--canvas-w, 100cqw) * ${ts.fontSize / 1000})`;
+  // Same canvas-relative formula as the rendered MediaContent text — keeps
+  // the editing caret/text exactly the size it will be once committed.
+  const fontSizeStyle = `calc(var(--canvas-w, 100cqw) * ${ts.fontSize / 1000})`;
 
   // Auto-grow the textarea to match its content so the surrounding flex
   // container can keep it visually centered (matching the rendered text
@@ -1226,6 +1224,8 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
           origY: r.y,
           origW: r.width,
           origH: r.height,
+          origFontSize: clip.mediaType === "text" ? clip.textStyle?.fontSize : undefined,
+          scaleText: clip.mediaType === "text" && clip.textAutoScale !== false,
         });
       }
     },
@@ -1391,6 +1391,26 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
         }
 
         dispatchAnimatable(drag.clipId, { x: nx, y: ny, width: nw, height: nh });
+
+        // "Resize scales text" → also scale ts.fontSize so the text grows
+        // with the box. We use sqrt of the area ratio so corner drags scale
+        // text proportionally, and edge-only drags still nudge the size
+        // (instead of feeling stuck like the previous cqw approach did).
+        if (drag.scaleText && drag.origFontSize) {
+          const areaRatio = (nw * nh) / Math.max(1e-6, drag.origW * drag.origH);
+          const factor = Math.sqrt(Math.max(0.0001, areaRatio));
+          const newFontSize = Math.max(4, Math.min(400, drag.origFontSize * factor));
+          const liveClip = state.clips.find((c) => c.id === drag.clipId);
+          if (liveClip?.textStyle && Math.abs(newFontSize - liveClip.textStyle.fontSize) > 0.5) {
+            dispatch({
+              type: "UPDATE_CLIP",
+              payload: {
+                id: drag.clipId,
+                updates: { textStyle: { ...liveClip.textStyle, fontSize: newFontSize } },
+              },
+            });
+          }
+        }
       } else if (drag.kind === "cropMove") {
         const clip = state.clips.find((c) => c.id === drag.clipId);
         if (!clip) return;
