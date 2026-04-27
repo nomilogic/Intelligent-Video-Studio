@@ -88,15 +88,17 @@ export const PROVIDERS: AiProvider[] = [
   },
   {
     id: "pollinations",
+    // As of writing, the public Pollinations text API only exposes a single
+    // text-only reasoning model (`openai-fast` / `gpt-oss-20b`). The dropdown
+    // hydrates from /models at runtime so newly-added models show up
+    // automatically. No vision/video models are currently exposed — so
+    // Pollinations is text-instruction-only in this editor.
     label: "Pollinations (free)",
-    defaultModel: "openai",
-    modelSuggestions: ["openai", "mistral", "llama", "openai-large"],
-    // Public Pollinations works without a key. If you DO have a token from
-    // pollinations.ai (paid tier / higher rate limits), add it in Settings
-    // and we'll send it as Authorization: Bearer.
+    defaultModel: "openai-fast",
+    modelSuggestions: ["openai-fast", "openai", "gpt-oss", "gpt-oss-20b"],
     needsKey: false,
     keyHelpUrl: "https://pollinations.ai",
-    description: "Free, no key required. Add an optional token in Settings for higher rate limits.",
+    description: "Free, no key required. Text instructions only — no vision/video analysis on this provider yet.",
   },
 ];
 
@@ -275,6 +277,44 @@ export async function generateWithProvider(
     case "pollinations":return callPollinations(key, model, prompt);
     case "replit":
       throw new Error("Replit provider should use the existing /api/ai endpoint, not generateWithProvider().");
+  }
+}
+
+/* ────────────────────── Pollinations dynamic model list ────────────── */
+
+export interface PollinationsModelInfo {
+  name: string;
+  description?: string;
+  vision?: boolean;
+  audio?: boolean;
+  reasoning?: boolean;
+  tools?: boolean;
+  tier?: string;
+  aliases?: string[];
+  input_modalities?: string[];
+  output_modalities?: string[];
+}
+
+/**
+ * Fetch the live Pollinations model catalog. Useful for the Settings dialog
+ * so the dropdown reflects whatever models are currently exposed (Pollinations
+ * adds/removes models without notice). Falls back to the static suggestions
+ * if the request fails or returns nothing.
+ *
+ * Caller should cache the result for the session — there's no need to re-hit
+ * this on every render.
+ */
+export async function fetchPollinationsModels(apiKey?: string): Promise<PollinationsModelInfo[]> {
+  try {
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (apiKey && apiKey.trim()) headers.Authorization = `Bearer ${apiKey.trim()}`;
+    const r = await fetch("https://text.pollinations.ai/models", { headers });
+    if (!r.ok) return [];
+    const data = await r.json();
+    if (!Array.isArray(data)) return [];
+    return data as PollinationsModelInfo[];
+  } catch {
+    return [];
   }
 }
 
