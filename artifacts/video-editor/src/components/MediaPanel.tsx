@@ -40,7 +40,8 @@ async function probeDuration(src: string, type: "video" | "audio"): Promise<numb
 
 export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [activeTab, setActiveTab] = useState<"media" | "text" | "shapes" | "assets" | "templates" | "saved">("media");
+  const [activeTab, setActiveTab] = useState<"media" | "gallery" | "effects" | "assets" | "templates">("media");
+  const [gallerySubTab, setGallerySubTab] = useState<"stock" | "saved" | "text">("stock");
   // Asset library tab state
   const [assetProvider, setAssetProvider] = useState<"giphy" | "pexels" | "iconify" | "lottie">("giphy");
   const [assetQuery, setAssetQuery] = useState("");
@@ -307,11 +308,10 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
       <div className="flex border-b border-border">
         {[
           { key: "media" as const, label: "Media" },
-          { key: "text" as const, label: "Text" },
-          { key: "shapes" as const, label: "Stock" },
+          { key: "gallery" as const, label: "Gallery" },
+          { key: "effects" as const, label: "Effects" },
           { key: "assets" as const, label: "Assets" },
           { key: "templates" as const, label: "Templates" },
-          { key: "saved" as const, label: "Saved" },
         ].map((t) => (
           <button
             key={t.key}
@@ -408,7 +408,30 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
         </div>
       )}
 
-      {activeTab === "text" && (
+      {activeTab === "gallery" && (
+        <div className="flex border-b border-border">
+          {[
+            { key: "stock" as const, label: "Stock" },
+            { key: "saved" as const, label: "Saved" },
+            { key: "text" as const, label: "Text" },
+          ].map((t) => (
+            <button
+              key={t.key}
+              className={cn(
+                "flex-1 text-[11px] font-medium py-1.5 transition-colors",
+                gallerySubTab === t.key
+                  ? "text-primary border-b-2 border-primary bg-muted/20"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setGallerySubTab(t.key)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {activeTab === "gallery" && gallerySubTab === "text" && (
         <div className="flex flex-col flex-1 overflow-y-auto p-2 space-y-2">
           <div className="space-y-1.5">
             <Input
@@ -494,7 +517,7 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
         </div>
       )}
 
-      {activeTab === "shapes" && (
+      {activeTab === "gallery" && gallerySubTab === "stock" && (
         <div className="flex flex-col flex-1 overflow-y-auto p-2 space-y-2">
           <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Color Blocks</p>
           <div className="grid grid-cols-4 gap-1.5">
@@ -570,8 +593,11 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
             ))}
           </div>
 
-          <Separator />
+        </div>
+      )}
 
+      {activeTab === "effects" && (
+        <div className="flex flex-col flex-1 overflow-y-auto p-2 space-y-2">
           {/*
             Special Layers — 50 cinematic overlays (light leaks, grain,
             vignette, color grades, geometry overlays, atmosphere). Each
@@ -619,7 +645,7 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
 
           <Separator />
 
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Effects Layer</p>
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Adjustment Layers</p>
           <p className="text-[10px] text-muted-foreground leading-snug">
             These sit on the timeline like normal clips and affect the visual composite within their rectangle. Animate position, size and rotation with keyframes.
           </p>
@@ -667,6 +693,40 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
             }}
           >
             <Droplets className="w-3 h-3" /> Logo Blur
+          </Button>
+          {/*
+            Effects Layer — a full-frame color/grade adjustment built on
+            top of the existing `specialLayer` infrastructure. We seed it
+            with the "tealOrange" colorWash preset so users get a visible
+            cinematic grade immediately; the inspector lets them swap the
+            preset, intensity and tint colors afterwards.
+          */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full h-7 text-xs gap-2 justify-start"
+            data-testid="add-effects-layer"
+            onClick={() => {
+              const preset = SPECIAL_LAYERS.find((s) => s.key === "tealOrange") ?? SPECIAL_LAYERS[0];
+              dispatch({
+                type: "ADD_CLIP",
+                payload: makeClip({
+                  label: "Effects Layer",
+                  mediaType: "specialLayer",
+                  specialKind: preset.key,
+                  specialIntensity: preset.intensity,
+                  specialColor: preset.color,
+                  blendMode: preset.blend,
+                  trackIndex: 0,
+                  startTime: state.currentTime,
+                  duration: 5,
+                  x: 0, y: 0, width: 1, height: 1,
+                  color: preset.color,
+                }),
+              });
+            }}
+          >
+            <Sparkles className="w-3 h-3" /> Effects Layer
           </Button>
 
           <Separator />
@@ -824,7 +884,7 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
         </div>
       )}
 
-      {activeTab === "saved" && (
+      {activeTab === "gallery" && gallerySubTab === "saved" && (
         <div className="flex flex-col flex-1 overflow-y-auto p-2 space-y-2">
           <div className="flex items-center justify-between">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wider">My Saved Presets</p>
