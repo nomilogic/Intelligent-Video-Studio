@@ -1,0 +1,17 @@
+Fix the server i am unable to signup or login
+i am unable to access admin panel
+the video should start from the place where it is clickd on the time ruler if the video is playing for preview
+in text transfromation check box is for to scale the field or scale the text including the field due to this the templates texts are not showing correctly they are being cut
+due fade effect when the tracks are overlapping it shows a blue screen glicthes add Effects Layer in Adjustment Layer remove the names from stock because the inspector of adjustment layers cover all
+when ever the text is selected the text inspector should open by default instead of basic
+Ai is not following the commands unable to perform tasks with the player improve its understanding json structure and instuctional mechanism
+wheneve the use transform any element the user should be able to do that and the effect of transformation will impact on the current key frame in which time line is like if there is 1 key frame only the transfrom will effect the cordinates of that key from if there are 2 or more then 2 the impact will be on the previous key frame befor the other one is started
+if i cut the video the 1st key frame come automatically on both splits at the 1st frame don't apply fade animation by default on tracks, adding tracks like shapes or videos still overlaps on adding they should make there new track in new layer
+also i am there should be an option to replace the elments in templates give the user friendly way to user to select images and texts or videos which will replace the place holders in templates
+add 200 more improved templates
+add more spliting options of video creating auto edits which can cut different scene can add different text with effects and create the video
+add ai scene cuttings by sending the video to ai to analyze and return the parameters according to our app which create the video as per the json
+this is pollinations api key sk_iAQIeoN23Aybie1ndkELwTpM8VkyGb45 for testing you can use its all models for audio video text for our use
+fix the AI perfectly
+fix all the clouds all the admin and api issue
+enhance the tool more add new features
