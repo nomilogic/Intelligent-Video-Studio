@@ -18,6 +18,21 @@ function uid(prefix: string): string {
 }
 
 function templateClip(partial: Partial<Clip>): Clip {
+  const width = partial.width ?? 1;
+  const height = partial.height ?? 1;
+
+  // Templates were authored when text font scaled with the clip box (the
+  // old `cqw` formula). The unified canvas-relative formula sizes text
+  // purely off the canvas, so a fontSize of 320 in a width=0.9 box now
+  // renders 11% larger than intended and overflows. Convert each template
+  // text size by the clip's width so the on-screen result matches the
+  // original visual design and the text fits inside its box.
+  const isText = (partial.mediaType ?? "blank") === "text";
+  const baseStyle = partial.textStyle ?? { ...DEFAULT_TEXT_STYLE };
+  const textStyle = isText
+    ? { ...baseStyle, fontSize: Math.round(baseStyle.fontSize * width) }
+    : baseStyle;
+
   return {
     id: partial.id ?? uid("clip"),
     label: partial.label ?? "Clip",
@@ -28,11 +43,11 @@ function templateClip(partial: Partial<Clip>): Clip {
     trimStart: 0,
     trimEnd: 0,
     text: partial.text,
-    textStyle: partial.textStyle ?? { ...DEFAULT_TEXT_STYLE },
+    textStyle,
     x: partial.x ?? 0,
     y: partial.y ?? 0,
-    width: partial.width ?? 1,
-    height: partial.height ?? 1,
+    width,
+    height,
     opacity: partial.opacity ?? 1,
     rotation: partial.rotation ?? 0,
     scale: partial.scale ?? 1,
