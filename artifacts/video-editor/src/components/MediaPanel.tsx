@@ -579,7 +579,12 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
             preset's intensity & tint color.
           */}
           <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Special Layers ({SPECIAL_LAYERS.length})</p>
-          <div className="grid grid-cols-2 gap-1">
+          {/*
+            Special Layers grid — name labels removed; the inspector panel
+            covers all configuration once a layer is added. Hover for the
+            tooltip to see the preset name + category.
+          */}
+          <div className="grid grid-cols-6 gap-1">
             {SPECIAL_LAYERS.map((s) => (
               <button
                 key={s.key}
@@ -602,21 +607,19 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
                   });
                 }}
                 title={`${s.name} · ${s.category}`}
-                className="text-[10px] px-1.5 py-1 rounded border border-border text-foreground hover:bg-muted/40 hover:border-primary/40 truncate text-left"
+                className="aspect-square rounded border border-border hover:border-primary/60 hover:scale-105 transition-transform"
+                style={{
+                  background: `linear-gradient(135deg, ${s.color}, ${s.color}55)`,
+                }}
                 data-testid={`special-${s.key}`}
-              >
-                <span
-                  className="inline-block w-2 h-2 rounded-full mr-1 align-middle"
-                  style={{ backgroundColor: s.color }}
-                />
-                {s.name}
-              </button>
+                aria-label={s.name}
+              />
             ))}
           </div>
 
           <Separator />
 
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Adjustment Layers</p>
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Effects Layer</p>
           <p className="text-[10px] text-muted-foreground leading-snug">
             These sit on the timeline like normal clips and affect the visual composite within their rectangle. Animate position, size and rotation with keyframes.
           </p>

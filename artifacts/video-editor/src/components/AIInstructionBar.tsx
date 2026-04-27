@@ -92,16 +92,56 @@ export default function AIInstructionBar({
       type: "ADD_AI_MESSAGE",
       payload: { id: `m-${Date.now()}`, role: "user", text: prompt, timestamp: Date.now() },
     });
-    // Prepend the schema markdown so the model knows what shapes /
-    // effects / transitions / templates / fonts / special layers and
-    // reducer actions are available in this build.
-    const enriched = `${AI_SCHEMA_MD}\n\n## User instruction\n${prompt}\n\n## Current editor state (JSON)\n${JSON.stringify(state)}\n\nReply with JSON: {"operations": [...], "explanation": "..."}.`;
+
+    // Trim the state payload — the model only needs structural info, not
+    // the full chat history or the entire keyframe array. Keep clip ids,
+    // labels, types, time ranges, transform & a summary of effects.
+    const slimState = {
+      currentTime: state.currentTime,
+      duration: state.duration,
+      canvasWidth: state.canvasWidth,
+      canvasHeight: state.canvasHeight,
+      tracks: state.tracks.map((t) => ({ id: t.id, name: t.name, type: t.type })),
+      clips: state.clips.map((c) => ({
+        id: c.id,
+        label: c.label,
+        mediaType: c.mediaType,
+        trackIndex: c.trackIndex,
+        startTime: c.startTime,
+        duration: c.duration,
+        x: c.x, y: c.y, width: c.width, height: c.height,
+        rotation: c.rotation, scale: c.scale, opacity: c.opacity,
+        text: c.text,
+        animationIn: c.animationIn,
+        animationOut: c.animationOut,
+        effectCount: c.effects?.length ?? 0,
+        effectTypes: (c.effects ?? []).map((e) => e.type),
+        specialKind: c.specialKind,
+        shapeKind: c.shapeKind,
+      })),
+      selectedClipIds: state.selectedClipIds,
+    };
+
+    const RULES = `## Output rules
+Reply with a single JSON object: {"operations": [...], "explanation": "..."}.
+- "operations" is an array of reducer actions ({type, payload}) that follow the schema above.
+- Use stable clip ids from state for UPDATE_CLIP / SELECT_CLIP / ADD_EFFECT.
+- New clips need a fresh "id" (any unique string starting with "clip-").
+- All times are seconds. Coordinates x/y/width/height are 0..1 ratios of the canvas.
+- "explanation" is one short sentence in plain English.
+- DO NOT wrap output in markdown fences. DO NOT include comments. JSON only.
+
+## Example
+User: "Add a centered title 'Hello' fading in for 2 seconds"
+Output: {"operations":[{"type":"ADD_CLIP","payload":{"clip":{"id":"clip-hello","label":"Hello","mediaType":"text","text":"Hello","trackIndex":1,"startTime":0,"duration":2,"x":0.1,"y":0.4,"width":0.8,"height":0.2,"animationIn":"fade","animationInDuration":1}}}],"explanation":"Added a 2s 'Hello' title with a fade-in."}`;
+
+    const enriched = `${AI_SCHEMA_MD}\n\n${RULES}\n\n## User instruction\n${prompt}\n\n## Current editor state (JSON)\n${JSON.stringify(slimState)}`;
 
     const cfg = loadAiKeys();
     if (cfg.provider === "replit") {
       // Default path — Gemini via Replit AI Integration.
       processInstruction.mutate(
-        { data: { instruction: `${AI_SCHEMA_MD}\n\n## User instruction\n${prompt}`, currentState: JSON.stringify(state) } },
+        { data: { instruction: `${AI_SCHEMA_MD}\n\n${RULES}\n\n## User instruction\n${prompt}`, currentState: JSON.stringify(slimState) } },
         {
           onSuccess: (result: any) => handleResult(result.operations, result.explanation || "Done.", "replit"),
           onError: (err: any) => handleError(err),

@@ -203,6 +203,39 @@ function applyClipUpdate(state: EditorState, ids: string[], updates: Partial<Cli
     }
   }
 
+  // Bind transform edits to the active keyframe. When the user changes
+  // x/y/width/height/rotation/scale/opacity in the inspector or by dragging
+  // on the canvas, we update the keyframe at-or-before the playhead (or the
+  // first keyframe if the playhead is before all of them). This makes the
+  // inspector behave like Adobe / Figma — the value you see is the value
+  // at the current frame, and editing it writes back to that frame.
+  const TRANSFORM_KF_PROPS = ["x", "y", "width", "height", "rotation", "scale", "opacity"] as const;
+  const propsToBind = TRANSFORM_KF_PROPS.filter((p) => (updates as any)[p] !== undefined);
+  if (propsToBind.length > 0) {
+    const cur = state.currentTime;
+    const updated = [...nextKeyframes];
+    for (const id of ids) {
+      for (const prop of propsToBind) {
+        const newVal = (updates as any)[prop] as number;
+        // Indices of this clip+prop's keyframes in the updated array.
+        const indices: number[] = [];
+        for (let i = 0; i < updated.length; i++) {
+          const k = updated[i];
+          if (k.clipId === id && k.property === prop) indices.push(i);
+        }
+        if (indices.length === 0) continue;
+        // Find keyframe at-or-before cur; fall back to the first one.
+        indices.sort((a, b) => updated[a].time - updated[b].time);
+        let targetIdx = indices[0];
+        for (const i of indices) {
+          if (updated[i].time <= cur + 0.001) targetIdx = i;
+        }
+        updated[targetIdx] = { ...updated[targetIdx], value: newVal };
+      }
+    }
+    nextKeyframes = updated;
+  }
+
   return {
     ...state,
     clips: state.clips.map((c) => (ids.includes(c.id) ? ensureFilters(c) : c)),
@@ -232,9 +265,82 @@ function splitClipAt(state: EditorState, clipId: string, time: number): EditorSt
     animationIn: "none",
     animationInDuration: 0,
   };
+
+  // ── Keyframe handling ────────────────────────────────────────────────
+  // Original clip's keyframes split between first/second by their time.
+  // Each half also gets an anchor keyframe at its first frame for every
+  // standard transform property — so the user can immediately see the
+  // diamond on the timeline and tweak from there. The anchor inherits the
+  // interpolated value at the cut so the visual result is unchanged.
+  const origKfs = state.keyframes.filter((k) => k.clipId === orig.id);
+  const otherKfs = state.keyframes.filter((k) => k.clipId !== orig.id);
+  const firstEnd = first.startTime + first.duration;
+
+  // Resolve a property's value at an absolute time using the original
+  // clip's keyframes (or the static prop as fallback).
+  const resolveAt = (prop: string, atTime: number): number => {
+    const propKfs = origKfs
+      .filter((k) => k.property === prop)
+      .sort((a, b) => a.time - b.time);
+    if (propKfs.length === 0) return (orig as any)[prop] ?? 0;
+    if (atTime <= propKfs[0].time) return propKfs[0].value;
+    if (atTime >= propKfs[propKfs.length - 1].time) return propKfs[propKfs.length - 1].value;
+    for (let i = 0; i < propKfs.length - 1; i++) {
+      const a = propKfs[i];
+      const b = propKfs[i + 1];
+      if (atTime >= a.time && atTime <= b.time) {
+        if (a.easing === "step") return a.value;
+        const t = (atTime - a.time) / (b.time - a.time || 1);
+        return a.value + (b.value - a.value) * t;
+      }
+    }
+    return propKfs[0].value;
+  };
+
+  const firstKfs: Keyframe[] = [];
+  const secondKfs: Keyframe[] = [];
+
+  // Re-bucket original keyframes into first / second halves.
+  for (const k of origKfs) {
+    if (k.time <= firstEnd - EPS) {
+      firstKfs.push({ ...k });
+    } else {
+      secondKfs.push({ ...k, id: uid("kf"), clipId: second.id });
+    }
+  }
+
+  // Ensure each transform prop has an anchor keyframe at the first frame
+  // of each half. Skip if one already exists at-or-near that time.
+  const hasKfAt = (kfs: Keyframe[], prop: string, atTime: number): boolean =>
+    kfs.some((k) => k.property === prop && Math.abs(k.time - atTime) < EPS);
+
+  for (const prop of DEFAULT_KF_PROPS) {
+    if (!hasKfAt(firstKfs, prop, first.startTime)) {
+      firstKfs.push({
+        id: uid("kf"),
+        clipId: first.id,
+        time: first.startTime,
+        property: prop,
+        value: resolveAt(prop, first.startTime),
+        easing: "easeInOut",
+      });
+    }
+    if (!hasKfAt(secondKfs, prop, second.startTime)) {
+      secondKfs.push({
+        id: uid("kf"),
+        clipId: second.id,
+        time: second.startTime,
+        property: prop,
+        value: resolveAt(prop, second.startTime),
+        easing: "easeInOut",
+      });
+    }
+  }
+
   return {
     ...state,
     clips: [...state.clips.slice(0, idx), first, second, ...state.clips.slice(idx + 1)],
+    keyframes: [...otherKfs, ...firstKfs, ...secondKfs],
   };
 }
 
@@ -422,8 +528,10 @@ function applyOps(state: EditorState, ops: any[]): EditorState {
           y: p.y ?? 0.4,
           width: p.width ?? 0.8,
           height: p.height ?? 0.2,
-          animationIn: p.animationIn ?? "fade",
-          animationOut: p.animationOut ?? "fade",
+          // No default fade — text appears/disappears cleanly. The user can
+          // opt in via the Animations tab or AI prompt.
+          animationIn: p.animationIn ?? "none",
+          animationOut: p.animationOut ?? "none",
         });
         s = {
           ...s,
@@ -555,12 +663,54 @@ function presentReducer(state: EditorState, action: EditorAction): EditorState {
       return applyClipUpdate(state, [action.payload.id], action.payload.updates);
     case "UPDATE_CLIPS":
       return applyClipUpdate(state, action.payload.ids, action.payload.updates);
-    case "ADD_CLIP":
+    case "ADD_CLIP": {
+      // Auto-promote to a new track when the requested track already has
+      // a clip occupying [startTime, startTime + duration]. This avoids
+      // accidental overlaps when the user keeps dragging media in.
+      const incoming = action.payload;
+      const overlaps = (a: Clip, b: Clip) =>
+        a.trackIndex === b.trackIndex &&
+        a.startTime < b.startTime + b.duration &&
+        b.startTime < a.startTime + a.duration;
+      const conflict = state.clips.some((c) => overlaps(c, incoming));
+      if (!conflict) {
+        return {
+          ...state,
+          clips: [...state.clips, incoming],
+          keyframes: [...state.keyframes, ...defaultClipKeyframes(incoming)],
+        };
+      }
+      // Find the lowest free track index that doesn't conflict in this time
+      // range. Scan upward from the incoming.trackIndex.
+      const occupied = new Set(
+        state.clips
+          .filter(
+            (c) =>
+              c.startTime < incoming.startTime + incoming.duration &&
+              incoming.startTime < c.startTime + c.duration,
+          )
+          .map((c) => c.trackIndex),
+      );
+      let freeTrack = incoming.trackIndex;
+      while (occupied.has(freeTrack)) freeTrack++;
+      let nextTracks = state.tracks;
+      while (nextTracks.length <= freeTrack) {
+        nextTracks = [
+          ...nextTracks,
+          makeTrack({
+            type: incoming.mediaType === "audio" ? "audio" : "video",
+            name: `Track ${nextTracks.length + 1}`,
+          }),
+        ];
+      }
+      const placed: Clip = { ...incoming, trackIndex: freeTrack };
       return {
         ...state,
-        clips: [...state.clips, action.payload],
-        keyframes: [...state.keyframes, ...defaultClipKeyframes(action.payload)],
+        tracks: nextTracks,
+        clips: [...state.clips, placed],
+        keyframes: [...state.keyframes, ...defaultClipKeyframes(placed)],
       };
+    }
     case "DELETE_CLIP":
       return {
         ...state,

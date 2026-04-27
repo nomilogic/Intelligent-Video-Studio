@@ -23,7 +23,7 @@ import {
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   Layers,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { resolveClip, interpolateKeyframes } from "../lib/animation";
 
@@ -1309,6 +1309,21 @@ const FILTER_PROPS = new Set([
 export default function PropertiesInspector({ state, dispatch, isCropping = false, onCroppingChange }: PropertiesInspectorProps) {
   const clip = state.clips.find((c) => state.selectedClipIds.includes(c.id));
   const [activeTab, setActiveTab] = useState<string>("basic");
+
+  // When the selected clip changes, jump to the most relevant tab. Text
+  // clips open the Text panel; everything else falls back to Basic. Tracking
+  // the previous clip id avoids stomping on the user's manual tab choice
+  // while they keep working on the same clip.
+  const prevClipIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = clip?.id ?? null;
+    if (id === prevClipIdRef.current) return;
+    prevClipIdRef.current = id;
+    if (!clip) return;
+    if (clip.mediaType === "text") setActiveTab("text");
+    else if (activeTab === "text") setActiveTab("basic");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clip?.id, clip?.mediaType]);
 
   const update = (updates: Partial<Clip>) => {
     if (!clip) return;

@@ -90,10 +90,13 @@ export const PROVIDERS: AiProvider[] = [
     id: "pollinations",
     label: "Pollinations (free)",
     defaultModel: "openai",
-    modelSuggestions: ["openai", "mistral", "llama"],
+    modelSuggestions: ["openai", "mistral", "llama", "openai-large"],
+    // Public Pollinations works without a key. If you DO have a token from
+    // pollinations.ai (paid tier / higher rate limits), add it in Settings
+    // and we'll send it as Authorization: Bearer.
     needsKey: false,
     keyHelpUrl: "https://pollinations.ai",
-    description: "Free, keyless. Best for quick experiments — quality varies.",
+    description: "Free, no key required. Add an optional token in Settings for higher rate limits.",
   },
 ];
 
@@ -224,15 +227,18 @@ async function callHuggingFace(apiKey: string, model: string, prompt: string): P
   return { text };
 }
 
-async function callPollinations(model: string, prompt: string): Promise<AiCallResult> {
+async function callPollinations(apiKey: string | undefined, model: string, prompt: string): Promise<AiCallResult> {
   // Pollinations is a free public proxy — POST to /openai for chat-compatible.
+  // If the user added a token in Settings, send it as a Bearer header.
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey && apiKey.trim()) headers.Authorization = `Bearer ${apiKey.trim()}`;
   const r = await fetch("https://text.pollinations.ai/openai", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
       model,
       messages: [
-        { role: "system", content: "You are a video-editor assistant. Respond with valid JSON only — no prose." },
+        { role: "system", content: "You are a video-editor assistant. Respond with valid JSON only — no prose, no markdown fences." },
         { role: "user", content: prompt },
       ],
       temperature: 0.4,
@@ -266,7 +272,7 @@ export async function generateWithProvider(
     case "groq":        return callGroq(key!, model, prompt);
     case "gemini":      return callGemini(key!, model, prompt);
     case "huggingface": return callHuggingFace(key!, model, prompt);
-    case "pollinations":return callPollinations(model, prompt);
+    case "pollinations":return callPollinations(key, model, prompt);
     case "replit":
       throw new Error("Replit provider should use the existing /api/ai endpoint, not generateWithProvider().");
   }

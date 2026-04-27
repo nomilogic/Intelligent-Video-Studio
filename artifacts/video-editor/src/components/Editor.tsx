@@ -60,9 +60,18 @@ export function Editor({ projectId, initialEditorState, projectName }: EditorPro
     let last = performance.now();
     let lastDispatch = last;
     let pending = currentTimeRef.current;
+    // Track the last value we dispatched. If the store's currentTime drifts
+    // away from this between ticks, the user (or AI) seeked externally —
+    // snap `pending` to the new position so playback continues from there.
+    let lastDispatchedValue = pending;
     const tick = (now: number) => {
       const dt = (now - last) / 1000;
       last = now;
+      // External seek detection (e.g. clicking the ruler while playing).
+      if (Math.abs(currentTimeRef.current - lastDispatchedValue) > 0.05) {
+        pending = currentTimeRef.current;
+        lastDispatchedValue = pending;
+      }
       pending += dt;
       if (pending >= playbackEndRef.current) {
         dispatch({ type: "SET_PLAYING", payload: false });
@@ -71,6 +80,7 @@ export function Editor({ projectId, initialEditorState, projectName }: EditorPro
       }
       if (now - lastDispatch >= DISPATCH_INTERVAL_MS) {
         lastDispatch = now;
+        lastDispatchedValue = pending;
         dispatch({ type: "SET_TIME", payload: pending });
       }
       rafRef.current = requestAnimationFrame(tick);
