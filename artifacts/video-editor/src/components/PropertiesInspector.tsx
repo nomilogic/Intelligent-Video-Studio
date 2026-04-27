@@ -3,6 +3,8 @@ import { EFFECT_LIBRARY as EFFECT_CATALOG, EFFECT_CATEGORIES } from "../lib/effe
 import { TRANSITION_LIBRARY as TRANSITION_CATALOG, TRANSITION_CATEGORIES } from "../lib/transition-library";
 import { SHAPE_LIBRARY } from "../lib/shape-library";
 import { SPECIAL_LAYERS } from "../lib/special-layers";
+import { PARTICLE_LIBRARY, getParticleDef } from "../lib/particles";
+import { TRANSITION_PRESETS, TRANSITION_PRESET_CATEGORIES, getTransitionPreset } from "../lib/transition-presets";
 import { savePreset, loadPresets, deletePreset, type CustomPreset } from "../lib/custom-library";
 import { useAuth } from "@/lib/auth-context";
 import { useDiamonds } from "@/lib/diamonds-context";
@@ -1003,6 +1005,210 @@ function SpecialLayerSection({
 }
 
 /**
+ * ParticleSection — inspector for `mediaType === "particles"` clips. Lets
+ * the user swap kinds (snow, confetti, sparkles, …) and tune the simulation
+ * parameters. The same fields drive both the live preview canvas and the
+ * exported MP4 via `drawParticles()` in `lib/particles.ts`.
+ */
+function ParticleSection({
+  clip,
+  dispatch,
+}: {
+  clip: Clip;
+  dispatch: React.Dispatch<EditorAction>;
+}) {
+  const update = (updates: Partial<Clip>) =>
+    dispatch({ type: "UPDATE_CLIP", payload: { id: clip.id, updates } });
+  const def = getParticleDef(clip.particleKind) ?? PARTICLE_LIBRARY[0];
+  const directions: NonNullable<Clip["particleDirection"]>[] = [
+    "down", "up", "left", "right", "burst", "swirl", "rise",
+  ];
+  return (
+    <Section title="Particles">
+      {/* Kind picker — emoji grid mirrors the MediaPanel for consistency. */}
+      <div className="grid grid-cols-5 gap-1 max-h-44 overflow-y-auto pr-1">
+        {PARTICLE_LIBRARY.map((p) => (
+          <button
+            key={p.key}
+            onClick={() => {
+              // Reset overrides when switching kinds so defaults from the new
+              // kind take over and the user isn't surprised by stale values.
+              update({
+                particleKind: p.key,
+                label: p.label,
+                particleCount: undefined,
+                particleSize: undefined,
+                particleSpeed: undefined,
+                particleColor: undefined,
+                particleColor2: undefined,
+                particleOpacity: undefined,
+                particleSpread: undefined,
+                particleDirection: undefined,
+                particleGravity: undefined,
+                particleTwinkle: undefined,
+                color: p.defaults.color,
+              });
+            }}
+            className={`aspect-square rounded border text-xl flex items-center justify-center transition-colors ${
+              clip.particleKind === p.key
+                ? "border-primary bg-primary/15"
+                : "border-border hover:bg-muted/40"
+            }`}
+            title={`${p.label} — ${p.description}`}
+            aria-label={p.label}
+          >
+            <span aria-hidden="true">{p.emoji}</span>
+          </button>
+        ))}
+      </div>
+
+      <p className="text-[10px] text-muted-foreground leading-snug">{def.description}</p>
+
+      <NumPair label="Count"   value={clip.particleCount   ?? def.defaults.count}   min={5}   max={400} step={1}    onChange={(v) => update({ particleCount: v })} />
+      <NumPair label="Size"    value={clip.particleSize    ?? def.defaults.size}    min={1}   max={120} step={1}    onChange={(v) => update({ particleSize: v })} />
+      <NumPair label="Speed"   value={clip.particleSpeed   ?? def.defaults.speed}   min={0.1} max={3}   step={0.05} onChange={(v) => update({ particleSpeed: v })} />
+      <NumPair label="Spread"  value={clip.particleSpread  ?? def.defaults.spread}  min={0}   max={1}   step={0.05} onChange={(v) => update({ particleSpread: v })} />
+      <NumPair label="Gravity" value={clip.particleGravity ?? def.defaults.gravity} min={-2}  max={2}   step={0.1}  onChange={(v) => update({ particleGravity: v })} />
+      <NumPair label="Twinkle" value={clip.particleTwinkle ?? def.defaults.twinkle} min={0}   max={1}   step={0.05} onChange={(v) => update({ particleTwinkle: v })} />
+      <NumPair label="Opacity" value={clip.particleOpacity ?? def.defaults.opacity} min={0}   max={1}   step={0.05} onChange={(v) => update({ particleOpacity: v })} />
+
+      <div className="flex items-center gap-2">
+        <Label className="text-[10px] text-muted-foreground w-14">Direction</Label>
+        <Select
+          value={clip.particleDirection ?? def.defaults.direction}
+          onValueChange={(v) => update({ particleDirection: v as NonNullable<Clip["particleDirection"]> })}
+        >
+          <SelectTrigger className="h-7 text-xs flex-1">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {directions.map((d) => (
+              <SelectItem key={d} value={d} className="text-xs capitalize">{d}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Label className="text-[10px] text-muted-foreground w-14">Color</Label>
+        <Input
+          type="color"
+          value={clip.particleColor ?? def.defaults.color}
+          onChange={(e) => update({ particleColor: e.target.value })}
+          className="h-7 w-12 p-0.5 cursor-pointer"
+        />
+        <Label className="text-[10px] text-muted-foreground w-14">Color 2</Label>
+        <Input
+          type="color"
+          value={clip.particleColor2 ?? def.defaults.color2 ?? def.defaults.color}
+          onChange={(e) => update({ particleColor2: e.target.value })}
+          className="h-7 w-12 p-0.5 cursor-pointer"
+          title="Optional secondary color (used for confetti, bokeh, leaves)"
+        />
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * TransitionPresetPicker — search + category filter on top of the 500+
+ * transition preset library. Picking a preset compiles to a
+ * `ClipTransition` with `type: "param"` so the renderer can build the
+ * mod from the preset's parameter payload without needing a switch case
+ * per variant.
+ */
+function TransitionPresetPicker({
+  clip,
+  dispatch,
+}: {
+  clip: Clip;
+  dispatch: React.Dispatch<EditorAction>;
+}) {
+  const update = (updates: Partial<Clip>) =>
+    dispatch({ type: "UPDATE_CLIP", payload: { id: clip.id, updates } });
+  const [query, setQuery] = useState("");
+  const [cat, setCat] = useState<string>("all");
+  const currentKey = clip.transitionIn?.presetKey;
+  const filtered = TRANSITION_PRESETS.filter((p) => {
+    if (cat !== "all" && p.category !== cat) return false;
+    if (!query) return true;
+    const q = query.toLowerCase();
+    return p.label.toLowerCase().includes(q) || p.key.toLowerCase().includes(q) || p.category.toLowerCase().includes(q);
+  });
+  const visible = filtered.slice(0, 240); // cap UI list to keep it snappy
+  return (
+    <>
+      <Input
+        type="text"
+        placeholder={`Search ${TRANSITION_PRESETS.length} transitions…`}
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        className="h-7 text-xs"
+        data-testid="input-transition-search"
+      />
+      <div className="flex flex-wrap gap-1">
+        <button
+          onClick={() => setCat("all")}
+          className={`text-[10px] px-1.5 py-0.5 rounded border ${cat === "all" ? "border-primary bg-primary/15 text-primary" : "border-border hover:bg-muted/40"}`}
+        >
+          All
+        </button>
+        {TRANSITION_PRESET_CATEGORIES.map((c) => (
+          <button
+            key={c}
+            onClick={() => setCat(c)}
+            className={`text-[10px] px-1.5 py-0.5 rounded border ${cat === c ? "border-primary bg-primary/15 text-primary" : "border-border hover:bg-muted/40"}`}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
+      <p className="text-[10px] text-muted-foreground">
+        Showing {visible.length} of {filtered.length} matches.
+      </p>
+      <div className="grid grid-cols-2 gap-1 max-h-72 overflow-y-auto pr-1">
+        {visible.map((p) => (
+          <button
+            key={p.key}
+            onClick={() => {
+              const preset = getTransitionPreset(p.key);
+              if (!preset) return;
+              update({
+                transitionIn: {
+                  type: "param",
+                  duration: preset.duration ?? clip.transitionIn?.duration ?? 0.6,
+                  params: preset.params,
+                  presetKey: preset.key,
+                },
+              });
+            }}
+            className={`text-[10px] px-1.5 py-1 rounded border text-left truncate ${
+              currentKey === p.key
+                ? "border-primary bg-primary/15 text-primary"
+                : "border-border text-foreground hover:bg-muted/40"
+            }`}
+            title={`${p.label} · ${p.category}`}
+            data-testid={`transition-preset-${p.key}`}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+      {currentKey && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-6 text-[10px] w-full"
+          onClick={() => update({ transitionIn: { type: "none", duration: clip.transitionIn?.duration ?? 0.5 } })}
+        >
+          Clear preset
+        </Button>
+      )}
+    </>
+  );
+}
+
+/**
  * SavedPresetsSection — save the current clip's styling/transform as a
  * named preset to localStorage, then re-apply or delete later. Surfaces
  * the user's "custom library" in the inspector itself so it travels
@@ -1681,6 +1887,12 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
                   <SpecialLayerSection clip={clip} dispatch={dispatch} />
                 </>
               )}
+              {clip.mediaType === "particles" && (
+                <>
+                  <Separator />
+                  <ParticleSection clip={clip} dispatch={dispatch} />
+                </>
+              )}
 
               <Separator />
 
@@ -1915,11 +2127,24 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
                   label="Duration"
                   value={clip.transitionIn?.duration ?? 0.5}
                   min={0.1} max={3} step={0.1} suffix="s"
-                  onChange={(v) => update({ transitionIn: { type: clip.transitionIn?.type ?? "none", duration: v } })}
+                  onChange={(v) => update({ transitionIn: { type: clip.transitionIn?.type ?? "none", duration: v, params: clip.transitionIn?.params, presetKey: clip.transitionIn?.presetKey } })}
                 />
                 <p className="text-[10px] text-muted-foreground">
                   Blends with the previous clip on the same track during the first {(clip.transitionIn?.duration ?? 0.5).toFixed(1)}s.
                 </p>
+              </Section>
+
+              <Separator />
+
+              {/*
+                500+ Transition Presets — these compile to `type: "param"`
+                with a `params` payload, sidestepping the 50-entry catalog
+                above. Search + category filter keeps the picker scannable
+                even at this scale. Picking a preset overrides any value
+                chosen in the simple "Transition In" select above.
+              */}
+              <Section title="Transition Presets (500+)">
+                <TransitionPresetPicker clip={clip} dispatch={dispatch} />
               </Section>
 
               <Separator />

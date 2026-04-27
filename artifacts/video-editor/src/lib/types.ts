@@ -20,7 +20,13 @@ export type MediaType =
   // light leaks, film grain, vignettes, scanlines, lens flares. Driven
   // by clip.specialKind and a few intensity knobs. Always renders on
   // top of media beneath in their track range.
-  | "specialLayer";
+  | "specialLayer"
+  // Particles overlay — emits N animated particles (snow, confetti,
+  // sparkles, rain, etc.) over the clip rectangle. Driven by
+  // `clip.particleKind` plus a handful of physics knobs. The same
+  // deterministic-RNG simulation is shared between preview (Canvas) and
+  // export (use-export.ts) so the playback matches the rendered file.
+  | "particles";
 
 export interface ChromaKey {
   // Enable toggle so users can adjust controls without immediately seeing the
@@ -250,11 +256,59 @@ export type TransitionType =
   | "morph"
   | "dropDown" | "popUp"
   | "swing"
-  | "elastic";
+  | "elastic"
+  // Parametric transition driven by a `ParamTransitionParams` payload on
+  // the ClipTransition itself. Used by the 500-entry transition-presets
+  // catalog so we don't need a separate string discriminant for every
+  // hand-tuned variant. The renderer composes slide + scale + spin +
+  // blur + iris + colorflash from the params.
+  | "param";
+
+/**
+ * Parametric transition payload — fed into `getTransitionMod("param", …, params)`
+ * to produce a TransitionMod without writing a dedicated case for every
+ * variant. Each field is optional and defaults to "do nothing"; combining
+ * a few fields yields a unique-looking transition. Used by
+ * `transition-presets.ts` to ship a 500-preset catalog.
+ */
+export interface ParamTransitionParams {
+  /** Slide direction in clip-box widths (typical -1..1). */
+  dx?: number;
+  dy?: number;
+  /** Incoming start scale (e.g. 0.4 = grow from 40%); 1 = no scale. */
+  scaleFrom?: number;
+  /** Outgoing end scale (e.g. 1.6 = enlarge while leaving). */
+  scaleTo?: number;
+  /** Rotation in degrees applied during the transition window. */
+  rotateDeg?: number;
+  /** Extra Gaussian-blur in px (relative to a 1080-wide canvas). */
+  blurPx?: number;
+  /** Multiplied into clip opacity. 1 = no fade. */
+  fade?: number;
+  /** Wipe insets — fraction (0..0.5) revealed from the matching edge. */
+  wipeLeft?: number;
+  wipeRight?: number;
+  wipeTop?: number;
+  wipeBottom?: number;
+  /** Iris animations (0..0.5 each side, symmetric on all four sides). */
+  iris?: "in" | "out";
+  /** Color flash overlay (hex). */
+  color?: string;
+  /** Peak alpha for the color overlay (0..1). */
+  colorAmp?: number;
+  /** If true, color is monotonic (fade-to-color); else bell curve (flash). */
+  colorMonotonic?: boolean;
+  /** Sinusoidal shake amplitude in clip-box %. */
+  shake?: number;
+}
 
 export interface ClipTransition {
   type: TransitionType;
   duration: number;
+  /** When `type === "param"`, the parameters that drive the transition. */
+  params?: ParamTransitionParams;
+  /** Optional preset key from `transition-presets.ts` for AI/UI tracking. */
+  presetKey?: string;
 }
 
 /**
@@ -361,6 +415,22 @@ export interface Clip {
   // For Lottie/Iconify imports we keep a hint about the original asset so
   // we know how to render it. `assetKind` is "lottie" / "icon" / undefined.
   assetKind?: "lottie" | "icon";
+  // particles clip type — see `particles.ts` for the full kind list and
+  // physics knobs. `particleKind` selects the preset; the optional knobs
+  // override the preset's defaults so users can tune density / color /
+  // speed without touching the preset definition. The renderer (Canvas
+  // and export) seeds its RNG from clip.id so playback is deterministic.
+  particleKind?: string;
+  particleCount?: number;        // 5..400
+  particleSize?: number;         // canvas-relative px on a 1080-wide canvas
+  particleSpeed?: number;        // 0.1..3 multiplier
+  particleColor?: string;        // primary color
+  particleColor2?: string;       // optional secondary color (for confetti, bokeh)
+  particleOpacity?: number;      // 0..1
+  particleSpread?: number;       // 0..1 — lateral randomness
+  particleDirection?: "down" | "up" | "left" | "right" | "burst" | "swirl" | "rise";
+  particleGravity?: number;      // -2..2 multiplier
+  particleTwinkle?: number;      // 0..1 — alpha pulsation amplitude
 }
 
 export interface DrawPath {

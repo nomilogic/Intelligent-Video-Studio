@@ -12,8 +12,10 @@
 
 import { EFFECT_LIBRARY, EFFECT_CATEGORIES } from "./effect-library";
 import { TRANSITION_LIBRARY, TRANSITION_CATEGORIES } from "./transition-library";
+import { TRANSITION_PRESETS, TRANSITION_PRESET_CATEGORIES } from "./transition-presets";
 import { SHAPE_LIBRARY } from "./shape-library";
 import { SPECIAL_LAYERS as SPECIAL_LAYER_LIBRARY } from "./special-layers";
+import { PARTICLE_LIBRARY } from "./particles";
 import { TEMPLATES } from "./templates";
 import { FONT_OPTIONS } from "./types";
 
@@ -143,6 +145,18 @@ export const AI_SCHEMA = {
       category: t.category,
     })),
     transitionCategories: TRANSITION_CATEGORIES,
+    /**
+     * 500+ parametric transition presets. To use one, set
+     * `clip.transitionIn = { type: "param", duration, params, presetKey }`.
+     * The renderer reads `params` to build the visual mod — the AI never
+     * has to write a switch case per variant.
+     */
+    transitionPresets: TRANSITION_PRESETS.map<AISchemaLibraryEntry>((p) => ({
+      key: p.key,
+      label: p.label,
+      category: p.category,
+    })),
+    transitionPresetCategories: TRANSITION_PRESET_CATEGORIES,
     shapes: SHAPE_LIBRARY.map<AISchemaLibraryEntry>((s) => ({
       key: s.key,
       label: s.name,
@@ -152,6 +166,19 @@ export const AI_SCHEMA = {
       key: s.key,
       label: s.name,
       category: s.category,
+    })),
+    /**
+     * Particle overlay kinds. To use, add a clip with
+     * `mediaType: "particles"` and set `particleKind` to one of these
+     * keys. The renderer fills in defaults; per-clip fields
+     * (`particleCount`, `particleSize`, `particleSpeed`, `particleColor`,
+     * `particleColor2`, `particleOpacity`, `particleSpread`,
+     * `particleDirection`, `particleGravity`, `particleTwinkle`)
+     * override them.
+     */
+    particles: PARTICLE_LIBRARY.map<AISchemaLibraryEntry>((p) => ({
+      key: p.key,
+      label: p.label,
     })),
     templates: TEMPLATES.map<AISchemaLibraryEntry>((t) => ({
       key: t.key,
@@ -175,6 +202,9 @@ export const AI_SCHEMA = {
     "chromaKey", "blurAmount", "maskAffectsTracksBelow",
     "shapeKind", "fill", "strokeColor", "strokeWidth",
     "specialKind", "specialIntensity", "specialColor",
+    "particleKind", "particleCount", "particleSize", "particleSpeed",
+    "particleColor", "particleColor2", "particleOpacity", "particleSpread",
+    "particleDirection", "particleGravity", "particleTwinkle",
   ],
   actions: AI_ACTIONS,
 };
@@ -210,6 +240,10 @@ export function buildAiSchemaMarkdown(): string {
   lines.push("");
   lines.push(`## Shapes (${SHAPE_LIBRARY.length}): ${SHAPE_LIBRARY.map((s) => s.key).join(", ")}`);
   lines.push(`## Special Layers (${SPECIAL_LAYER_LIBRARY.length}): ${SPECIAL_LAYER_LIBRARY.map((s) => s.key).join(", ")}`);
+  lines.push(`## Particles (${PARTICLE_LIBRARY.length}): ${PARTICLE_LIBRARY.map((p) => p.key).join(", ")}`);
+  lines.push(`Use as \`mediaType: "particles"\` clip with \`particleKind\`. Tunable: count/size/speed/color/direction/gravity/twinkle.`);
+  lines.push(`## Transition Presets (${TRANSITION_PRESETS.length})`);
+  lines.push(`Use \`transitionIn: { type: "param", duration, params, presetKey }\` to apply. Categories: ${TRANSITION_PRESET_CATEGORIES.join(", ")}.`);
   lines.push(`## Templates (${TEMPLATES.length}): ${TEMPLATES.map((t) => t.key).join(", ")}`);
   lines.push(`## Fonts (${FONT_OPTIONS.length}): ${FONT_OPTIONS.map((f) => f.value).join(", ")}`);
   lines.push("");

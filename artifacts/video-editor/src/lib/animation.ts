@@ -358,11 +358,82 @@ export function getTransitionMod(
   type: TransitionType,
   p: number,
   side: "in" | "out",
+  params?: import("./types").ParamTransitionParams,
 ): TransitionMod {
   const m: TransitionMod = { ...NO_TRANSITION };
   if (type === "none") return m;
   const ip = Math.max(0, Math.min(1, p));
   const inv = 1 - ip;
+  // ── "param" type — build mod from a parametric payload. Used by the
+  // 500-entry transition-presets catalog so we don't need a switch case
+  // per variant. Each field is optional and composes with the rest.
+  if (type === "param" && params) {
+    const dx = params.dx ?? 0;
+    const dy = params.dy ?? 0;
+    if (side === "in") {
+      m.translateXPct = dx * inv * 100;
+      m.translateYPct = dy * inv * 100;
+    } else {
+      m.translateXPct = -dx * ip * 100;
+      m.translateYPct = -dy * ip * 100;
+    }
+    if (params.scaleFrom !== undefined) {
+      const sf = params.scaleFrom;
+      const st = params.scaleTo ?? 1;
+      // incoming: lerp scaleFrom → 1; outgoing: lerp 1 → scaleTo
+      m.scaleMul = side === "in" ? sf + (1 - sf) * ip : 1 + (st - 1) * ip;
+    } else if (params.scaleTo !== undefined) {
+      const st = params.scaleTo;
+      m.scaleMul = side === "in" ? 1 : 1 + (st - 1) * ip;
+    }
+    if (params.rotateDeg) {
+      m.rotateExtraDeg = side === "in" ? params.rotateDeg * inv : params.rotateDeg * ip;
+    }
+    if (params.blurPx) {
+      // Bell curve so blur peaks mid-transition.
+      const bell = 1 - Math.abs(2 * ip - 1);
+      m.blurExtra = params.blurPx * bell;
+    }
+    if (params.fade !== undefined && params.fade < 1) {
+      const fadeFloor = params.fade;
+      m.opacityMul = side === "in" ? fadeFloor + (1 - fadeFloor) * ip : fadeFloor + (1 - fadeFloor) * inv;
+    }
+    if (params.shake) {
+      const bell = 1 - Math.abs(2 * ip - 1);
+      const seed = side === "in" ? 13 : 27;
+      m.translateXPct += Math.sin(ip * 47 + seed) * params.shake * bell;
+      m.translateYPct += Math.cos(ip * 53 + seed) * params.shake * bell;
+    }
+    // Wipe insets — sweep in/out from the matched edge.
+    if (params.wipeLeft || params.wipeRight || params.wipeTop || params.wipeBottom) {
+      const k = side === "in" ? inv : ip;
+      m.clipInsetLeft   = (params.wipeLeft   ?? 0) * k * 2 * 100; // *100 because TransitionMod uses %; *2 because params are 0..0.5
+      m.clipInsetRight  = (params.wipeRight  ?? 0) * k * 2 * 100;
+      m.clipInsetTop    = (params.wipeTop    ?? 0) * k * 2 * 100;
+      m.clipInsetBottom = (params.wipeBottom ?? 0) * k * 2 * 100;
+    }
+    // Iris — symmetric inset on all four sides.
+    if (params.iris) {
+      const k = params.iris === "in"
+        ? (side === "in" ? inv : ip)         // closes-in then opens-out
+        : (side === "in" ? ip  : inv);       // opens-out then closes-in
+      const inset = k * 50; // 50% = fully closed
+      m.clipInsetLeft   = Math.max(m.clipInsetLeft,   inset);
+      m.clipInsetRight  = Math.max(m.clipInsetRight,  inset);
+      m.clipInsetTop    = Math.max(m.clipInsetTop,    inset);
+      m.clipInsetBottom = Math.max(m.clipInsetBottom, inset);
+    }
+    // Color overlay — flash (bell curve) or monotonic fade-to-color.
+    if (params.color && params.colorAmp) {
+      const amp = params.colorAmp;
+      const env = params.colorMonotonic
+        ? (side === "in" ? inv : ip)
+        : (1 - Math.abs(2 * ip - 1));
+      m.overlayColor = params.color;
+      m.overlayAlpha = Math.max(0, Math.min(1, amp * env));
+    }
+    return m;
+  }
   // Helpers -----------------------------------------------------------------
   // Slide: incoming enters from `dx`/`dy` direction in % of clip box; outgoing
   // exits in the opposite direction. dx/dy = +1/-1.
@@ -665,8 +736,8 @@ export function getActiveTransition(
   const eased = easeFn(p, "easeInOut");
   const prev = findPrevClipOnTrack(allClips, clip);
   return {
-    incoming: getTransitionMod(tr.type, eased, "in"),
-    outgoing: getTransitionMod(tr.type, eased, "out"),
+    incoming: getTransitionMod(tr.type, eased, "in", tr.params),
+    outgoing: getTransitionMod(tr.type, eased, "out", tr.params),
     prevClip: prev,
     progress: eased,
   };

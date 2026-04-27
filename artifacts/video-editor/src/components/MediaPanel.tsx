@@ -8,6 +8,7 @@ import { textContainerStyle, textElementStyle } from "../lib/text-style";
 import { makeClip } from "../lib/reducer";
 import { TEMPLATES } from "../lib/templates";
 import { SHAPE_LIBRARY } from "../lib/shape-library";
+import { PARTICLE_LIBRARY } from "../lib/particles";
 import { SPECIAL_LAYERS } from "../lib/special-layers";
 import { loadPresets, deletePreset, type CustomPreset } from "../lib/custom-library";
 import { TEXT_PRESETS as ALL_TEXT_PRESETS, TEXT_PRESET_CATEGORIES, type TextPreset, type TextPresetCategory } from "../lib/text-presets";
@@ -670,6 +671,45 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
                 data-testid={`special-${s.key}`}
                 aria-label={s.name}
               />
+            ))}
+          </div>
+
+          <Separator />
+
+          {/*
+            Particles — animated overlays (snow, confetti, sparkles, rain,
+            etc.) rendered in real time via the shared `drawParticles()`
+            helper. Each picker entry adds a `mediaType: "particles"`
+            clip seeded with the kind's defaults; the inspector exposes
+            count / size / speed / color / direction sliders for tuning.
+          */}
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Particles ({PARTICLE_LIBRARY.length})</p>
+          <div className="grid grid-cols-5 gap-1">
+            {PARTICLE_LIBRARY.map((p) => (
+              <button
+                key={p.key}
+                onClick={() => {
+                  dispatch({
+                    type: "ADD_CLIP",
+                    payload: makeClip({
+                      label: p.label,
+                      mediaType: "particles",
+                      particleKind: p.key,
+                      trackIndex: 0, // overlay track
+                      startTime: state.currentTime,
+                      duration: 5,
+                      x: 0, y: 0, width: 1, height: 1,
+                      color: p.defaults.color,
+                    }),
+                  });
+                }}
+                title={`${p.label} — ${p.description}`}
+                className="aspect-square rounded border border-border hover:border-primary/60 hover:scale-105 transition-transform flex items-center justify-center text-2xl bg-background"
+                data-testid={`particle-${p.key}`}
+                aria-label={p.label}
+              >
+                <span aria-hidden="true">{p.emoji}</span>
+              </button>
             ))}
           </div>
 

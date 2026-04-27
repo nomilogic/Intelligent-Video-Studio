@@ -16,6 +16,7 @@ import {
 } from "../lib/animation";
 import { getShape, buildShapeSvg, buildGradientDefs, type ShapeDef } from "../lib/shape-library";
 import { getSpecialLayer, type SpecialDef } from "../lib/special-layers";
+import { drawParticles, resolveParticleClip } from "../lib/particles";
 
 /**
  * Convert a Fill (solid | linear | radial gradient) into either a CSS color
@@ -440,6 +441,7 @@ function drawClipToCanvas(
   mod: TransitionMod = NO_TRANSITION,
   fx: EffectImpact = NO_EFFECT_IMPACT,
   maskCanvas: HTMLCanvasElement | null = null,
+  time: number = 0,
 ) {
   ctx.save();
   ctx.globalAlpha = Math.max(0, Math.min(1, resolved.opacity * mod.opacityMul));
@@ -604,6 +606,17 @@ function drawClipToCanvas(
       ctx.fillStyle = clip.specialColor || clip.color || "rgba(255,255,255,0.5)";
       ctx.fillRect(-pw / 2, -ph / 2, pw, ph);
     }
+  } else if (clip.mediaType === "particles") {
+    // Particles overlay — same draw helper as the live preview, so what
+    // the user sees in the editor matches the rendered MP4 frame-by-frame.
+    // We translate so (0,0) is the clip's top-left corner instead of the
+    // canvas centerline that the surrounding transform sets up.
+    ctx.save();
+    ctx.translate(-pw / 2, -ph / 2);
+    const resolved = resolveParticleClip(clip);
+    const tLocal = Math.max(0, time - clip.startTime);
+    drawParticles(ctx, resolved, pw, ph, tLocal, clip.id);
+    ctx.restore();
   } else {
     // Color-block / blank clip. Treat empty/missing color as transparent so
     // placeholders don't leak a stray colored frame into the export. Also
@@ -749,9 +762,10 @@ function drawClipWithMask(
   resScale: number,
   mod: TransitionMod = NO_TRANSITION,
   fx: EffectImpact = NO_EFFECT_IMPACT,
+  time: number = 0,
 ) {
   if (!clip.mask || !maskCanvas) {
-    drawClipToCanvas(mainCtx, clip, resolved, mediaEl, W, H, resScale, mod, fx, null);
+    drawClipToCanvas(mainCtx, clip, resolved, mediaEl, W, H, resScale, mod, fx, null, time);
     return;
   }
   const off = document.createElement("canvas");
@@ -759,10 +773,10 @@ function drawClipWithMask(
   off.height = mainCtx.canvas.height;
   const ox = off.getContext("2d");
   if (!ox) {
-    drawClipToCanvas(mainCtx, clip, resolved, mediaEl, W, H, resScale, mod, fx, null);
+    drawClipToCanvas(mainCtx, clip, resolved, mediaEl, W, H, resScale, mod, fx, null, time);
     return;
   }
-  drawClipToCanvas(ox, clip, resolved, mediaEl, W, H, resScale, mod, fx, maskCanvas);
+  drawClipToCanvas(ox, clip, resolved, mediaEl, W, H, resScale, mod, fx, maskCanvas, time);
   mainCtx.drawImage(off, 0, 0);
 }
 
@@ -1001,7 +1015,7 @@ async function renderFrame(
           : null;
       const pFx = getEffectImpact(prev, time);
       const prevMask = media.maskEls.get(prev.id) ?? null;
-      drawClipWithMask(targetCtx, prev, pr, prevMediaEl, prevMask, W, H, scale, trans.outgoing, pFx);
+      drawClipWithMask(targetCtx, prev, pr, prevMediaEl, prevMask, W, H, scale, trans.outgoing, pFx, time);
     }
 
     const mediaEl = clip.mediaType === "video"
@@ -1010,7 +1024,7 @@ async function renderFrame(
         ? (media.imageEls.get(clip.id) ?? null)
         : null;
     const clipMask = media.maskEls.get(clip.id) ?? null;
-    drawClipWithMask(targetCtx, clip, resolved, mediaEl, clipMask, W, H, scale, incomingMod, fxImpact);
+    drawClipWithMask(targetCtx, clip, resolved, mediaEl, clipMask, W, H, scale, incomingMod, fxImpact, time);
   };
 
   const applyMasksToOffscreen = (offCtx: CanvasRenderingContext2D, masks: MaskEntry[]) => {

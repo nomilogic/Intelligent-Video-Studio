@@ -15,6 +15,46 @@ import { textContainerStyle, textElementStyle } from "../lib/text-style";
 import { cn } from "@/lib/utils";
 import { getShape } from "../lib/shape-library";
 import { getSpecialLayer, type SpecialDef } from "../lib/special-layers";
+import { drawParticles, resolveParticleClip } from "../lib/particles";
+
+/**
+ * Renders a particle field for a `mediaType: "particles"` clip into a
+ * <canvas> element sized to the clip's box. The same `drawParticles()`
+ * helper runs in both the live preview here and the export pipeline in
+ * `use-export.ts`, so what the user sees is what gets rendered. The
+ * canvas is keyed on `videoTime` so it redraws every playhead tick.
+ */
+function ParticlesOverlay({ clip, videoTime }: { clip: Clip; videoTime: number }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const resolved = useMemo(() => resolveParticleClip(clip), [clip]);
+  useEffect(() => {
+    const cnv = canvasRef.current;
+    if (!cnv) return;
+    // Size the backing buffer to the clip's rendered pixel size so the
+    // particles look crisp at any zoom level.
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = cnv.clientWidth;
+    const h = cnv.clientHeight;
+    if (w <= 0 || h <= 0) return;
+    const targetW = Math.round(w * dpr);
+    const targetH = Math.round(h * dpr);
+    if (cnv.width !== targetW) cnv.width = targetW;
+    if (cnv.height !== targetH) cnv.height = targetH;
+    const ctx = cnv.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    const tLocal = Math.max(0, videoTime - clip.startTime);
+    drawParticles(ctx, resolved, w, h, tLocal, clip.id);
+  }, [clip, videoTime, resolved]);
+  return (
+    <canvas
+      ref={canvasRef}
+      className="w-full h-full pointer-events-none"
+      style={{ display: "block" }}
+    />
+  );
+}
 
 /**
  * Build a CSS `clip-path: inset(...)` string from a TransitionMod, or
@@ -563,6 +603,10 @@ function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false }
     return <div className="w-full h-full pointer-events-none" style={style} />;
   }
 
+  if (clip.mediaType === "particles") {
+    return <ParticlesOverlay clip={clip} videoTime={videoTime} />;
+  }
+
   return (
     <div
       className="w-full h-full flex items-center justify-center"
@@ -703,6 +747,10 @@ const MediaContent = memo(MediaContentBase, (prev, next) => {
   // Text clips have no native playback element — always re-render on prop changes
   // so live text/style edits show immediately, even while playing.
   if (next.clip.mediaType === "text") return false;
+  // Particles need to re-draw every playhead tick (their canvas does not
+  // animate itself). Always re-render so the simulation advances during
+  // playback and scrubbing alike.
+  if (next.clip.mediaType === "particles") return false;
   // While playing, the browser advances the video natively — skip re-renders
   // triggered solely by changes in `videoTime`.
   if (next.isPlaying) return true;
