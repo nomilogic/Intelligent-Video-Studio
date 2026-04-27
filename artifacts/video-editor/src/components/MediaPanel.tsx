@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Plus, Trash2, Film, Music, Image as ImageIcon, Type, Square, Sparkles, Layout, Droplets, Shapes, Bookmark } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -69,6 +69,36 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
       setAssetLoading(false);
     }
   };
+  const [tplSearch, setTplSearch] = useState("");
+  const [tplLimit, setTplLimit] = useState(60);
+  const [tplAspect, setTplAspect] = useState<"all" | "9:16" | "1:1" | "16:9" | "4:5" | "21:9">("all");
+  // Aspect classifier — must match the BULK_ASPECTS labels in templates.ts
+  // so the chip filter behaves identically across hand-authored and
+  // procedurally-generated templates.
+  const aspectLabelOf = (w: number, h: number): "9:16" | "1:1" | "16:9" | "4:5" | "21:9" | "other" => {
+    const r = w / h;
+    if (Math.abs(r - 9 / 16) < 0.04) return "9:16";
+    if (Math.abs(r - 1) < 0.04) return "1:1";
+    if (Math.abs(r - 16 / 9) < 0.04) return "16:9";
+    if (Math.abs(r - 4 / 5) < 0.04) return "4:5";
+    if (Math.abs(r - 21 / 9) < 0.06) return "21:9";
+    return "other";
+  };
+  const filteredTemplates = useMemo(() => {
+    const q = tplSearch.trim().toLowerCase();
+    return TEMPLATES.filter((tpl) => {
+      if (tplAspect !== "all") {
+        if (aspectLabelOf(tpl.canvasWidth, tpl.canvasHeight) !== tplAspect) return false;
+      }
+      if (!q) return true;
+      return (
+        tpl.name.toLowerCase().includes(q) ||
+        tpl.description.toLowerCase().includes(q) ||
+        tpl.key.toLowerCase().includes(q)
+      );
+    });
+  }, [tplSearch, tplAspect]);
+  const visibleTemplates = filteredTemplates.slice(0, tplLimit);
   const [textInput, setTextInput] = useState("Your title here");
   const [textPresetCategory, setTextPresetCategory] = useState<TextPresetCategory | "All">("All");
   const filteredTextPresets: TextPreset[] = textPresetCategory === "All"
@@ -833,55 +863,107 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
       )}
 
       {activeTab === "templates" && (
-        <div className="flex flex-col flex-1 overflow-y-auto p-2 space-y-2">
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Project Templates</p>
-          <p className="text-[10px] text-muted-foreground leading-relaxed">
-            Start from a ready-made layout. This <strong>replaces your current timeline</strong> — your imported media stays in the library so you can drop it into the empty slots.
-          </p>
-          <div className="space-y-1.5">
-            {TEMPLATES.map((tpl) => {
-              const aspect = tpl.canvasWidth / tpl.canvasHeight;
-              const aspectLabel = aspect > 1.1 ? "16:9" : aspect < 0.9 ? "9:16" : "1:1";
-              return (
+          <div className="flex flex-col flex-1 overflow-y-auto p-2 space-y-2">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+              Project Templates · {TEMPLATES.length.toLocaleString()}
+            </p>
+            <p className="text-[10px] text-muted-foreground leading-relaxed">
+              Start from a ready-made layout. This <strong>replaces your current timeline</strong> — your imported media stays in the library so you can drop it into the empty slots.
+            </p>
+            <Input
+              value={tplSearch}
+              onChange={(e) => {
+                setTplSearch(e.target.value);
+                setTplLimit(60);
+              }}
+              placeholder="Search templates (sale, podcast, vertical, …)"
+              className="h-7 text-xs"
+              data-testid="template-search"
+            />
+            <div className="flex flex-wrap gap-1">
+              {(["all", "9:16", "1:1", "16:9", "4:5", "21:9"] as const).map((a) => (
                 <button
-                  key={tpl.key}
-                  className="w-full flex items-start gap-2 p-2 rounded-md border border-border bg-muted/20 hover:bg-muted/40 hover:border-primary/40 text-left transition-colors group"
+                  key={a}
                   onClick={() => {
-                    if (state.clips.length > 0) {
-                      const ok = window.confirm(`Apply "${tpl.name}" template? This will replace your current timeline (your media library is kept).`);
-                      if (!ok) return;
-                    }
-                    dispatch({ type: "APPLY_TEMPLATE", payload: { templateKey: tpl.key } });
+                    setTplAspect(a);
+                    setTplLimit(60);
                   }}
-                  data-testid={`template-${tpl.key}`}
-                  title={tpl.description}
+                  className={cn(
+                    "text-[10px] px-2 py-0.5 rounded border transition-colors",
+                    tplAspect === a
+                      ? "bg-primary/20 border-primary/50 text-foreground"
+                      : "bg-muted/20 border-border hover:bg-muted/40",
+                  )}
+                  data-testid={`template-aspect-${a}`}
                 >
-                  <div
-                    className="shrink-0 w-12 rounded bg-gradient-to-br from-primary/30 to-primary/10 border border-white/10 flex items-center justify-center text-lg"
-                    style={{
-                      aspectRatio: `${tpl.canvasWidth}/${tpl.canvasHeight}`,
-                      maxHeight: 56,
-                    }}
-                  >
-                    <span aria-hidden>{tpl.emoji}</span>
-                  </div>
-                  <div className="flex-1 min-w-0 space-y-0.5">
-                    <div className="flex items-center gap-1.5">
-                      <Layout className="w-3 h-3 text-primary shrink-0" />
-                      <span className="text-xs font-medium text-foreground truncate">{tpl.name}</span>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground leading-snug line-clamp-2">{tpl.description}</p>
-                    <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground">
-                      <span className="px-1 py-px rounded bg-white/5">{aspectLabel}</span>
-                      <span>·</span>
-                      <span>{tpl.duration}s</span>
-                    </div>
-                  </div>
+                  {a === "all" ? "All" : a}
                 </button>
-              );
-            })}
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              {filteredTemplates.length.toLocaleString()} match{filteredTemplates.length === 1 ? "" : "es"}
+              {filteredTemplates.length > visibleTemplates.length ? ` · showing ${visibleTemplates.length}` : ""}
+            </p>
+            <div className="space-y-1.5">
+              {visibleTemplates.map((tpl) => {
+                const a = aspectLabelOf(tpl.canvasWidth, tpl.canvasHeight);
+                const aspectLabel = a === "other" ? `${tpl.canvasWidth}×${tpl.canvasHeight}` : a;
+                return (
+                  <button
+                    key={tpl.key}
+                    className="w-full flex items-start gap-2 p-2 rounded-md border border-border bg-muted/20 hover:bg-muted/40 hover:border-primary/40 text-left transition-colors group"
+                    onClick={() => {
+                      if (state.clips.length > 0) {
+                        const ok = window.confirm(`Apply "${tpl.name}" template? This will replace your current timeline (your media library is kept).`);
+                        if (!ok) return;
+                      }
+                      dispatch({ type: "APPLY_TEMPLATE", payload: { templateKey: tpl.key } });
+                    }}
+                    data-testid={`template-${tpl.key}`}
+                    title={tpl.description}
+                  >
+                    <div
+                      className="shrink-0 w-12 rounded bg-gradient-to-br from-primary/30 to-primary/10 border border-white/10 flex items-center justify-center text-lg"
+                      style={{
+                        aspectRatio: `${tpl.canvasWidth}/${tpl.canvasHeight}`,
+                        maxHeight: 56,
+                      }}
+                    >
+                      <span aria-hidden>{tpl.emoji}</span>
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <Layout className="w-3 h-3 text-primary shrink-0" />
+                        <span className="text-xs font-medium text-foreground truncate">{tpl.name}</span>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground leading-snug line-clamp-2">{tpl.description}</p>
+                      <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground">
+                        <span className="px-1 py-px rounded bg-white/5">{aspectLabel}</span>
+                        <span>·</span>
+                        <span>{tpl.duration}s</span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            {filteredTemplates.length > visibleTemplates.length ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-[11px]"
+                onClick={() => setTplLimit((n) => n + 60)}
+                data-testid="template-load-more"
+              >
+                Load more ({filteredTemplates.length - visibleTemplates.length} left)
+              </Button>
+            ) : null}
+            {filteredTemplates.length === 0 ? (
+              <p className="text-[10px] text-muted-foreground italic text-center py-6">
+                No templates match — try a different search or aspect ratio.
+              </p>
+            ) : null}
           </div>
-        </div>
       )}
 
       {activeTab === "gallery" && gallerySubTab === "saved" && (

@@ -78,6 +78,357 @@ const baseTracks = [
   { id: "track-video", name: "Main", type: "video" as const, muted: false, hidden: false, locked: false },
   { id: "track-audio", name: "Audio", type: "audio" as const, muted: false, hidden: false, locked: false },
 ];
+// ──────────────────────────────────────────────────────────────────────────
+// Bulk template generator. Cross-multiplies a fixed pool of "categories"
+// against the five most common output aspect ratios so the user has a
+// large, browseable catalog without us having to hand-author 1,500 entries.
+//
+//   5 aspect ratios × 25 themed categories × 12 title variants  = 1,500
+//
+// Each generated template is a `buildTitleTpl` (single backdrop + big title
+// + optional subtitle + a colored visual FX) — the same proven layout used
+// elsewhere in this file. All sizes/positions are normalized so the same
+// definition produces a sensible result for every aspect ratio.
+// ──────────────────────────────────────────────────────────────────────────
+
+const BULK_ASPECTS: { key: string; w: number; h: number; label: string }[] = [
+  { key: "v",   w: 1080, h: 1920, label: "9:16" },
+  { key: "sq",  w: 1080, h: 1080, label: "1:1" },
+  { key: "ld",  w: 1920, h: 1080, label: "16:9" },
+  { key: "p45", w: 1080, h: 1350, label: "4:5" },
+  { key: "ult", w: 2560, h: 1080, label: "21:9" },
+];
+
+const FX_CYCLE = ["glow", "vignette", "tint", "scanlines", "shake"] as const;
+
+interface BulkCategory {
+  cat: string;
+  pretty: string;
+  emoji: string;
+  /** ~12 title strings (use \n for line breaks). */
+  titles: string[];
+  /** Subtitles that pair with each title (cycled). */
+  subtitles: string[];
+  /** Palette swatches: bg + titleColor + fxColor. */
+  palette: { bg: string; titleColor: string; fxColor: string }[];
+}
+
+const BULK_CATEGORIES: BulkCategory[] = [
+  {
+    cat: "sale", pretty: "Sale", emoji: "🔥",
+    titles: ["50%\nOFF", "70%\nOFF", "FLASH\nSALE", "MEGA\nDEAL", "BUY 1\nGET 1", "DOOR-\nBUSTERS", "LIMITED\nTIME", "CLEAR-\nANCE", "SUMMER\nSALE", "BLACK\nFRIDAY", "CYBER\nMONDAY", "FINAL\nHOURS"],
+    subtitles: ["Today only — ends midnight", "While supplies last", "Use code SAVE at checkout", "Tap to shop", "Sitewide discount", "No code needed"],
+    palette: [
+      { bg: "#7f1d1d", titleColor: "#fef9c3", fxColor: "#dc2626" },
+      { bg: "#0c0a09", titleColor: "#facc15", fxColor: "#facc15" },
+      { bg: "#1e1b4b", titleColor: "#a78bfa", fxColor: "#a78bfa" },
+      { bg: "#831843", titleColor: "#fde68a", fxColor: "#fb7185" },
+    ],
+  },
+  {
+    cat: "launch", pretty: "Launch", emoji: "🚀",
+    titles: ["NEW\nDROP", "INTRO-\nDUCING", "JUST\nLANDED", "LAUNCH\nDAY", "PRE-\nORDER", "FIRST\nLOOK", "AVAIL-\nABLE NOW", "MEET\nAURORA", "VERSION\n2.0", "BIG\nNEWS", "FRESH\nDESIGN", "SHIPPING\nNOW"],
+    subtitles: ["Available worldwide", "Reserve your spot", "Now in beta", "Limited inventory", "Free shipping included", "Be the first to try"],
+    palette: [
+      { bg: "#082f49", titleColor: "#fff", fxColor: "#0ea5e9" },
+      { bg: "#1d4ed8", titleColor: "#fff", fxColor: "#60a5fa" },
+      { bg: "#020617", titleColor: "#22d3ee", fxColor: "#22d3ee" },
+      { bg: "#0f172a", titleColor: "#a5f3fc", fxColor: "#06b6d4" },
+    ],
+  },
+  {
+    cat: "event", pretty: "Event", emoji: "📅",
+    titles: ["SAVE\nTHE DATE", "OCT\n12", "NOV\n02", "DEC\n31", "MAR\n15", "JOIN US\nLIVE", "RSVP\nTODAY", "HAPPENING\nFRIDAY", "MEETUP\nTONIGHT", "CONF\n2026", "FESTIVAL\nWEEKEND", "DOORS\nOPEN"],
+    subtitles: ["Brooklyn · 7pm", "Online & free", "Limited seats — book now", "Headlining act announced", "Tickets at link in bio", "Catering provided"],
+    palette: [
+      { bg: "#831843", titleColor: "#fde68a", fxColor: "#f43f5e" },
+      { bg: "#3b0764", titleColor: "#fde68a", fxColor: "#a855f7" },
+      { bg: "#0f766e", titleColor: "#a7f3d0", fxColor: "#10b981" },
+      { bg: "#0c0a09", titleColor: "#fcd34d", fxColor: "#facc15" },
+    ],
+  },
+  {
+    cat: "quote", pretty: "Quote", emoji: "💬",
+    titles: ["“STAY\nHUNGRY.”", "“DREAM\nBIG.”", "“KEEP\nGOING.”", "“BE\nKIND.”", "“DO\nLESS.”", "“START\nNOW.”", "“TRUST\nTHE WORK.”", "“SHIP\nIT.”", "“LESS IS\nMORE.”", "“GROW\nDAILY.”", "“DONE >\nPERFECT.”", "“OWN\nIT.”"],
+    subtitles: ["— Anonymous", "— Daily reminder", "— A gentle nudge", "— Your future self", "— Worth repeating", "— A small truth"],
+    palette: [
+      { bg: "#0f172a", titleColor: "#fff", fxColor: "#64748b" },
+      { bg: "#111827", titleColor: "#fde68a", fxColor: "#facc15" },
+      { bg: "#1c1917", titleColor: "#fef3c7", fxColor: "#fbbf24" },
+      { bg: "#020617", titleColor: "#a5f3fc", fxColor: "#22d3ee" },
+    ],
+  },
+  {
+    cat: "tutorial", pretty: "Tutorial", emoji: "📚",
+    titles: ["HOW IT\nWORKS", "STEP-\nBY-STEP", "QUICK\nGUIDE", "60-SEC\nTIP", "DAY 1\nBASICS", "PRO\nTIPS", "5\nMISTAKES", "DEEP\nDIVE", "CHEAT\nSHEET", "MASTER\nIT", "TUTORIAL\nINSIDE", "WATCH &\nLEARN"],
+    subtitles: ["A 60-second walkthrough", "Save this for later", "Beginner-friendly", "Read the captions", "Notes in description", "Try along with us"],
+    palette: [
+      { bg: "#0f766e", titleColor: "#fff", fxColor: "#5eead4" },
+      { bg: "#1d4ed8", titleColor: "#fff", fxColor: "#60a5fa" },
+      { bg: "#0c4a6e", titleColor: "#a5f3fc", fxColor: "#0ea5e9" },
+      { bg: "#1e293b", titleColor: "#fff", fxColor: "#94a3b8" },
+    ],
+  },
+  {
+    cat: "bts", pretty: "BTS", emoji: "🎬",
+    titles: ["BEHIND\nTHE SCENES", "DAY\n03", "ON\nSET", "RAW\nFOOTAGE", "SET\nLIFE", "CREW\nCALL", "SHOOT\nDAY", "TAKE\nFIVE", "B-ROLL\nBLITZ", "PROCESS\nNOTES", "MAKING\nOF…", "OFF\nCAMERA"],
+    subtitles: ["Day 3 on set", "How the magic happens", "Cut from the final edit", "Notes from the director", "First-take perfection", "We didn't plan this"],
+    palette: [
+      { bg: "#1c1917", titleColor: "#fff", fxColor: "#a8a29e" },
+      { bg: "#0c0a09", titleColor: "#fbbf24", fxColor: "#f59e0b" },
+      { bg: "#27272a", titleColor: "#fff", fxColor: "#71717a" },
+      { bg: "#1e1b4b", titleColor: "#a5b4fc", fxColor: "#818cf8" },
+    ],
+  },
+  {
+    cat: "recipe", pretty: "Recipe", emoji: "🍳",
+    titles: ["MISO\nRAMEN", "AVOCADO\nTOAST", "CACIO\nE PEPE", "GREEK\nSALAD", "BERRY\nGRANOLA", "CRISPY\nTOFU", "SPICY\nNOODLES", "CHOCO\nMUG CAKE", "SUNDAY\nROAST", "5-MIN\nSMOOTHIE", "PROTEIN\nBOWL", "ICED\nMATCHA"],
+    subtitles: ["Ready in 25 minutes", "Serves two", "One pan, no fuss", "Vegan & gluten-free", "Kid-approved", "Pantry staples only"],
+    palette: [
+      { bg: "#fef3c7", titleColor: "#7c2d12", fxColor: "#facc15" },
+      { bg: "#1c1917", titleColor: "#fde68a", fxColor: "#f59e0b" },
+      { bg: "#7c2d12", titleColor: "#fef3c7", fxColor: "#fb923c" },
+      { bg: "#0f172a", titleColor: "#fff", fxColor: "#fbbf24" },
+    ],
+  },
+  {
+    cat: "fitness", pretty: "Fitness", emoji: "💪",
+    titles: ["20 MIN\nHIIT", "LEG\nDAY", "PUSH\nDAY", "PULL\nDAY", "AB\nBURNER", "MOBILITY\nFLOW", "5K\nCHALLENGE", "FULL\nBODY", "MORNING\nROUTINE", "BURPEE\nGAUNTLET", "REST\nDAY", "GAME\nDAY"],
+    subtitles: ["No equipment · Full body", "Beginner-friendly", "Track your reps", "Stretch first", "Hydrate halfway", "Push your limits"],
+    palette: [
+      { bg: "#0c0a09", titleColor: "#f97316", fxColor: "#f97316" },
+      { bg: "#1e1b4b", titleColor: "#fff", fxColor: "#a78bfa" },
+      { bg: "#020617", titleColor: "#22d3ee", fxColor: "#22d3ee" },
+      { bg: "#7f1d1d", titleColor: "#fef9c3", fxColor: "#dc2626" },
+    ],
+  },
+  {
+    cat: "realestate", pretty: "Listing", emoji: "🏠",
+    titles: ["JUST\nLISTED", "OPEN\nHOUSE", "PRICE\nDROP", "JUST\nSOLD", "PENDING\nOFFER", "BACK ON\nMARKET", "COMING\nSOON", "TOUR\nTODAY", "MODERN\nLIVING", "OCEAN\nVIEW", "DOWN-\nTOWN GEM", "FAMILY\nHOME"],
+    subtitles: ["3 bd · 2 ba · $785k", "Sat & Sun · 1pm–4pm", "Just reduced — schedule a tour", "Listed by Jane Doe Realty", "Hardwoods throughout", "Walk to everything"],
+    palette: [
+      { bg: "#0c4a6e", titleColor: "#fff", fxColor: "#0ea5e9" },
+      { bg: "#0f172a", titleColor: "#fcd34d", fxColor: "#facc15" },
+      { bg: "#064e3b", titleColor: "#a7f3d0", fxColor: "#10b981" },
+      { bg: "#1c1917", titleColor: "#fff", fxColor: "#a8a29e" },
+    ],
+  },
+  {
+    cat: "wellness", pretty: "Wellness", emoji: "🧘",
+    titles: ["BREATHE", "PAUSE", "RESET", "STILL-\nNESS", "GRATI-\nTUDE", "SLOW\nDOWN", "DAILY\nRITUAL", "MORNING\nMOMENT", "WIND\nDOWN", "JUST\nBE", "CALM\nMIND", "SOFT\nDAY"],
+    subtitles: ["Inhale · 4 · Hold · 4 · Exhale · 4", "Take five for yourself", "A pocket of quiet", "10 minutes is enough", "Hydrate · Stretch · Smile", "You've earned this"],
+    palette: [
+      { bg: "#134e4a", titleColor: "#a7f3d0", fxColor: "#5eead4" },
+      { bg: "#0f172a", titleColor: "#a5f3fc", fxColor: "#22d3ee" },
+      { bg: "#1e1b4b", titleColor: "#c4b5fd", fxColor: "#a78bfa" },
+      { bg: "#7c2d12", titleColor: "#fef3c7", fxColor: "#fbbf24" },
+    ],
+  },
+  {
+    cat: "podcast", pretty: "Podcast", emoji: "🎙️",
+    titles: ["DEEP\nDIVE", "EP\n014", "GUEST\nDROP", "NEW\nEPISODE", "LISTEN\nNOW", "HOT\nTAKES", "FIRESIDE\nCHAT", "AFTER\nHOURS", "STORY\nTIME", "WEEKLY\nROUNDUP", "Q&A\nSPECIAL", "SEASON\nFINALE"],
+    subtitles: ["Available everywhere podcasts live", "Featuring Dr. Priya Patel", "Subscribe for weekly drops", "Tap the link in bio", "60 minutes of insight", "Bonus content for members"],
+    palette: [
+      { bg: "#3b0764", titleColor: "#fde68a", fxColor: "#a855f7" },
+      { bg: "#0f172a", titleColor: "#fff", fxColor: "#60a5fa" },
+      { bg: "#1c1917", titleColor: "#fde68a", fxColor: "#facc15" },
+      { bg: "#0c0a09", titleColor: "#fff", fxColor: "#a78bfa" },
+    ],
+  },
+  {
+    cat: "news", pretty: "News", emoji: "📺",
+    titles: ["BREAKING\nNEWS", "LIVE\nNOW", "JUST\nIN", "DEVELOP-\nING", "EXCLUSIVE", "UPDATED\nSTORY", "MARKETS\nMOVE", "WEATHER\nALERT", "TOP\nSTORY", "ANALYSIS", "FACT\nCHECK", "ON THE\nGROUND"],
+    subtitles: ["Live · Right now", "Reporting from Brooklyn", "Story developing", "Updated 5 min ago", "Sources confirm", "Watch our full coverage"],
+    palette: [
+      { bg: "#7f1d1d", titleColor: "#fff", fxColor: "#dc2626" },
+      { bg: "#0c0a09", titleColor: "#facc15", fxColor: "#facc15" },
+      { bg: "#0f172a", titleColor: "#fff", fxColor: "#3b82f6" },
+      { bg: "#1c1917", titleColor: "#fef3c7", fxColor: "#fb923c" },
+    ],
+  },
+  {
+    cat: "travel", pretty: "Travel", emoji: "✈️",
+    titles: ["TOKYO\nDAY 4", "PARIS\nIN SPRING", "BALI\nVIBES", "ROADTRIP\nUSA", "ALPS\nADVENTURE", "ISLAND\nESCAPE", "CITY\nLIGHTS", "HIDDEN\nGEMS", "WEEKEND\nIN ROME", "DESERT\nDAYS", "JUNGLE\nTREK", "AIRPORT\nVIBES"],
+    subtitles: ["Day 4 of 12", "Sights · Bites · Stories", "Bookmark for later", "Off the beaten path", "Sunrise hike included", "Pack light, fly far"],
+    palette: [
+      { bg: "#0c0a09", titleColor: "#fde68a", fxColor: "#facc15" },
+      { bg: "#0c4a6e", titleColor: "#a5f3fc", fxColor: "#22d3ee" },
+      { bg: "#7c2d12", titleColor: "#fef3c7", fxColor: "#fb923c" },
+      { bg: "#0f172a", titleColor: "#fff", fxColor: "#60a5fa" },
+    ],
+  },
+  {
+    cat: "wedding", pretty: "Wedding", emoji: "💍",
+    titles: ["SAVE\nTHE DATE", "WE\nDO!", "M & J", "FOR-\nEVER", "JUST\nMARRIED", "ENGAGED!", "OUR\nDAY", "SAY YES", "VOWS\n& KISSES", "FIRST\nDANCE", "TILL\nFOREVER", "CHEERS\nTO US"],
+    subtitles: ["June 14, 2026", "Reception details inside", "Black-tie · evening", "RSVP by April 1", "Plus-one welcome", "Hashtag #MJforever"],
+    palette: [
+      { bg: "#fef3c7", titleColor: "#7c2d12", fxColor: "#facc15" },
+      { bg: "#1c1917", titleColor: "#fde68a", fxColor: "#fbbf24" },
+      { bg: "#fdf2f8", titleColor: "#831843", fxColor: "#f9a8d4" },
+      { bg: "#0f172a", titleColor: "#fff", fxColor: "#fbcfe8" },
+    ],
+  },
+  {
+    cat: "birthday", pretty: "Birthday", emoji: "🎂",
+    titles: ["HAPPY\nBIRTHDAY", "BIG\nTHREE-OH", "SWEET\nSIXTEEN", "PARTY\nTONIGHT", "MAKE A\nWISH", "ANOTHER\nTRIP", "B-DAY\nBASH", "CAKE\nTIME", "LET'S\nCELEBRATE", "BIRTHDAY\nGIRL", "BIRTHDAY\nBOY", "SLAY\nTHE DAY"],
+    subtitles: ["Cheers to many more", "Doors open at 8pm", "Cake will happen", "Bring your best moves", "Rooftop · 21+", "Surprise party — shhh"],
+    palette: [
+      { bg: "#831843", titleColor: "#fde68a", fxColor: "#f9a8d4" },
+      { bg: "#0c0a09", titleColor: "#facc15", fxColor: "#fbbf24" },
+      { bg: "#1d4ed8", titleColor: "#fff", fxColor: "#60a5fa" },
+      { bg: "#3b0764", titleColor: "#fde68a", fxColor: "#a855f7" },
+    ],
+  },
+  {
+    cat: "music", pretty: "Music", emoji: "🎵",
+    titles: ["NEW\nSINGLE", "ALBUM\nOUT NOW", "TOUR\n2026", "OUT\nFRIDAY", "PRE-\nSAVE", "MUSIC\nVIDEO", "STUDIO\nSESSION", "VINYL\nDROP", "ON\nREPEAT", "LIVE\nSESSION", "REMIX\nINCOMING", "ENCORE!"],
+    subtitles: ["Stream everywhere now", "Pre-save on Spotify", "Tour dates in bio", "Vinyl drops next week", "Acoustic version included", "Headphones recommended"],
+    palette: [
+      { bg: "#020617", titleColor: "#22d3ee", fxColor: "#22d3ee" },
+      { bg: "#3b0764", titleColor: "#fde68a", fxColor: "#a855f7" },
+      { bg: "#0f172a", titleColor: "#fff", fxColor: "#f43f5e" },
+      { bg: "#1c1917", titleColor: "#fcd34d", fxColor: "#facc15" },
+    ],
+  },
+  {
+    cat: "teaser", pretty: "Teaser", emoji: "👀",
+    titles: ["SOMETHING\nIS COMING", "TICK\nTOCK", "STAY\nTUNED", "GET\nREADY", "ALMOST\nHERE", "BIG\nREVEAL", "SECRET\nPROJECT", "CLOSER\nTHAN EVER", "WAIT\nFOR IT", "WHAT IF…", "DON'T\nBLINK", "THE\nCOUNTDOWN"],
+    subtitles: ["Drops next Friday", "Subscribe to be the first", "More details soon", "You won't want to miss this", "Set a reminder", "Reveal at 9am PT"],
+    palette: [
+      { bg: "#020617", titleColor: "#22d3ee", fxColor: "#22d3ee" },
+      { bg: "#0f172a", titleColor: "#a5f3fc", fxColor: "#06b6d4" },
+      { bg: "#1c1917", titleColor: "#fde68a", fxColor: "#facc15" },
+      { bg: "#3b0764", titleColor: "#a5b4fc", fxColor: "#a78bfa" },
+    ],
+  },
+  {
+    cat: "soon", pretty: "Coming Soon", emoji: "⏳",
+    titles: ["COMING\nSOON", "T-MINUS\n10", "T-MINUS\n3 DAYS", "OPENING\nFRIDAY", "DOORS\nSOON", "ALMOST\nREADY", "ARRIVING\nSPRING", "DROP\nINCOMING", "LIVE\nSHORTLY", "WAITLIST\nOPEN", "BETA\nSOON", "LAUNCH\nWEEK"],
+    subtitles: ["Mark your calendar", "Sign up for early access", "Limited release", "Notifications open", "First in line — first served", "Big things ahead"],
+    palette: [
+      { bg: "#020617", titleColor: "#22d3ee", fxColor: "#22d3ee" },
+      { bg: "#0c0a09", titleColor: "#facc15", fxColor: "#facc15" },
+      { bg: "#1d4ed8", titleColor: "#fff", fxColor: "#60a5fa" },
+      { bg: "#0f172a", titleColor: "#fde68a", fxColor: "#fbbf24" },
+    ],
+  },
+  {
+    cat: "thanks", pretty: "Thank You", emoji: "🙏",
+    titles: ["THANK\nYOU", "MUCH\nLOVE", "GRATEFUL", "WE\nDID IT", "1K\nSTRONG", "10K\nFAMILY", "100K!!", "1M\nMILESTONE", "FROM US\nTO YOU", "CHEERS\nFRIENDS", "WITH\nLOVE", "MERCI\n!"],
+    subtitles: ["For watching", "For being here", "For sharing", "For the support", "Couldn't do it without you", "More to come"],
+    palette: [
+      { bg: "#7c2d12", titleColor: "#fef3c7", fxColor: "#fb923c" },
+      { bg: "#0f172a", titleColor: "#fff", fxColor: "#22d3ee" },
+      { bg: "#1c1917", titleColor: "#fde68a", fxColor: "#facc15" },
+      { bg: "#1e1b4b", titleColor: "#c4b5fd", fxColor: "#a78bfa" },
+    ],
+  },
+  {
+    cat: "subscribe", pretty: "Subscribe", emoji: "🔔",
+    titles: ["SUB-\nSCRIBE", "FOLLOW\nFOR MORE", "HIT THE\nBELL", "JOIN US", "LIKE +\nSHARE", "SAVE\nTHIS", "SHARE\nWITH A FRIEND", "NEW\nWEEKLY", "DAILY\nDROPS", "DON'T\nMISS OUT", "TURN ON\nNOTIFS", "STAY\nLOOPED"],
+    subtitles: ["Hit the bell for more", "Free · weekly · always", "Tap the link in bio", "Join 50,000+ readers", "Built for creators", "It's good — promise"],
+    palette: [
+      { bg: "#7f1d1d", titleColor: "#fff", fxColor: "#ef4444" },
+      { bg: "#0f172a", titleColor: "#fff", fxColor: "#3b82f6" },
+      { bg: "#0c0a09", titleColor: "#facc15", fxColor: "#facc15" },
+      { bg: "#1c1917", titleColor: "#fff", fxColor: "#a3e635" },
+    ],
+  },
+  {
+    cat: "tech", pretty: "Tech", emoji: "💻",
+    titles: ["NEW\nGADGET", "UNBOXING", "REVIEW\nINSIDE", "5 STAR\nDEVICE", "FIRST\nIMPRESSIONS", "DEVICE\nTOUR", "VS\nCOMPARED", "WORTH\nIT?", "FEATURE\nDROP", "SETUP\nGUIDE", "PERFORM-\nANCE TEST", "DEEP\nREVIEW"],
+    subtitles: ["Specs and impressions", "Hands-on demo", "Watch before you buy", "Honest review inside", "Pros & cons", "Field-tested for two weeks"],
+    palette: [
+      { bg: "#0f172a", titleColor: "#fff", fxColor: "#3b82f6" },
+      { bg: "#020617", titleColor: "#22d3ee", fxColor: "#22d3ee" },
+      { bg: "#1c1917", titleColor: "#fff", fxColor: "#a8a29e" },
+      { bg: "#1e1b4b", titleColor: "#a5b4fc", fxColor: "#818cf8" },
+    ],
+  },
+  {
+    cat: "beauty", pretty: "Beauty", emoji: "💄",
+    titles: ["GLOW\nUP", "GET\nREADY", "DAILY\nROUTINE", "SOFT\nGLAM", "SKIN\nFIRST", "BOLD\nLIPS", "EYE\nLOOK", "5 STEP\nSKINCARE", "HAIR\nGOALS", "SUMMER\nGLOW", "PRODUCT\nHAUL", "GET THE\nLOOK"],
+    subtitles: ["Step-by-step routine", "Linked in bio", "Cruelty-free picks", "Drugstore approved", "Editor's favorites", "Save for later"],
+    palette: [
+      { bg: "#fdf2f8", titleColor: "#831843", fxColor: "#f9a8d4" },
+      { bg: "#0c0a09", titleColor: "#fde68a", fxColor: "#facc15" },
+      { bg: "#1c1917", titleColor: "#fff", fxColor: "#fb7185" },
+      { bg: "#7c2d12", titleColor: "#fef3c7", fxColor: "#fbbf24" },
+    ],
+  },
+  {
+    cat: "gaming", pretty: "Gaming", emoji: "🎮",
+    titles: ["LIVE\nNOW", "STREAM\nSTARTING", "GG!", "VICTORY\nROYALE", "SPEED\nRUN", "CLUTCH\nMOMENT", "NEW\nCONTENT", "RANKED\nGRIND", "PATCH\nNOTES", "WORLD\nRECORD", "BOSS\nFIGHT", "TOP\nPLAYS"],
+    subtitles: ["Twitch · twitch.tv/you", "Hang out — chat is open", "First to victory", "Pro tips inside", "Subscribe for daily drops", "Patch dropping tonight"],
+    palette: [
+      { bg: "#1e1b4b", titleColor: "#a5b4fc", fxColor: "#a78bfa" },
+      { bg: "#020617", titleColor: "#22d3ee", fxColor: "#22d3ee" },
+      { bg: "#7f1d1d", titleColor: "#fef9c3", fxColor: "#dc2626" },
+      { bg: "#0c0a09", titleColor: "#a3e635", fxColor: "#84cc16" },
+    ],
+  },
+  {
+    cat: "holiday", pretty: "Holiday", emoji: "🎄",
+    titles: ["HAPPY\nHOLIDAYS", "MERRY\nXMAS", "NEW\nYEAR", "HALLO-\nWEEN", "JOY &\nLOVE", "FROM US\nTO YOU", "SEASON'S\nGREETINGS", "CHEERS\n2026", "FALL\nVIBES", "WINTER\nWONDER", "HARVEST\nFEST", "EID\nMUBARAK"],
+    subtitles: ["From our team", "May yours be merry", "Cheers to a great year", "Wishing you the best", "Eat, drink, repeat", "Stay cozy"],
+    palette: [
+      { bg: "#7f1d1d", titleColor: "#fef9c3", fxColor: "#dc2626" },
+      { bg: "#0f766e", titleColor: "#a7f3d0", fxColor: "#5eead4" },
+      { bg: "#0c0a09", titleColor: "#facc15", fxColor: "#facc15" },
+      { bg: "#1e1b4b", titleColor: "#fde68a", fxColor: "#a78bfa" },
+    ],
+  },
+  {
+    cat: "recap", pretty: "Recap", emoji: "📈",
+    titles: ["YEAR IN\nREVIEW", "2025\nRECAP", "Q4\nSUMMARY", "WEEK IN\nREVIEW", "TOP\nMOMENTS", "BEST\nOF…", "MILE-\nSTONES", "FAVES\nLIST", "MONTHLY\nROUND-UP", "ANNUAL\nWRAP", "BIG\nWINS", "CHAPTER\nCLOSED"],
+    subtitles: ["Highlights from the year", "Top 10 moments", "Numbers that matter", "Looking back, moving forward", "Onwards & upwards", "Cheers to next year"],
+    palette: [
+      { bg: "#0f172a", titleColor: "#fff", fxColor: "#22d3ee" },
+      { bg: "#1e1b4b", titleColor: "#fde68a", fxColor: "#a78bfa" },
+      { bg: "#7c2d12", titleColor: "#fef3c7", fxColor: "#fb923c" },
+      { bg: "#0c0a09", titleColor: "#facc15", fxColor: "#facc15" },
+    ],
+  },
+];
+
+function buildBulkTemplates(): VideoTemplate[] {
+  const out: VideoTemplate[] = [];
+  for (const a of BULK_ASPECTS) {
+    for (const cat of BULK_CATEGORIES) {
+      for (let i = 0; i < cat.titles.length; i++) {
+        const pal = cat.palette[i % cat.palette.length];
+        const sub = cat.subtitles[i % cat.subtitles.length];
+        // Pick FX deterministically per (category, index) so similar cards
+        // don't all share the same effect.
+        const fx = FX_CYCLE[(cat.cat.length + i) % FX_CYCLE.length];
+        // Title font sizing scales with the longest line so multi-line text
+        // never overflows the box. Landscape = wider, so smaller default.
+        const longestLine = cat.titles[i].split("\n").reduce((m, s) => Math.max(m, s.length), 1);
+        const baseSize = a.w >= a.h ? 200 : 240;
+        const titleSize = Math.max(80, Math.round(baseSize * Math.min(1.2, 7 / longestLine)));
+        out.push(
+          buildTitleTpl({
+            key: `bulk-${a.key}-${cat.cat}-${i}`,
+            name: `${cat.pretty} ${i + 1} · ${a.label}`,
+            description: `${cat.titles[i].replace(/\n/g, " ")} — ${a.w}×${a.h}.`,
+            emoji: cat.emoji,
+            width: a.w,
+            height: a.h,
+            duration: 8,
+            bg: pal.bg,
+            title: cat.titles[i],
+            titleColor: pal.titleColor,
+            titleSize,
+            subtitle: sub,
+            fxType: fx,
+            fxColor: pal.fxColor,
+          }),
+        );
+      }
+    }
+  }
+  return out;
+}
 
 export const TEMPLATES: VideoTemplate[] = [
   {
@@ -695,8 +1046,12 @@ function buildExtendedTemplates(): VideoTemplate[] {
     buildSlideshowTpl({ key: "promo-luxe",  name: "Luxe Reveal",      description: "Slow elegant 16:9 luxury product reveal.",     emoji: "💎", width: 1920, height: 1080, bg: "#000", slots: 3, slotDuration: 4, transition: "fade", intro: "INTRODUCING", outro: "AVAILABLE NOW", palette: ["#fde68a", "#fff", "#fcd34d"] }),
     buildTitleTpl({ key: "promo-coupon",   name: "Coupon Code",       description: "Square coupon code blast with shake.",         emoji: "🎟️", width: 1080, height: 1080, bg: "#0c0a09", title: "USE CODE\nFLOW20", titleColor: "#fde68a", titleSize: 170, subtitle: "20% off your first order", fxType: "shake" }),
     buildTitleTpl({ key: "promo-launch",   name: "Launch Day",        description: "Vertical launch-day countdown card.",          emoji: "🎉", width: 1080, height: 1920, bg: "#1e1b4b", title: "LAUNCH\nDAY", titleColor: "#fff", titleSize: 240, subtitle: "Doors open at 9am PT", fxType: "glow", fxColor: "#a855f7" }),
+
+    // ── Bulk generator: 1,500 procedurally-built templates ──────────────
+    ...buildBulkTemplates(),
   ];
 }
+
 
 export function getTemplateByKey(key: string): VideoTemplate | undefined {
   return TEMPLATES.find((t) => t.key === key);
