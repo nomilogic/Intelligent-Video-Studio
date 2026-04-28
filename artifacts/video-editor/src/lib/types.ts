@@ -556,7 +556,9 @@ export type EditorAction =
   | { type: "SPLIT_AT_PLAYHEAD" }
   | { type: "ADD_TRACK"; payload?: { type?: Track["type"]; name?: string } }
   | { type: "DELETE_TRACK"; payload: string }
+  | { type: "DUPLICATE_TRACK"; payload: string }
   | { type: "UPDATE_TRACK"; payload: { id: string; updates: Partial<Track> } }
+  | { type: "PASTE_CLIPS"; payload: { clips: Clip[]; pasteTime: number } }
   | { type: "SET_DURATION"; payload: number }
   | { type: "SET_CANVAS_SIZE"; payload: { width: number; height: number } }
   | { type: "SET_ZOOM"; payload: number }

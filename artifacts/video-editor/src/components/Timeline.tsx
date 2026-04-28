@@ -2,7 +2,7 @@ import { useRef, useCallback, useState, useEffect, useMemo } from "react";
 import {
   Play, Pause, Square, Plus, ChevronRight, Scissors, Magnet,
   Eye, EyeOff, Volume2, VolumeX, Lock, Unlock, Trash2, SkipBack, SkipForward,
-  MousePointer2, Flag, ZoomIn, ZoomOut, Diamond, Pen, Settings,
+  MousePointer2, Flag, ZoomIn, ZoomOut, Diamond, Pen, Settings, Copy,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
@@ -640,6 +640,13 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
                   title={track.locked ? "Unlock" : "Lock"}
                 >
                   {track.locked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                </button>
+                <button
+                  className="opacity-0 group-hover:opacity-50 hover:!opacity-100"
+                  onClick={() => dispatch({ type: "DUPLICATE_TRACK", payload: track.id })}
+                  title="Duplicate track"
+                >
+                  <Copy className="w-3 h-3" />
                 </button>
                 <button
                   className="opacity-0 group-hover:opacity-50 hover:!opacity-100"

@@ -779,6 +779,41 @@ function presentReducer(state: EditorState, action: EditorAction): EditorState {
           .map((c) => (c.trackIndex > idx ? { ...c, trackIndex: c.trackIndex - 1 } : c)),
       };
     }
+    case "DUPLICATE_TRACK": {
+      const srcIdx = state.tracks.findIndex((t) => t.id === action.payload);
+      if (srcIdx < 0) return state;
+      const srcTrack = state.tracks[srcIdx];
+      const newTrack = makeTrack({ name: `${srcTrack.name} copy`, type: srcTrack.type });
+      const newTrackIndex = state.tracks.length;
+      const clipsOnTrack = state.clips.filter((c) => c.trackIndex === srcIdx);
+      const newClips: Clip[] = clipsOnTrack.map((c) =>
+        makeClip({ ...c, id: uid("clip"), trackIndex: newTrackIndex, label: c.label }),
+      );
+      const newKfs = newClips.flatMap(defaultClipKeyframes);
+      return {
+        ...state,
+        tracks: [...state.tracks, newTrack],
+        clips: [...state.clips, ...newClips],
+        keyframes: [...state.keyframes, ...newKfs],
+        selectedClipIds: newClips.map((c) => c.id),
+      };
+    }
+    case "PASTE_CLIPS": {
+      const { clips: src, pasteTime } = action.payload;
+      if (!src.length) return state;
+      const minStart = Math.min(...src.map((c) => c.startTime));
+      const offset = pasteTime - minStart;
+      const newClips: Clip[] = src.map((c) =>
+        makeClip({ ...c, id: uid("clip"), startTime: c.startTime + offset, label: c.label }),
+      );
+      const newKfs = newClips.flatMap(defaultClipKeyframes);
+      return {
+        ...state,
+        clips: [...state.clips, ...newClips],
+        keyframes: [...state.keyframes, ...newKfs],
+        selectedClipIds: newClips.map((c) => c.id),
+      };
+    }
     case "UPDATE_TRACK":
       return {
         ...state,

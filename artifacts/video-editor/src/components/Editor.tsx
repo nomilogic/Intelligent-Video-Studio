@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useCallback, useState } from "react";
 import { rootReducer, initialRootState } from "@/lib/reducer";
-import type { EditorAction, EditorState } from "@/lib/types";
+import type { EditorAction, EditorState, Clip } from "@/lib/types";
 
 import Toolbar from "./Toolbar";
 import MediaPanel from "./MediaPanel";
@@ -29,6 +29,7 @@ export function Editor({ projectId, initialEditorState, projectName }: EditorPro
   const [canvasZoom, setCanvasZoom] = useState(1);
   const [isCropping, setIsCropping] = useState(false);
   const hydratedRef = useRef(false);
+  const clipboardRef = useRef<Clip[]>([]);
 
   // Hydrate the reducer when async-loaded state arrives later (e.g. switching
   // between projects).
@@ -132,6 +133,18 @@ export function Editor({ projectId, initialEditorState, projectName }: EditorPro
         if (isCropping) setIsCropping(false);
         else dispatchTyped({ type: "SELECT_CLIP", payload: null });
       }
+      else if (meta && e.key.toLowerCase() === "c") {
+        if (state.selectedClipIds.length) {
+          e.preventDefault();
+          clipboardRef.current = state.clips.filter((c) => state.selectedClipIds.includes(c.id));
+        }
+      }
+      else if (meta && e.key.toLowerCase() === "v") {
+        if (clipboardRef.current.length) {
+          e.preventDefault();
+          dispatchTyped({ type: "PASTE_CLIPS", payload: { clips: clipboardRef.current, pasteTime: state.currentTime } });
+        }
+      }
       else if (e.key.toLowerCase() === "c" && !meta && state.selectedClipIds.length) {
         const sel = state.clips.find((c) => state.selectedClipIds.includes(c.id));
         if (sel && (sel.mediaType === "video" || sel.mediaType === "image")) {
@@ -142,7 +155,7 @@ export function Editor({ projectId, initialEditorState, projectName }: EditorPro
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [state.selectedClipIds, state.currentTime, state.duration, state.zoom, dispatchTyped, isCropping]);
+  }, [state.selectedClipIds, state.currentTime, state.clips, state.duration, state.zoom, dispatchTyped, isCropping]);
 
   return (
     <div className="h-screen w-full flex flex-col bg-background text-foreground overflow-hidden">
