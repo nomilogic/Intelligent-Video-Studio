@@ -557,6 +557,7 @@ export type EditorAction =
   | { type: "ADD_TRACK"; payload?: { type?: Track["type"]; name?: string } }
   | { type: "DELETE_TRACK"; payload: string }
   | { type: "DUPLICATE_TRACK"; payload: string }
+  | { type: "REORDER_TRACK"; payload: { fromIndex: number; toIndex: number } }
   | { type: "UPDATE_TRACK"; payload: { id: string; updates: Partial<Track> } }
   | { type: "PASTE_CLIPS"; payload: { clips: Clip[]; pasteTime: number } }
   | { type: "SET_DURATION"; payload: number }

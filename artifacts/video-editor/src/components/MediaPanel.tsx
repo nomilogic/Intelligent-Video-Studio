@@ -12,9 +12,40 @@ import { PARTICLE_LIBRARY } from "../lib/particles";
 import { SPECIAL_LAYERS } from "../lib/special-layers";
 import { loadPresets, deletePreset, type CustomPreset } from "../lib/custom-library";
 import { TEXT_PRESETS as ALL_TEXT_PRESETS, TEXT_PRESET_CATEGORIES, type TextPreset, type TextPresetCategory } from "../lib/text-presets";
+import { buildMotionKeyframes } from "../lib/motion-paths";
 import { cn } from "@/lib/utils";
 
 const CLIP_COLORS = ["#3b82f6", "#8b5cf6", "#f59e0b", "#10b981", "#f43f5e", "#06b6d4", "#f97316", "#ec4899"];
+
+// Pre-configured animated text layers — each adds a styled text clip with
+// a baked-in motion path preset applied as keyframes on the timeline.
+const ANIMATED_TEXT_LAYERS: Array<{
+  key: string; label: string; emoji: string; description: string; text: string;
+  clipColor: string; animationIn: string; animationOut: string;
+  motionPath: string; x: number; y: number; w: number; h: number;
+  style: Partial<TextStyle>;
+}> = [
+  { key: "atl-rise-title",   label: "Rise Title",        emoji: "⬆️",  description: "Bold title that rises into frame",            text: "YOUR TITLE", clipColor: "#8b5cf6", animationIn: "slideUp",   animationOut: "fade", motionPath: "rise",       x: 0.05, y: 0.35, w: 0.9, h: 0.15, style: { fontFamily: "'Anton', sans-serif", fontSize: 140, fontWeight: 900, color: "#ffffff", align: "center", letterSpacing: 4 } },
+  { key: "atl-float-quote",  label: "Floating Quote",    emoji: "💬",  description: "Italic serif quote that gently floats",        text: "Words that matter.", clipColor: "#a855f7", animationIn: "fade", animationOut: "fade", motionPath: "float", x: 0.1, y: 0.38, w: 0.8, h: 0.12, style: { fontFamily: "'Cormorant Garamond', serif", fontSize: 60, fontWeight: 300, color: "#f5f0e8", align: "center", italic: true, letterSpacing: 2 } },
+  { key: "atl-neon-slide",   label: "Neon Slide",        emoji: "🌈",  description: "Neon glow text slides in from left",           text: "NEON", clipColor: "#ec4899", animationIn: "slideLeft",  animationOut: "fade", motionPath: "slide-in-l", x: 0.05, y: 0.38, w: 0.9, h: 0.15, style: { fontFamily: "'Poppins', sans-serif", fontSize: 120, fontWeight: 800, color: "#ff0099", align: "center", glow: { enabled: true, color: "#ff0099", blur: 20, intensity: 3 } } },
+  { key: "atl-lower-drift",  label: "Lower-Third Drift", emoji: "📺",  description: "Lower-third caption that drifts right",        text: "Lower Third", clipColor: "#3b82f6", animationIn: "slideLeft", animationOut: "fade", motionPath: "drift-r", x: 0.03, y: 0.78, w: 0.55, h: 0.1, style: { fontFamily: "Inter, system-ui, sans-serif", fontSize: 36, fontWeight: 600, color: "#ffffff", align: "left" } },
+  { key: "atl-retro-shake",  label: "Retro Shake",       emoji: "📼",  description: "Bold retro text with a shake motion",          text: "RETRO", clipColor: "#f97316", animationIn: "zoom",      animationOut: "fade", motionPath: "shake",      x: 0.05, y: 0.35, w: 0.9, h: 0.2, style: { fontFamily: "'Anton', sans-serif", fontSize: 160, fontWeight: 900, color: "#ff6b35", align: "center", letterSpacing: 6, stroke: { enabled: true, color: "#000000", width: 4 } } },
+  { key: "atl-cinematic",    label: "Cinematic Title",   emoji: "🎬",  description: "Wide-letter cinematic title that arcs in",      text: "DREAMSCAPE", clipColor: "#06b6d4", animationIn: "fade", animationOut: "fade", motionPath: "arc-lr", x: 0.05, y: 0.38, w: 0.9, h: 0.15, style: { fontFamily: "'Montserrat', sans-serif", fontSize: 110, fontWeight: 700, color: "#ffffff", align: "center", letterSpacing: 14 } },
+  { key: "atl-luxury",       label: "Luxury Gold",       emoji: "✨",  description: "Elegant gold serif that rises softly",         text: "LUXURY", clipColor: "#f59e0b", animationIn: "fade",     animationOut: "fade", motionPath: "drift-r",    x: 0.1, y: 0.38, w: 0.8, h: 0.15, style: { fontFamily: "'Cormorant Garamond', serif", fontSize: 100, fontWeight: 300, color: "#c9a84c", align: "center", letterSpacing: 8 } },
+  { key: "atl-gradient-arc", label: "Gradient Arc",      emoji: "🌊",  description: "Gradient headline following an arc path",      text: "GRADIENT", clipColor: "#8b5cf6", animationIn: "zoom", animationOut: "fade", motionPath: "arc-lr", x: 0.05, y: 0.36, w: 0.9, h: 0.15, style: { fontFamily: "'Montserrat', sans-serif", fontSize: 130, fontWeight: 900, color: "#ffffff", align: "center", gradient: { enabled: true, color1: "#f953c6", color2: "#b91d73", angle: 90 } } },
+  { key: "atl-sports-bounce",label: "Sports Bounce",     emoji: "🏆",  description: "Impact sports text that bounces in",           text: "CHAMPION", clipColor: "#f43f5e", animationIn: "zoom", animationOut: "fade", motionPath: "bounce", x: 0.05, y: 0.35, w: 0.9, h: 0.18, style: { fontFamily: "'Black Ops One', cursive", fontSize: 160, fontWeight: 900, color: "#ffffff", align: "center", italic: true, stroke: { enabled: true, color: "#000000", width: 5 } } },
+  { key: "atl-social-pop",   label: "Social Pop",        emoji: "📱",  description: "Social-media gradient that zooms and pulses",  text: "TRENDING", clipColor: "#ec4899", animationIn: "zoom",  animationOut: "fade", motionPath: "zoom-pulse", x: 0.05, y: 0.38, w: 0.9, h: 0.15, style: { fontFamily: "'Poppins', sans-serif", fontSize: 100, fontWeight: 800, color: "#ffffff", align: "center", gradient: { enabled: true, color1: "#f9d823", color2: "#ee0979", angle: 135 } } },
+  { key: "atl-hipop-spiral", label: "Hip-Hop Spiral",    emoji: "🎤",  description: "Bold hip-hop text with spiral entrance",       text: "FIRE", clipColor: "#f97316", animationIn: "zoom",     animationOut: "fade", motionPath: "spiral",     x: 0.05, y: 0.35, w: 0.9, h: 0.2, style: { fontFamily: "Bungee, cursive", fontSize: 130, fontWeight: 900, color: "#ffffff", align: "center", stroke: { enabled: true, color: "#ff0000", width: 6 } } },
+  { key: "atl-pendulum-count",label: "Pendulum Counter", emoji: "⏱️", description: "Monospace counter with pendulum sway",         text: "00:00", clipColor: "#10b981", animationIn: "fade",   animationOut: "fade", motionPath: "pendulum",   x: 0.1, y: 0.35, w: 0.8, h: 0.15, style: { fontFamily: "'Space Mono', monospace", fontSize: 120, fontWeight: 700, color: "#00ff88", align: "center", glow: { enabled: true, color: "#00ff88", blur: 14, intensity: 2 } } },
+  { key: "atl-vintage-drift", label: "Vintage Drift",    emoji: "🎞️", description: "Sepia vintage text drifting across",           text: "REMEMBER", clipColor: "#a16207", animationIn: "fade",  animationOut: "fade", motionPath: "drift-r",    x: 0.05, y: 0.38, w: 0.9, h: 0.15, style: { fontFamily: "'Playfair Display', serif", fontSize: 80, fontWeight: 700, color: "#c8b06e", align: "center", italic: true, letterSpacing: 4 } },
+  { key: "atl-hand-float",   label: "Handwrite Float",   emoji: "✍️",  description: "Handwritten script that floats and fades",     text: "written with love", clipColor: "#db2777", animationIn: "fade", animationOut: "fade", motionPath: "float", x: 0.05, y: 0.40, w: 0.9, h: 0.12, style: { fontFamily: "'Dancing Script', cursive", fontSize: 72, fontWeight: 700, color: "#f9d29d", align: "center" } },
+  { key: "atl-tech-slide",   label: "Tech Slide",        emoji: "💻",  description: "Glowing tech text that slides from right",     text: "> LOADING...", clipColor: "#06b6d4", animationIn: "slideLeft", animationOut: "fade", motionPath: "slide-in-r", x: 0.05, y: 0.40, w: 0.9, h: 0.12, style: { fontFamily: "Audiowide, cursive", fontSize: 72, fontWeight: 400, color: "#00ff88", align: "left", glow: { enabled: true, color: "#00ff88", blur: 12, intensity: 2 } } },
+  { key: "atl-minimalist",   label: "Minimalist Float",  emoji: "◻️",  description: "Ultra-thin minimalist text floating gently",   text: "less is more", clipColor: "#64748b", animationIn: "fade", animationOut: "fade", motionPath: "float", x: 0.1, y: 0.40, w: 0.8, h: 0.1, style: { fontFamily: "'DM Sans', sans-serif", fontSize: 52, fontWeight: 300, color: "#ffffff", align: "center", letterSpacing: 10 } },
+  { key: "atl-caption-rise", label: "Caption Rise",      emoji: "📖",  description: "Clean subtitle that rises to bottom third",    text: "Caption goes here", clipColor: "#3b82f6", animationIn: "slideUp", animationOut: "fade", motionPath: "rise", x: 0.05, y: 0.78, w: 0.9, h: 0.08, style: { fontFamily: "'Open Sans', sans-serif", fontSize: 32, fontWeight: 400, color: "#ffffff", align: "center", textShadow: { enabled: true, color: "#000000aa", offsetX: 1, offsetY: 1, blur: 4 } } },
+  { key: "atl-circle-neon",  label: "Neon Circle",       emoji: "🔵",  description: "Neon text that traces a circular path",        text: "LOOP", clipColor: "#a855f7", animationIn: "fade", animationOut: "fade", motionPath: "circle", x: 0.3, y: 0.38, w: 0.4, h: 0.12, style: { fontFamily: "'Poppins', sans-serif", fontSize: 80, fontWeight: 800, color: "#a855f7", align: "center", glow: { enabled: true, color: "#a855f7", blur: 16, intensity: 3 } } },
+  { key: "atl-figure8-title",label: "Figure-8 Title",    emoji: "∞",   description: "Bold title that traces a figure-8 path",      text: "INFINITE", clipColor: "#f59e0b", animationIn: "fade", animationOut: "fade", motionPath: "figure8", x: 0.2, y: 0.35, w: 0.6, h: 0.15, style: { fontFamily: "'Bebas Neue', sans-serif", fontSize: 120, fontWeight: 900, color: "#fde047", align: "center", letterSpacing: 6 } },
+  { key: "atl-watermark",    label: "Animated Watermark",emoji: "🔏",  description: "Subtle drifting watermark overlay",            text: "© yourbrand", clipColor: "#64748b", animationIn: "fade", animationOut: "fade", motionPath: "drift-r", x: 0.6, y: 0.88, w: 0.38, h: 0.07, style: { fontFamily: "Inter, system-ui, sans-serif", fontSize: 22, fontWeight: 400, color: "rgba(255,255,255,0.4)", align: "right", letterSpacing: 2 } },
+];
 
 interface MediaPanelProps {
   state: EditorState;
@@ -798,6 +829,59 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
           >
             <Sparkles className="w-3 h-3" /> Effects Layer
           </Button>
+
+          <Separator />
+
+          {/* ── Animated Text Layers ─────────────────────────────────── */}
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Animated Text Layers ({ANIMATED_TEXT_LAYERS.length})</p>
+          <p className="text-[10px] text-muted-foreground leading-snug">
+            One click adds a styled text clip with motion keyframes already applied. Edit the text content in the inspector.
+          </p>
+          <div className="grid grid-cols-2 gap-1.5">
+            {ANIMATED_TEXT_LAYERS.map((atl) => (
+              <button
+                key={atl.key}
+                title={atl.description}
+                className="relative rounded border border-border hover:border-primary/60 bg-black/40 hover:bg-black/60 transition-colors overflow-hidden text-left p-2"
+                style={{ borderLeft: `3px solid ${atl.clipColor}` }}
+                onClick={() => {
+                  const t0 = state.currentTime;
+                  const dur = 5;
+                  const clipId = crypto.randomUUID();
+                  dispatch({
+                    type: "ADD_CLIP",
+                    payload: makeClip({
+                      id: clipId,
+                      label: atl.label,
+                      mediaType: "text",
+                      text: atl.text,
+                      textStyle: { ...DEFAULT_TEXT_STYLE, ...atl.style } as TextStyle,
+                      animationIn: atl.animationIn,
+                      animationOut: atl.animationOut,
+                      trackIndex: 0,
+                      startTime: t0,
+                      duration: dur,
+                      x: atl.x, y: atl.y, width: atl.w, height: atl.h,
+                      color: atl.clipColor,
+                    }),
+                  });
+                  if (atl.motionPath !== "none") {
+                    const snapshot = { id: clipId, startTime: t0, duration: dur, x: atl.x, y: atl.y, scale: 1, rotation: 0 };
+                    buildMotionKeyframes(atl.motionPath, snapshot).forEach(({ property, time, value, easing }) => {
+                      dispatch({ type: "ADD_KEYFRAME", payload: { clipId, property, time, value, easing } });
+                    });
+                  }
+                }}
+                data-testid={`atl-${atl.key}`}
+              >
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <span className="text-base leading-none">{atl.emoji}</span>
+                  <span className="text-[10px] font-medium text-foreground leading-tight">{atl.label}</span>
+                </div>
+                <p className="text-[9px] text-muted-foreground leading-snug line-clamp-2">{atl.description}</p>
+              </button>
+            ))}
+          </div>
 
           <Separator />
 

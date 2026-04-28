@@ -45,9 +45,41 @@ type DragState =
 export default function Timeline({ state, dispatch }: TimelineProps) {
   const rulerRef = useRef<HTMLDivElement>(null);
   const trackAreaRef = useRef<HTMLDivElement>(null);
+  const trackLabelsRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [snapTarget, setSnapTarget] = useState<number | null>(null);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
+  const [dragTrackIdx, setDragTrackIdx] = useState<number | null>(null);
+  const [dropTrackIdx, setDropTrackIdx] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (dragTrackIdx === null) return;
+    const onMove = (e: MouseEvent) => {
+      const el = trackLabelsRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const HEADER_H = 28;
+      const relY = e.clientY - rect.top - HEADER_H;
+      const idx = Math.min(
+        state.tracks.length - 1,
+        Math.max(0, Math.floor(relY / TRACK_HEIGHT)),
+      );
+      setDropTrackIdx(idx);
+    };
+    const onUp = () => {
+      if (dragTrackIdx !== null && dropTrackIdx !== null && dragTrackIdx !== dropTrackIdx) {
+        dispatch({ type: "REORDER_TRACK", payload: { fromIndex: dragTrackIdx, toIndex: dropTrackIdx } });
+      }
+      setDragTrackIdx(null);
+      setDropTrackIdx(null);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+  }, [dragTrackIdx, dropTrackIdx, dispatch, state.tracks.length]);
 
   const PPS = BASE_PIXELS_PER_SECOND * state.zoom;
 
@@ -608,18 +640,34 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
       {/* Timeline body */}
       <div className="flex flex-1 overflow-hidden">
         {/* Track labels */}
-        <div className="shrink-0 border-r border-border bg-muted/10 overflow-hidden" style={{ width: HEADER_WIDTH }}>
+        <div ref={trackLabelsRef} className="shrink-0 border-r border-border bg-muted/10 overflow-hidden" style={{ width: HEADER_WIDTH }}>
           <div className="h-7 border-b border-border" />
           {state.tracks.map((track, i) => {
-            void i;
+            const isDraggingThis = dragTrackIdx === i;
+            const isDropTarget = dropTrackIdx === i && dragTrackIdx !== null && dragTrackIdx !== i;
             return (
               <div
                 key={track.id}
-                className="flex items-center gap-1 px-2 border-b border-border text-xs group hover:bg-muted/30"
+                className={cn(
+                  "flex items-center gap-1 px-2 border-b border-border text-xs group hover:bg-muted/30 transition-colors",
+                  isDraggingThis && "opacity-40 bg-muted/50",
+                  isDropTarget && "bg-primary/10 border-t-2 border-t-primary",
+                )}
                 style={{ height: TRACK_HEIGHT }}
               >
                 <ChevronRight className="w-3 h-3 shrink-0 text-muted-foreground" />
-                <span className="truncate flex-1 text-foreground/80">{track.name}</span>
+                <span
+                  className={cn(
+                    "truncate flex-1 text-foreground/80 select-none",
+                    dragTrackIdx === null ? "cursor-grab hover:text-foreground" : "cursor-grabbing",
+                  )}
+                  title="Drag to reorder track"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setDragTrackIdx(i);
+                    setDropTrackIdx(i);
+                  }}
+                >{track.name}</span>
                 <button
                   className="opacity-50 hover:opacity-100"
                   onClick={() => dispatch({ type: "UPDATE_TRACK", payload: { id: track.id, updates: { hidden: !track.hidden } } })}

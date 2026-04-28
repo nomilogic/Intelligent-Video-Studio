@@ -5,6 +5,7 @@ import { SHAPE_LIBRARY } from "../lib/shape-library";
 import { SPECIAL_LAYERS } from "../lib/special-layers";
 import { PARTICLE_LIBRARY, getParticleDef } from "../lib/particles";
 import { TRANSITION_PRESETS, TRANSITION_PRESET_CATEGORIES, getTransitionPreset } from "../lib/transition-presets";
+import { MOTION_PATHS, buildMotionKeyframes } from "../lib/motion-paths";
 import { savePreset, loadPresets, deletePreset, type CustomPreset } from "../lib/custom-library";
 import { useAuth } from "@/lib/auth-context";
 import { useDiamonds } from "@/lib/diamonds-context";
@@ -25,7 +26,7 @@ import {
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   Layers,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Dispatch, useEffect, useRef, useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { resolveClip, interpolateKeyframes } from "../lib/animation";
 
@@ -2186,6 +2187,10 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
                 </div>
               </Section>
 
+              <Separator />
+
+              <MotionPathSection clip={clip} dispatch={dispatch} />
+
               {state.keyframes.filter((k) => k.clipId === clip.id).length > 0 && (
                 <>
                   <Separator />
@@ -2352,6 +2357,58 @@ const DEFAULT_BG: TextBackground = {
   padding: 12,
 };
 
+// ── Text Style Presets ──────────────────────────────────────────────────────
+const TEXT_PRESETS: { key: string; label: string; style: Partial<TextStyle> }[] = [
+  { key: "big-title", label: "Big Bold Title", style: { fontFamily: "'Anton', sans-serif", fontSize: 180, fontWeight: 900, color: "#ffffff", align: "center", letterSpacing: 2, italic: false } },
+  { key: "elegant-serif", label: "Elegant Serif", style: { fontFamily: "'Cormorant Garamond', serif", fontSize: 80, fontWeight: 300, color: "#f5f0e8", align: "center", letterSpacing: 4, italic: true } },
+  { key: "neon-glow", label: "Neon Glow", style: { fontFamily: "'Poppins', sans-serif", fontSize: 90, fontWeight: 800, color: "#ff0099", align: "center", glow: { enabled: true, color: "#ff0099", blur: 20, intensity: 3 } } },
+  { key: "lower-third", label: "Lower Third", style: { fontFamily: "Inter, system-ui, sans-serif", fontSize: 36, fontWeight: 600, color: "#ffffff", align: "left" } },
+  { key: "quote", label: "Inspirational Quote", style: { fontFamily: "'Cormorant Garamond', serif", fontSize: 60, fontWeight: 400, color: "#ffffff", align: "center", italic: true, letterSpacing: 1 } },
+  { key: "caption", label: "Caption", style: { fontFamily: "Inter, system-ui, sans-serif", fontSize: 28, fontWeight: 400, color: "#ffffff", align: "center" } },
+  { key: "gradient-headline", label: "Gradient Headline", style: { fontFamily: "'Montserrat', sans-serif", fontSize: 120, fontWeight: 900, color: "#ffffff", align: "center", gradient: { enabled: true, color1: "#f953c6", color2: "#b91d73", angle: 90 } } },
+  { key: "retro", label: "Retro Block", style: { fontFamily: "'Anton', sans-serif", fontSize: 140, fontWeight: 900, color: "#ff6b35", align: "center", letterSpacing: 6, stroke: { enabled: true, color: "#000000", width: 3 } } },
+  { key: "cinematic", label: "Cinematic Title", style: { fontFamily: "'Montserrat', sans-serif", fontSize: 100, fontWeight: 700, color: "#ffffff", align: "center", letterSpacing: 12 } },
+  { key: "minimalist", label: "Minimalist", style: { fontFamily: "'DM Sans', sans-serif", fontSize: 56, fontWeight: 300, color: "#ffffff", align: "center", letterSpacing: 8 } },
+  { key: "handwritten", label: "Handwritten", style: { fontFamily: "'Dancing Script', cursive", fontSize: 80, fontWeight: 700, color: "#f9d29d", align: "center", italic: false } },
+  { key: "sports", label: "Sports Impact", style: { fontFamily: "'Black Ops One', cursive", fontSize: 160, fontWeight: 900, color: "#ffffff", align: "center", italic: true, stroke: { enabled: true, color: "#000000", width: 4 } } },
+  { key: "luxury", label: "Luxury Gold", style: { fontFamily: "'Cormorant Garamond', serif", fontSize: 96, fontWeight: 300, color: "#c9a84c", align: "center", letterSpacing: 6 } },
+  { key: "hip-hop", label: "Hip Hop", style: { fontFamily: "Bungee, cursive", fontSize: 120, fontWeight: 900, color: "#ffffff", align: "center", stroke: { enabled: true, color: "#ff0000", width: 5 } } },
+  { key: "social", label: "Social Media Pop", style: { fontFamily: "'Poppins', sans-serif", fontSize: 90, fontWeight: 800, color: "#ffffff", align: "center", gradient: { enabled: true, color1: "#f9d823", color2: "#ee0979", angle: 135 } } },
+  { key: "watermark", label: "Watermark", style: { fontFamily: "Inter, system-ui, sans-serif", fontSize: 24, fontWeight: 400, color: "rgba(255,255,255,0.5)", align: "right", letterSpacing: 2 } },
+  { key: "subtitle", label: "Subtitle", style: { fontFamily: "'Open Sans', sans-serif", fontSize: 36, fontWeight: 400, color: "#ffffff", align: "center", textShadow: { enabled: true, color: "#000000aa", offsetX: 1, offsetY: 1, blur: 4 } } },
+  { key: "vintage", label: "Vintage", style: { fontFamily: "'Playfair Display', serif", fontSize: 72, fontWeight: 700, color: "#c8b06e", align: "center", italic: true, letterSpacing: 3 } },
+  { key: "techy", label: "Tech / Glitch", style: { fontFamily: "Audiowide, cursive", fontSize: 72, fontWeight: 400, color: "#00ff88", align: "center", glow: { enabled: true, color: "#00ff88", blur: 12, intensity: 2 } } },
+  { key: "bold-red", label: "Bold Red Alert", style: { fontFamily: "'Oswald', sans-serif", fontSize: 120, fontWeight: 700, color: "#ff1a1a", align: "center", italic: false, stroke: { enabled: true, color: "#000000", width: 2 } } },
+];
+
+function MotionPathSection({ clip, dispatch }: { clip: Clip; dispatch: Dispatch<EditorAction> }) {
+  const [selectedPath, setSelectedPath] = useState("none");
+  const apply = () => {
+    if (selectedPath === "none") return;
+    buildMotionKeyframes(selectedPath, clip).forEach(({ property, time, value, easing }) => {
+      dispatch({ type: "ADD_KEYFRAME", payload: { clipId: clip.id, property, time, value, easing: easing as EasingType } });
+    });
+  };
+  return (
+    <Section title="Motion Path">
+      <Select value={selectedPath} onValueChange={setSelectedPath}>
+        <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Select path..." /></SelectTrigger>
+        <SelectContent>
+          {MOTION_PATHS.map((p) => (
+            <SelectItem key={p.key} value={p.key} className="text-xs">{p.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-[10px] text-muted-foreground leading-snug">
+        Adds x/y/scale/rotation keyframes. Undo to revert. Fine-tune in the keyframe list below.
+      </p>
+      <Button variant="default" size="sm" className="w-full h-7 text-xs" disabled={selectedPath === "none"} onClick={apply}>
+        Apply Path
+      </Button>
+    </Section>
+  );
+}
+
 function TextStylePanel({
   clip,
   update,
@@ -2370,6 +2427,28 @@ function TextStylePanel({
 
   return (
     <>
+      <Section title="Style Preset">
+        <Select
+          value="none"
+          onValueChange={(key) => {
+            const preset = TEXT_PRESETS.find((p) => p.key === key);
+            if (preset) setTs(preset.style as Partial<TextStyle>);
+          }}
+        >
+          <SelectTrigger className="h-7 text-xs">
+            <SelectValue placeholder="Apply a style preset…" />
+          </SelectTrigger>
+          <SelectContent className="max-h-72">
+            {TEXT_PRESETS.map((p) => (
+              <SelectItem key={p.key} value={p.key} className="text-xs">{p.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-[10px] text-muted-foreground">Applies font, size, color &amp; effects — then customize freely below.</p>
+      </Section>
+
+      <Separator />
+
       <Section title="Content">
         <textarea
           key={clip.id}

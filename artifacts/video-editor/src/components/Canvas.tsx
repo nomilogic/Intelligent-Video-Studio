@@ -27,11 +27,10 @@ import { drawParticles, resolveParticleClip } from "../lib/particles";
 function ParticlesOverlay({ clip, videoTime }: { clip: Clip; videoTime: number }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const resolved = useMemo(() => resolveParticleClip(clip), [clip]);
-  useEffect(() => {
+
+  const draw = useCallback(() => {
     const cnv = canvasRef.current;
     if (!cnv) return;
-    // Size the backing buffer to the clip's rendered pixel size so the
-    // particles look crisp at any zoom level.
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const w = cnv.clientWidth;
     const h = cnv.clientHeight;
@@ -47,6 +46,19 @@ function ParticlesOverlay({ clip, videoTime }: { clip: Clip; videoTime: number }
     const tLocal = Math.max(0, videoTime - clip.startTime);
     drawParticles(ctx, resolved, w, h, tLocal, clip.id);
   }, [clip, videoTime, resolved]);
+
+  useEffect(() => { draw(); }, [draw]);
+
+  // ResizeObserver ensures we redraw when the canvas element is first laid
+  // out (clientWidth was 0 on mount) or whenever it is resized later.
+  useEffect(() => {
+    const cnv = canvasRef.current;
+    if (!cnv) return;
+    const ro = new ResizeObserver(() => draw());
+    ro.observe(cnv);
+    return () => ro.disconnect();
+  }, [draw]);
+
   return (
     <canvas
       ref={canvasRef}

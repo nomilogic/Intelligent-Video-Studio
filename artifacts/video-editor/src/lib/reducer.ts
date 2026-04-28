@@ -761,12 +761,13 @@ function presentReducer(state: EditorState, action: EditorAction): EditorState {
       return {
         ...state,
         tracks: [
-          ...state.tracks,
           makeTrack({
             type: action.payload?.type ?? "video",
             name: action.payload?.name ?? `Track ${state.tracks.length + 1}`,
           }),
+          ...state.tracks,
         ],
+        clips: state.clips.map((c) => ({ ...c, trackIndex: c.trackIndex + 1 })),
       };
     case "DELETE_TRACK": {
       const idx = state.tracks.findIndex((t) => t.id === action.payload);
@@ -784,18 +785,38 @@ function presentReducer(state: EditorState, action: EditorAction): EditorState {
       if (srcIdx < 0) return state;
       const srcTrack = state.tracks[srcIdx];
       const newTrack = makeTrack({ name: `${srcTrack.name} copy`, type: srcTrack.type });
-      const newTrackIndex = state.tracks.length;
+      // Source clips are on srcIdx; after prepending the new track they'll be on srcIdx+1
       const clipsOnTrack = state.clips.filter((c) => c.trackIndex === srcIdx);
+      // Shift all existing clips +1 (new track goes to index 0)
+      const shiftedClips = state.clips.map((c) => ({ ...c, trackIndex: c.trackIndex + 1 }));
       const newClips: Clip[] = clipsOnTrack.map((c) =>
-        makeClip({ ...c, id: uid("clip"), trackIndex: newTrackIndex, label: c.label }),
+        makeClip({ ...c, id: uid("clip"), trackIndex: 0, label: c.label }),
       );
       const newKfs = newClips.flatMap(defaultClipKeyframes);
       return {
         ...state,
-        tracks: [...state.tracks, newTrack],
-        clips: [...state.clips, ...newClips],
+        tracks: [newTrack, ...state.tracks],
+        clips: [...shiftedClips, ...newClips],
         keyframes: [...state.keyframes, ...newKfs],
         selectedClipIds: newClips.map((c) => c.id),
+      };
+    }
+    case "REORDER_TRACK": {
+      const { fromIndex, toIndex } = action.payload;
+      if (fromIndex === toIndex) return state;
+      const newTracks = [...state.tracks];
+      const [moved] = newTracks.splice(fromIndex, 1);
+      newTracks.splice(toIndex, 0, moved);
+      // Build oldIndex → newIndex remap
+      const remap = new Map<number, number>();
+      for (let ni = 0; ni < newTracks.length; ni++) {
+        const oldIdx = state.tracks.indexOf(newTracks[ni]);
+        remap.set(oldIdx, ni);
+      }
+      return {
+        ...state,
+        tracks: newTracks,
+        clips: state.clips.map((c) => ({ ...c, trackIndex: remap.get(c.trackIndex) ?? c.trackIndex })),
       };
     }
     case "PASTE_CLIPS": {
