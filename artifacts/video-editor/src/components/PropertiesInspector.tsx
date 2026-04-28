@@ -131,13 +131,13 @@ function EditableNumber({
 
 function NumPair({
   label, value, min, max, step, onChange, onKeyframe, hasKeyframe, isAtKeyframe,
-  tweened, onToggleTween, suffix = "",
+  tweened, onToggleTween, suffix = "", snapPoints,
 }: {
   label: string; value: number; min: number; max: number; step: number;
   onChange: (v: number) => void; onKeyframe?: () => void;
   hasKeyframe?: boolean; isAtKeyframe?: boolean;
   tweened?: boolean; onToggleTween?: () => void;
-  suffix?: string;
+  suffix?: string; snapPoints?: number[];
 }) {
   return (
     <div className="space-y-1">
@@ -168,7 +168,7 @@ function NumPair({
           className={hasKeyframe ? "text-yellow-400" : "text-foreground"}
         />
       </div>
-      <Slider value={[value]} min={min} max={max} step={step} onValueChange={([v]) => onChange(v)} />
+      <Slider value={[value]} min={min} max={max} step={step} onValueChange={([v]) => onChange(v)} snapPoints={snapPoints} />
     </div>
   );
 }
@@ -710,10 +710,10 @@ function MaskSection({
               />
             </div>
           </div>
-          <NumPair label="Scale" value={m.scale} min={0.1} max={3} step={0.05} onChange={(v) => setMask({ scale: v })} />
+          <NumPair label="Scale" value={m.scale} min={0.1} max={3} step={0.05} onChange={(v) => setMask({ scale: v })} snapPoints={[1]} />
           <NumPair label="Offset X" value={m.offsetX} min={-1} max={1} step={0.01} onChange={(v) => setMask({ offsetX: v })} />
           <NumPair label="Offset Y" value={m.offsetY} min={-1} max={1} step={0.01} onChange={(v) => setMask({ offsetY: v })} />
-          <NumPair label="Opacity" value={m.opacity} min={0} max={1} step={0.05} onChange={(v) => setMask({ opacity: v })} />
+          <NumPair label="Opacity" value={m.opacity} min={0} max={1} step={0.05} onChange={(v) => setMask({ opacity: v })} snapPoints={[1]} />
           <Button
             variant={m.invert ? "secondary" : "outline"}
             size="sm"
@@ -1066,11 +1066,11 @@ function ParticleSection({
 
       <NumPair label="Count"   value={clip.particleCount   ?? def.defaults.count}   min={5}   max={400} step={1}    onChange={(v) => update({ particleCount: v })} />
       <NumPair label="Size"    value={clip.particleSize    ?? def.defaults.size}    min={1}   max={120} step={1}    onChange={(v) => update({ particleSize: v })} />
-      <NumPair label="Speed"   value={clip.particleSpeed   ?? def.defaults.speed}   min={0.1} max={3}   step={0.05} onChange={(v) => update({ particleSpeed: v })} />
+      <NumPair label="Speed"   value={clip.particleSpeed   ?? def.defaults.speed}   min={0.1} max={3}   step={0.05} onChange={(v) => update({ particleSpeed: v })} snapPoints={[1]} />
       <NumPair label="Spread"  value={clip.particleSpread  ?? def.defaults.spread}  min={0}   max={1}   step={0.05} onChange={(v) => update({ particleSpread: v })} />
       <NumPair label="Gravity" value={clip.particleGravity ?? def.defaults.gravity} min={-2}  max={2}   step={0.1}  onChange={(v) => update({ particleGravity: v })} />
       <NumPair label="Twinkle" value={clip.particleTwinkle ?? def.defaults.twinkle} min={0}   max={1}   step={0.05} onChange={(v) => update({ particleTwinkle: v })} />
-      <NumPair label="Opacity" value={clip.particleOpacity ?? def.defaults.opacity} min={0}   max={1}   step={0.05} onChange={(v) => update({ particleOpacity: v })} />
+      <NumPair label="Opacity" value={clip.particleOpacity ?? def.defaults.opacity} min={0}   max={1}   step={0.05} onChange={(v) => update({ particleOpacity: v })} snapPoints={[1]} />
 
       <div className="flex items-center gap-2">
         <Label className="text-[10px] text-muted-foreground w-14">Direction</Label>
@@ -1947,8 +1947,8 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
                 }} onKeyframe={() => addKeyframe("height")} hasKeyframe={hasKf("height")} isAtKeyframe={isAtKf("height")} tweened={isTweened("height")} onToggleTween={() => toggleTween("height")} />
 
                 <NumPair label="Rotation" value={liveVal("rotation", clip.rotation)} min={-180} max={180} step={1} suffix="°" onChange={(v) => updateAnimatable("rotation", v)} onKeyframe={() => addKeyframe("rotation")} hasKeyframe={hasKf("rotation")} isAtKeyframe={isAtKf("rotation")} tweened={isTweened("rotation")} onToggleTween={() => toggleTween("rotation")} />
-                <NumPair label="Scale" value={liveVal("scale", clip.scale)} min={0.1} max={3} step={0.05} suffix="x" onChange={(v) => updateAnimatable("scale", v)} onKeyframe={() => addKeyframe("scale")} hasKeyframe={hasKf("scale")} isAtKeyframe={isAtKf("scale")} tweened={isTweened("scale")} onToggleTween={() => toggleTween("scale")} />
-                <NumPair label="Opacity" value={liveVal("opacity", clip.opacity)} min={0} max={1} step={0.01} onChange={(v) => updateAnimatable("opacity", v)} onKeyframe={() => addKeyframe("opacity")} hasKeyframe={hasKf("opacity")} isAtKeyframe={isAtKf("opacity")} tweened={isTweened("opacity")} onToggleTween={() => toggleTween("opacity")} />
+                <NumPair label="Scale" value={liveVal("scale", clip.scale)} min={0.1} max={3} step={0.05} suffix="x" onChange={(v) => updateAnimatable("scale", v)} onKeyframe={() => addKeyframe("scale")} hasKeyframe={hasKf("scale")} isAtKeyframe={isAtKf("scale")} tweened={isTweened("scale")} onToggleTween={() => toggleTween("scale")} snapPoints={[1]} />
+                <NumPair label="Opacity" value={liveVal("opacity", clip.opacity)} min={0} max={1} step={0.01} onChange={(v) => updateAnimatable("opacity", v)} onKeyframe={() => addKeyframe("opacity")} hasKeyframe={hasKf("opacity")} isAtKeyframe={isAtKf("opacity")} tweened={isTweened("opacity")} onToggleTween={() => toggleTween("opacity")} snapPoints={[1]} />
 
                 <div className="flex gap-1.5">
                   <Button variant={clip.flipH ? "secondary" : "outline"} size="sm" className="h-7 text-xs flex-1" onClick={() => update({ flipH: !clip.flipH })}>
@@ -2040,9 +2040,9 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
                   <RotateCcw className="w-3 h-3" />
                 </Button>
               }>
-                <NumPair label="Brightness" value={liveVal("brightness", clip.filters.brightness)} min={0} max={200} step={1} suffix="%" onChange={(v) => updateFilter("brightness", v)} onKeyframe={() => addKeyframe("brightness")} hasKeyframe={hasKf("brightness")} isAtKeyframe={isAtKf("brightness")} tweened={isTweened("brightness")} onToggleTween={() => toggleTween("brightness")} />
-                <NumPair label="Contrast" value={liveVal("contrast", clip.filters.contrast)} min={0} max={200} step={1} suffix="%" onChange={(v) => updateFilter("contrast", v)} onKeyframe={() => addKeyframe("contrast")} hasKeyframe={hasKf("contrast")} isAtKeyframe={isAtKf("contrast")} tweened={isTweened("contrast")} onToggleTween={() => toggleTween("contrast")} />
-                <NumPair label="Saturation" value={liveVal("saturation", clip.filters.saturation)} min={0} max={200} step={1} suffix="%" onChange={(v) => updateFilter("saturation", v)} onKeyframe={() => addKeyframe("saturation")} hasKeyframe={hasKf("saturation")} isAtKeyframe={isAtKf("saturation")} tweened={isTweened("saturation")} onToggleTween={() => toggleTween("saturation")} />
+                <NumPair label="Brightness" value={liveVal("brightness", clip.filters.brightness)} min={0} max={200} step={1} suffix="%" onChange={(v) => updateFilter("brightness", v)} onKeyframe={() => addKeyframe("brightness")} hasKeyframe={hasKf("brightness")} isAtKeyframe={isAtKf("brightness")} tweened={isTweened("brightness")} onToggleTween={() => toggleTween("brightness")} snapPoints={[100]} />
+                <NumPair label="Contrast" value={liveVal("contrast", clip.filters.contrast)} min={0} max={200} step={1} suffix="%" onChange={(v) => updateFilter("contrast", v)} onKeyframe={() => addKeyframe("contrast")} hasKeyframe={hasKf("contrast")} isAtKeyframe={isAtKf("contrast")} tweened={isTweened("contrast")} onToggleTween={() => toggleTween("contrast")} snapPoints={[100]} />
+                <NumPair label="Saturation" value={liveVal("saturation", clip.filters.saturation)} min={0} max={200} step={1} suffix="%" onChange={(v) => updateFilter("saturation", v)} onKeyframe={() => addKeyframe("saturation")} hasKeyframe={hasKf("saturation")} isAtKeyframe={isAtKf("saturation")} tweened={isTweened("saturation")} onToggleTween={() => toggleTween("saturation")} snapPoints={[100]} />
                 <NumPair label="Hue" value={liveVal("hue", clip.filters.hue)} min={-180} max={180} step={1} suffix="°" onChange={(v) => updateFilter("hue", v)} onKeyframe={() => addKeyframe("hue")} hasKeyframe={hasKf("hue")} isAtKeyframe={isAtKf("hue")} tweened={isTweened("hue")} onToggleTween={() => toggleTween("hue")} />
                 <NumPair label="Blur" value={liveVal("blur", clip.filters.blur)} min={0} max={20} step={0.5} suffix="px" onChange={(v) => updateFilter("blur", v)} onKeyframe={() => addKeyframe("blur")} hasKeyframe={hasKf("blur")} isAtKeyframe={isAtKf("blur")} tweened={isTweened("blur")} onToggleTween={() => toggleTween("blur")} />
                 <NumPair label="Grayscale" value={liveVal("grayscale", clip.filters.grayscale)} min={0} max={100} step={1} suffix="%" onChange={(v) => updateFilter("grayscale", v)} onKeyframe={() => addKeyframe("grayscale")} hasKeyframe={hasKf("grayscale")} isAtKeyframe={isAtKf("grayscale")} tweened={isTweened("grayscale")} onToggleTween={() => toggleTween("grayscale")} />
@@ -2178,7 +2178,7 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
               <Separator />
 
               <Section title="Speed">
-                <NumPair label="Playback" value={clip.speed} min={0.25} max={4} step={0.05} suffix="x" onChange={(v) => update({ speed: v })} />
+                <NumPair label="Playback" value={clip.speed} min={0.25} max={4} step={0.05} suffix="x" onChange={(v) => update({ speed: v })} snapPoints={[1, 2]} />
                 <div className="grid grid-cols-4 gap-1">
                   {[0.5, 1, 1.5, 2].map((s) => (
                     <Button key={s} variant="outline" size="sm" className="h-6 text-[10px]" onClick={() => update({ speed: s })}>{s}x</Button>
@@ -2293,7 +2293,7 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
 
             <TabsContent value="audio" className="m-0">
               <Section title="Volume">
-                <NumPair label="Volume" value={clip.volume} min={0} max={1} step={0.01} onChange={(v) => update({ volume: v })} onKeyframe={() => addKeyframe("volume")} hasKeyframe={hasKf("volume")} isAtKeyframe={isAtKf("volume")} />
+                <NumPair label="Volume" value={clip.volume} min={0} max={1} step={0.01} onChange={(v) => update({ volume: v })} onKeyframe={() => addKeyframe("volume")} hasKeyframe={hasKf("volume")} isAtKeyframe={isAtKf("volume")} snapPoints={[1]} />
                 <Button
                   variant={clip.muted ? "secondary" : "outline"}
                   size="sm"

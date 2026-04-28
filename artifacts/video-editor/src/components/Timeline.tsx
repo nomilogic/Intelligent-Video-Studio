@@ -484,6 +484,7 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
                   min={5}
                   max={100}
                   step={1}
+                  snapPoints={[100]}
                   onValueChange={(v) => dispatch({ type: "SET_DRAW_BRUSH", payload: { opacity: v[0] / 100 } })}
                 />
               </div>
