@@ -1,4 +1,5 @@
-import { EditorState, EditorAction, Clip, ClipMask, DEFAULT_FILTERS, EasingType, Effect, EffectType, TransitionType, FONT_OPTIONS, type TextStyle, type TextGradient, type TextStroke, type TextGlow, type TextShadow, type TextBackground, type Fill } from "../lib/types";
+import { EditorState, EditorAction, Clip, ClipMask, DEFAULT_FILTERS, DEFAULT_TEXT_STYLE, EasingType, Effect, EffectType, TransitionType, FONT_OPTIONS, type TextStyle, type TextGradient, type TextStroke, type TextGlow, type TextShadow, type TextBackground, type Fill } from "../lib/types";
+import { textContainerStyle, textElementStyle } from "../lib/text-style";
 import { EFFECT_LIBRARY as EFFECT_CATALOG, EFFECT_CATEGORIES } from "../lib/effect-library";
 import { TRANSITION_LIBRARY as TRANSITION_CATALOG, TRANSITION_CATEGORIES } from "../lib/transition-library";
 import { SHAPE_LIBRARY } from "../lib/shape-library";
@@ -715,6 +716,18 @@ function MaskSection({
           <NumPair label="Offset X" value={m.offsetX} min={-1} max={1} step={0.01} onChange={(v) => setMask({ offsetX: v })} />
           <NumPair label="Offset Y" value={m.offsetY} min={-1} max={1} step={0.01} onChange={(v) => setMask({ offsetY: v })} />
           <NumPair label="Opacity" value={m.opacity} min={0} max={1} step={0.05} onChange={(v) => setMask({ opacity: v })} snapPoints={[1]} />
+          <div>
+            <Label className="text-[10px] text-muted-foreground">Feather (edge softness)</Label>
+            <div className="flex items-center gap-2 mt-1">
+              <Slider
+                min={0} max={30} step={0.5}
+                value={[m.feather ?? 0]}
+                onValueChange={([v]) => setMask({ feather: v })}
+                className="flex-1"
+              />
+              <span className="text-[10px] text-muted-foreground w-8 text-right">{(m.feather ?? 0).toFixed(0)}px</span>
+            </div>
+          </div>
           <Button
             variant={m.invert ? "secondary" : "outline"}
             size="sm"
@@ -2359,26 +2372,26 @@ const DEFAULT_BG: TextBackground = {
 
 // ── Text Style Presets ──────────────────────────────────────────────────────
 const TEXT_PRESETS: { key: string; label: string; style: Partial<TextStyle> }[] = [
-  { key: "big-title", label: "Big Bold Title", style: { fontFamily: "'Anton', sans-serif", fontSize: 180, fontWeight: 900, color: "#ffffff", align: "center", letterSpacing: 2, italic: false } },
+  { key: "big-title", label: "Big Bold Title", style: { fontFamily: "Anton, sans-serif", fontSize: 180, fontWeight: 900, color: "#ffffff", align: "center", letterSpacing: 2, italic: false } },
   { key: "elegant-serif", label: "Elegant Serif", style: { fontFamily: "'Cormorant Garamond', serif", fontSize: 80, fontWeight: 300, color: "#f5f0e8", align: "center", letterSpacing: 4, italic: true } },
-  { key: "neon-glow", label: "Neon Glow", style: { fontFamily: "'Poppins', sans-serif", fontSize: 90, fontWeight: 800, color: "#ff0099", align: "center", glow: { enabled: true, color: "#ff0099", blur: 20, intensity: 3 } } },
+  { key: "neon-glow", label: "Neon Glow", style: { fontFamily: "Poppins, sans-serif", fontSize: 90, fontWeight: 800, color: "#ff0099", align: "center", glow: { enabled: true, color: "#ff0099", blur: 20, intensity: 3 } } },
   { key: "lower-third", label: "Lower Third", style: { fontFamily: "Inter, system-ui, sans-serif", fontSize: 36, fontWeight: 600, color: "#ffffff", align: "left" } },
   { key: "quote", label: "Inspirational Quote", style: { fontFamily: "'Cormorant Garamond', serif", fontSize: 60, fontWeight: 400, color: "#ffffff", align: "center", italic: true, letterSpacing: 1 } },
   { key: "caption", label: "Caption", style: { fontFamily: "Inter, system-ui, sans-serif", fontSize: 28, fontWeight: 400, color: "#ffffff", align: "center" } },
-  { key: "gradient-headline", label: "Gradient Headline", style: { fontFamily: "'Montserrat', sans-serif", fontSize: 120, fontWeight: 900, color: "#ffffff", align: "center", gradient: { enabled: true, color1: "#f953c6", color2: "#b91d73", angle: 90 } } },
-  { key: "retro", label: "Retro Block", style: { fontFamily: "'Anton', sans-serif", fontSize: 140, fontWeight: 900, color: "#ff6b35", align: "center", letterSpacing: 6, stroke: { enabled: true, color: "#000000", width: 3 } } },
-  { key: "cinematic", label: "Cinematic Title", style: { fontFamily: "'Montserrat', sans-serif", fontSize: 100, fontWeight: 700, color: "#ffffff", align: "center", letterSpacing: 12 } },
+  { key: "gradient-headline", label: "Gradient Headline", style: { fontFamily: "Montserrat, sans-serif", fontSize: 120, fontWeight: 900, color: "#ffffff", align: "center", gradient: { enabled: true, color1: "#f953c6", color2: "#b91d73", angle: 90 } } },
+  { key: "retro", label: "Retro Block", style: { fontFamily: "Anton, sans-serif", fontSize: 140, fontWeight: 900, color: "#ff6b35", align: "center", letterSpacing: 6, stroke: { enabled: true, color: "#000000", width: 3 } } },
+  { key: "cinematic", label: "Cinematic Title", style: { fontFamily: "Montserrat, sans-serif", fontSize: 100, fontWeight: 700, color: "#ffffff", align: "center", letterSpacing: 12 } },
   { key: "minimalist", label: "Minimalist", style: { fontFamily: "'DM Sans', sans-serif", fontSize: 56, fontWeight: 300, color: "#ffffff", align: "center", letterSpacing: 8 } },
   { key: "handwritten", label: "Handwritten", style: { fontFamily: "'Dancing Script', cursive", fontSize: 80, fontWeight: 700, color: "#f9d29d", align: "center", italic: false } },
   { key: "sports", label: "Sports Impact", style: { fontFamily: "'Black Ops One', cursive", fontSize: 160, fontWeight: 900, color: "#ffffff", align: "center", italic: true, stroke: { enabled: true, color: "#000000", width: 4 } } },
   { key: "luxury", label: "Luxury Gold", style: { fontFamily: "'Cormorant Garamond', serif", fontSize: 96, fontWeight: 300, color: "#c9a84c", align: "center", letterSpacing: 6 } },
   { key: "hip-hop", label: "Hip Hop", style: { fontFamily: "Bungee, cursive", fontSize: 120, fontWeight: 900, color: "#ffffff", align: "center", stroke: { enabled: true, color: "#ff0000", width: 5 } } },
-  { key: "social", label: "Social Media Pop", style: { fontFamily: "'Poppins', sans-serif", fontSize: 90, fontWeight: 800, color: "#ffffff", align: "center", gradient: { enabled: true, color1: "#f9d823", color2: "#ee0979", angle: 135 } } },
+  { key: "social", label: "Social Media Pop", style: { fontFamily: "Poppins, sans-serif", fontSize: 90, fontWeight: 800, color: "#ffffff", align: "center", gradient: { enabled: true, color1: "#f9d823", color2: "#ee0979", angle: 135 } } },
   { key: "watermark", label: "Watermark", style: { fontFamily: "Inter, system-ui, sans-serif", fontSize: 24, fontWeight: 400, color: "rgba(255,255,255,0.5)", align: "right", letterSpacing: 2 } },
   { key: "subtitle", label: "Subtitle", style: { fontFamily: "'Open Sans', sans-serif", fontSize: 36, fontWeight: 400, color: "#ffffff", align: "center", textShadow: { enabled: true, color: "#000000aa", offsetX: 1, offsetY: 1, blur: 4 } } },
   { key: "vintage", label: "Vintage", style: { fontFamily: "'Playfair Display', serif", fontSize: 72, fontWeight: 700, color: "#c8b06e", align: "center", italic: true, letterSpacing: 3 } },
   { key: "techy", label: "Tech / Glitch", style: { fontFamily: "Audiowide, cursive", fontSize: 72, fontWeight: 400, color: "#00ff88", align: "center", glow: { enabled: true, color: "#00ff88", blur: 12, intensity: 2 } } },
-  { key: "bold-red", label: "Bold Red Alert", style: { fontFamily: "'Oswald', sans-serif", fontSize: 120, fontWeight: 700, color: "#ff1a1a", align: "center", italic: false, stroke: { enabled: true, color: "#000000", width: 2 } } },
+  { key: "bold-red", label: "Bold Red Alert", style: { fontFamily: "Oswald, sans-serif", fontSize: 120, fontWeight: 700, color: "#ff1a1a", align: "center", italic: false, stroke: { enabled: true, color: "#000000", width: 2 } } },
 ];
 
 function MotionPathSection({ clip, dispatch }: { clip: Clip; dispatch: Dispatch<EditorAction> }) {
@@ -2428,23 +2441,36 @@ function TextStylePanel({
   return (
     <>
       <Section title="Style Preset">
-        <Select
-          value="none"
-          onValueChange={(key) => {
-            const preset = TEXT_PRESETS.find((p) => p.key === key);
-            if (preset) setTs(preset.style as Partial<TextStyle>);
-          }}
-        >
-          <SelectTrigger className="h-7 text-xs">
-            <SelectValue placeholder="Apply a style preset…" />
-          </SelectTrigger>
-          <SelectContent className="max-h-72">
-            {TEXT_PRESETS.map((p) => (
-              <SelectItem key={p.key} value={p.key} className="text-xs">{p.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-[10px] text-muted-foreground">Applies font, size, color &amp; effects — then customize freely below.</p>
+        <div className="grid grid-cols-2 gap-1.5 max-h-64 overflow-y-auto pr-0.5">
+          {TEXT_PRESETS.map((p) => {
+            const merged = { ...DEFAULT_TEXT_STYLE, ...p.style } as TextStyle;
+            const previewPx = Math.min(Math.max((merged.fontSize || 40) / 5.5, 11), 17);
+            const cStyle = textContainerStyle(merged);
+            const eStyle = textElementStyle(merged, `${previewPx}px`);
+            return (
+              <button
+                key={p.key}
+                title={p.label}
+                className="w-full rounded border border-border hover:border-primary/60 bg-black/30 hover:bg-black/50 transition-colors overflow-hidden text-left"
+                onClick={() => setTs(p.style as Partial<TextStyle>)}
+              >
+                <div
+                  className="flex items-center justify-center px-1 overflow-hidden"
+                  style={{ ...cStyle, minHeight: "38px", maxHeight: "38px" }}
+                >
+                  <span
+                    className="truncate"
+                    style={{ ...eStyle, fontSize: `${previewPx}px`, lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}
+                  >
+                    {p.label}
+                  </span>
+                </div>
+                <p className="text-[9px] text-muted-foreground px-1.5 pb-1 truncate">{p.label}</p>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[10px] text-muted-foreground">Click a preset to apply font, size, color &amp; effects — then customize freely.</p>
       </Section>
 
       <Separator />

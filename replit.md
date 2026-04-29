@@ -228,3 +228,12 @@ single-tenant editor still works without them.
   `transitionPresetCategories`, `particles`, plus all 11 particle field
   names in `clipMutableFields`, so the Gemini-driven AI bar can apply
   any of them.
+
+## Session-5 Bug Fixes (April 2026)
+
+- **Track-level mute propagation.** `Canvas.tsx` derives `mutedTrackIndices` via `useMemo` and passes `trackMuted` down to `MediaContentBase`. Clips now silence correctly when their parent track is muted, not just when `clip.muted` is set individually.
+- **Track-level lock propagation.** `Timeline.tsx` `handleClipMouseDown`, `handleResizeLeft`, and `handleResizeRight` all check `state.tracks[clip.trackIndex]?.locked` in addition to `clip.locked`, so clips in locked tracks can't be dragged or resized.
+- **Text style preset visual grid.** PropertiesInspector's style preset selector replaced with a 2-column grid of rendered text preview buttons. Font values in `TEXT_PRESETS` fixed (Anton, Poppins, Montserrat, Oswald no longer wrapped in extra single quotes).
+- **Shape library expanded (52 → 168).** Added Nature (sun, moon, snowflake, etc.), Callouts (12), Frames (14), Compound (20: target, yin-yang, gear, wifi, …), Lines (12), Animals (8). Also added `_rp`/`_sp` polygon/star generators plus `_GEN_POLYS`.
+- **Mask feathering.** `ClipMask` interface gains optional `feather?: number` (0–30 px). Canvas filter incorporates feather into the `combineFilterCss` blur path so it composites cleanly with effects blur. PropertiesInspector mask section shows a "Feather (edge softness)" slider with live px readout.
+- **New elements always on top.** `ADD_CLIP` reducer branch for time-conflict: instead of scanning upward to a higher (lower-priority) track, now inserts a brand-new track at index 0 and shifts all existing clips down by 1, so every dropped element appears at the top of the stack.

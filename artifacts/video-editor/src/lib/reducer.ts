@@ -680,34 +680,19 @@ function presentReducer(state: EditorState, action: EditorAction): EditorState {
           keyframes: [...state.keyframes, ...defaultClipKeyframes(incoming)],
         };
       }
-      // Find the lowest free track index that doesn't conflict in this time
-      // range. Scan upward from the incoming.trackIndex.
-      const occupied = new Set(
-        state.clips
-          .filter(
-            (c) =>
-              c.startTime < incoming.startTime + incoming.duration &&
-              incoming.startTime < c.startTime + c.duration,
-          )
-          .map((c) => c.trackIndex),
-      );
-      let freeTrack = incoming.trackIndex;
-      while (occupied.has(freeTrack)) freeTrack++;
-      let nextTracks = state.tracks;
-      while (nextTracks.length <= freeTrack) {
-        nextTracks = [
-          ...nextTracks,
-          makeTrack({
-            type: incoming.mediaType === "audio" ? "audio" : "video",
-            name: `Track ${nextTracks.length + 1}`,
-          }),
-        ];
-      }
-      const placed: Clip = { ...incoming, trackIndex: freeTrack };
+      // Conflict on the target track — insert a brand-new track at the very
+      // top of the stack (trackIndex 0) and shift all existing clips down.
+      // This keeps new elements always visually on top of existing content.
+      const shiftedClips = state.clips.map((c) => ({ ...c, trackIndex: c.trackIndex + 1 }));
+      const newTrack = makeTrack({
+        type: incoming.mediaType === "audio" ? "audio" : "video",
+        name: `Track ${state.tracks.length + 1}`,
+      });
+      const placed: Clip = { ...incoming, trackIndex: 0 };
       return {
         ...state,
-        tracks: nextTracks,
-        clips: [...state.clips, placed],
+        tracks: [newTrack, ...state.tracks],
+        clips: [...shiftedClips, placed],
         keyframes: [...state.keyframes, ...defaultClipKeyframes(placed)],
       };
     }

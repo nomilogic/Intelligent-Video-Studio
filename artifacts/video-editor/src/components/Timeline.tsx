@@ -297,7 +297,7 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
 
   const handleClipMouseDown = (e: React.MouseEvent, clip: Clip) => {
     e.stopPropagation();
-    if (clip.locked) return;
+    if (clip.locked || state.tracks[clip.trackIndex]?.locked) return;
     if (isBlade) {
       const rect = trackAreaRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -326,7 +326,7 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
 
   const handleResizeLeft = (e: React.MouseEvent, clip: Clip) => {
     e.stopPropagation();
-    if (clip.locked) return;
+    if (clip.locked || state.tracks[clip.trackIndex]?.locked) return;
     setDrag({
       kind: "resize-l",
       clipId: clip.id,
@@ -340,7 +340,7 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
 
   const handleResizeRight = (e: React.MouseEvent, clip: Clip) => {
     e.stopPropagation();
-    if (clip.locked) return;
+    if (clip.locked || state.tracks[clip.trackIndex]?.locked) return;
     setDrag({
       kind: "resize-r",
       clipId: clip.id,

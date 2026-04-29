@@ -335,6 +335,7 @@ export interface ClipMask {
   offsetX: number;      // -1..1 (fraction of clip width)
   offsetY: number;      // -1..1 (fraction of clip height)
   opacity: number;      // 0..1 — blends mask result with full opacity
+  feather?: number;     // 0..30 px — Gaussian blur applied to the mask boundary (soft edges)
 }
 
 export interface Clip {

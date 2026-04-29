@@ -350,9 +350,10 @@ function ChromaKeyMedia({ clip, videoTime, isPlaying }: { clip: Clip; videoTime:
   );
 }
 
-function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false }: { clip: Clip; videoTime: number; isPlaying: boolean; showFullSource?: boolean }) {
+function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false, trackMuted = false }: { clip: Clip; videoTime: number; isPlaying: boolean; showFullSource?: boolean; trackMuted?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const effectiveMuted = clip.muted || trackMuted;
 
   // Sync video element to playhead. When playing, allow drift up to 0.25s before correcting.
   // When paused, snap exactly to videoTime so scrubbing is frame-accurate.
@@ -374,14 +375,14 @@ function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false }
     const v = videoRef.current;
     if (!v) return;
     v.playbackRate = clip.speed || 1;
-    v.volume = clip.muted ? 0 : clip.volume;
-    v.muted = clip.muted;
+    v.volume = effectiveMuted ? 0 : clip.volume;
+    v.muted = effectiveMuted;
     if (isPlaying) {
       v.play().catch(() => {});
     } else {
       v.pause();
     }
-  }, [isPlaying, clip.muted, clip.volume, clip.speed]);
+  }, [isPlaying, effectiveMuted, clip.volume, clip.speed]);
 
   useEffect(() => {
     const a = audioRef.current;
@@ -401,14 +402,14 @@ function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false }
     const a = audioRef.current;
     if (!a) return;
     a.playbackRate = clip.speed || 1;
-    a.volume = clip.muted ? 0 : clip.volume;
-    a.muted = clip.muted;
+    a.volume = effectiveMuted ? 0 : clip.volume;
+    a.muted = effectiveMuted;
     if (isPlaying) {
       a.play().catch(() => {});
     } else {
       a.pause();
     }
-  }, [isPlaying, clip.muted, clip.volume, clip.speed]);
+  }, [isPlaying, effectiveMuted, clip.volume, clip.speed]);
 
   const hasCrop =
     !showFullSource && (
@@ -429,7 +430,7 @@ function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false }
         <video
           ref={videoRef}
           src={clip.src}
-          muted={clip.muted}
+          muted={effectiveMuted}
           playsInline
           preload="auto"
           className="block object-cover"
@@ -756,6 +757,7 @@ const MediaContent = memo(MediaContentBase, (prev, next) => {
   if (prev.clip !== next.clip) return false;
   if (prev.isPlaying !== next.isPlaying) return false;
   if (prev.showFullSource !== next.showFullSource) return false;
+  if (prev.trackMuted !== next.trackMuted) return false;
   // Text clips have no native playback element — always re-render on prop changes
   // so live text/style edits show immediately, even while playing.
   if (next.clip.mediaType === "text") return false;
@@ -1121,6 +1123,15 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
       new Set(
         state.tracks
           .map((t, i) => (t.hidden ? i : -1))
+          .filter((i) => i >= 0),
+      ),
+    [state.tracks],
+  );
+  const mutedTrackIndices = useMemo(
+    () =>
+      new Set(
+        state.tracks
+          .map((t, i) => (t.muted ? i : -1))
           .filter((i) => i >= 0),
       ),
     [state.tracks],
@@ -1750,7 +1761,7 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
                 opacity: r.opacity * incomingMod.opacityMul,
                 transform: `translate(${r.translateX + incomingMod.translateXPct + fxImpact.shakeXPct}%, ${r.translateY + incomingMod.translateYPct + fxImpact.shakeYPct}%) rotate(${r.rotation + incomingMod.rotateExtraDeg}deg) scale(${r.scale * incomingMod.scaleMul})`,
                 mixBlendMode: clip.blendMode as any,
-                filter: combineFilterCss(r.filterCss, fxImpact.extraFilter, incomingMod.blurExtra),
+                filter: combineFilterCss(r.filterCss, fxImpact.extraFilter, incomingMod.blurExtra + (clip.mask?.feather ?? 0)),
                 borderRadius: cropThis ? 0 : `${clip.borderRadius}px`,
                 transformOrigin: "center",
                 clipPath: buildInsetClipPath(incomingMod.clipInsetTop, incomingMod.clipInsetRight, incomingMod.clipInsetBottom, incomingMod.clipInsetLeft),
@@ -1788,6 +1799,7 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
                   videoTime={r.videoTime}
                   isPlaying={state.isPlaying}
                   showFullSource={cropThis}
+                  trackMuted={mutedTrackIndices.has(clip.trackIndex)}
                 />
               )}
               <EffectOverlays overlays={fxImpact.overlays} />
