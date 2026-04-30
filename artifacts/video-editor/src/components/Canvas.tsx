@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { getShape } from "../lib/shape-library";
 import { getSpecialLayer, type SpecialDef } from "../lib/special-layers";
 import { drawParticles, resolveParticleClip } from "../lib/particles";
+import WavesOverlay from "./WavesOverlay";
 
 /**
  * Renders a particle field for a `mediaType: "particles"` clip into a
@@ -620,6 +621,50 @@ function MediaContentBase({ clip, videoTime, isPlaying, showFullSource = false, 
     return <ParticlesOverlay clip={clip} videoTime={videoTime} />;
   }
 
+  if (clip.mediaType === "waves") {
+    return (
+      <div className="w-full h-full pointer-events-none overflow-hidden" style={{ background: clip.color || "transparent" }}>
+        <WavesOverlay clip={clip} currentTime={videoTime} />
+      </div>
+    );
+  }
+
+  if (clip.mediaType === "gradient") {
+    const stops = (clip.gradientStops ?? [[0, "#6366f1"], [1, "#ec4899"]]) as [number, string][];
+    const stopStr = stops.map(([pos, color]) => `${color} ${(pos * 100).toFixed(1)}%`).join(", ");
+    let bgStyle: string;
+    if (clip.gradientKind === "radial") {
+      bgStyle = `radial-gradient(circle, ${stopStr})`;
+    } else if (clip.gradientKind === "conic") {
+      bgStyle = `conic-gradient(from ${clip.gradientAngle ?? 0}deg, ${stopStr})`;
+    } else {
+      bgStyle = `linear-gradient(${clip.gradientAngle ?? 135}deg, ${stopStr})`;
+    }
+    return <div className="w-full h-full pointer-events-none" style={{ background: bgStyle }} />;
+  }
+
+  if (clip.mediaType === "visualizer") {
+    return (
+      <div className="w-full h-full flex items-end justify-center gap-0.5 p-2 pointer-events-none"
+           style={{ background: "transparent" }}>
+        {Array.from({ length: 32 }, (_, i) => {
+          const h = 10 + 80 * Math.abs(Math.sin(i * 0.8 + videoTime * 3));
+          return (
+            <div
+              key={i}
+              className="flex-1 rounded-sm transition-all duration-75"
+              style={{
+                height: `${h}%`,
+                background: clip.visualizerColor ?? "#22d3ee",
+                opacity: 0.85,
+              }}
+            />
+          );
+        })}
+      </div>
+    );
+  }
+
   return (
     <div
       className="w-full h-full flex items-center justify-center"
@@ -761,10 +806,11 @@ const MediaContent = memo(MediaContentBase, (prev, next) => {
   // Text clips have no native playback element — always re-render on prop changes
   // so live text/style edits show immediately, even while playing.
   if (next.clip.mediaType === "text") return false;
-  // Particles need to re-draw every playhead tick (their canvas does not
-  // animate itself). Always re-render so the simulation advances during
-  // playback and scrubbing alike.
+  // Particles / waves / visualizer need to re-draw every playhead tick.
+  // Always re-render so animation advances during playback and scrubbing.
   if (next.clip.mediaType === "particles") return false;
+  if (next.clip.mediaType === "waves") return false;
+  if (next.clip.mediaType === "visualizer") return false;
   // While playing, the browser advances the video natively — skip re-renders
   // triggered solely by changes in `videoTime`.
   if (next.isPlaying) return true;
@@ -1189,11 +1235,11 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
       const modes: string[] = [];
       for (const { c, r } of resolvedMasks) {
         const depth = c.maskAffectsTracksBelow ?? 0;
-        // Lower trackIndex = drawn first / underneath. A mask only ever
-        // affects clips on tracks BELOW (lower index), and only within the
-        // depth window if one is set.
-        if (clip.trackIndex >= c.trackIndex) continue;
-        if (depth > 0 && clip.trackIndex < c.trackIndex - depth) continue;
+        // In this timeline, lower trackIndex = displayed higher (top of timeline) = drawn beneath in canvas.
+        // A mask layer placed at the top of the timeline (lower trackIndex) affects
+        // clips on tracks BELOW it in the timeline (higher trackIndex).
+        if (clip.trackIndex <= c.trackIndex) continue;
+        if (depth > 0 && clip.trackIndex > c.trackIndex + depth) continue;
         const m = c.mask;
         if (!m || !m.src) continue;
         const url = buildMaskLayerSvgUrl(c, r, m, W, H);

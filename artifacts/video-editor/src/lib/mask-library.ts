@@ -2,7 +2,7 @@ export type MaskPreset = { label: string; src: string; mode: "luminance" | "alph
 
 const _s = (inner: string): string => {
   const full = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>${inner}</svg>`;
-  return "data:image/svg+xml;base64," + btoa(full);
+  return "data:image/svg+xml," + encodeURIComponent(full);
 };
 
 const _lg = (id: string, x1: number, y1: number, x2: number, y2: number, stops: string) =>
@@ -243,12 +243,87 @@ export const MASK_PRESETS: MaskPreset[] = [
   { label: "Text: FILM",   mode: "alpha", group: "Text", src: _s(`<text x='50' y='62' text-anchor='middle' font-family='sans-serif' font-size='22' font-weight='bold' fill='white' letter-spacing='2'>FILM</text>`) },
   { label: "Text: OPEN",   mode: "alpha", group: "Text", src: _s(`<text x='50' y='62' text-anchor='middle' font-family='sans-serif' font-size='22' font-weight='bold' fill='white' letter-spacing='2'>OPEN</text>`) },
   { label: "Text: LIVE",   mode: "alpha", group: "Text", src: _s(`<text x='50' y='62' text-anchor='middle' font-family='sans-serif' font-size='22' font-weight='bold' fill='white' letter-spacing='2'>LIVE</text>`) },
+  { label: "Text: DREAM",  mode: "alpha", group: "Text", src: _s(`<text x='50' y='62' text-anchor='middle' font-family='sans-serif' font-size='16' font-weight='bold' fill='white' letter-spacing='2'>DREAM</text>`) },
+  { label: "Text: PLAY",   mode: "alpha", group: "Text", src: _s(`<text x='50' y='62' text-anchor='middle' font-family='sans-serif' font-size='22' font-weight='bold' fill='white' letter-spacing='2'>PLAY</text>`) },
+  { label: "Text: VIBE",   mode: "alpha", group: "Text", src: _s(`<text x='50' y='62' text-anchor='middle' font-family='sans-serif' font-size='22' font-weight='bold' fill='white' letter-spacing='2'>VIBE</text>`) },
+  { label: "Text: WILD",   mode: "alpha", group: "Text", src: _s(`<text x='50' y='62' text-anchor='middle' font-family='sans-serif' font-size='22' font-weight='bold' fill='white' letter-spacing='2'>WILD</text>`) },
   { label: "Text: A",      mode: "alpha", group: "Text", src: _s(`<text x='50' y='74' text-anchor='middle' font-family='sans-serif' font-size='80' font-weight='bold' fill='white'>A</text>`) },
   { label: "Text: B",      mode: "alpha", group: "Text", src: _s(`<text x='50' y='74' text-anchor='middle' font-family='sans-serif' font-size='80' font-weight='bold' fill='white'>B</text>`) },
   { label: "Text: 0",      mode: "alpha", group: "Text", src: _s(`<text x='50' y='74' text-anchor='middle' font-family='sans-serif' font-size='80' font-weight='bold' fill='white'>0</text>`) },
   { label: "Text: 1",      mode: "alpha", group: "Text", src: _s(`<text x='50' y='74' text-anchor='middle' font-family='sans-serif' font-size='80' font-weight='bold' fill='white'>1</text>`) },
   { label: "Text: &",      mode: "alpha", group: "Text", src: _s(`<text x='50' y='74' text-anchor='middle' font-family='sans-serif' font-size='80' font-weight='bold' fill='white'>&amp;</text>`) },
   { label: "Text: ?",      mode: "alpha", group: "Text", src: _s(`<text x='50' y='74' text-anchor='middle' font-family='sans-serif' font-size='80' font-weight='bold' fill='white'>?</text>`) },
+  { label: "Text: !",      mode: "alpha", group: "Text", src: _s(`<text x='50' y='74' text-anchor='middle' font-family='sans-serif' font-size='80' font-weight='bold' fill='white'>!</text>`) },
+  { label: "Text: *",      mode: "alpha", group: "Text", src: _s(`<text x='50' y='74' text-anchor='middle' font-family='sans-serif' font-size='80' font-weight='bold' fill='white'>*</text>`) },
+
+  // ── Extra Shapes (alpha) ─────────────────────────────────────────────────
+  { label: "Shield",         mode: "alpha", group: "Shapes", src: _s(`<path d='M50 4 L90 16 L90 50 Q90 80 50 96 Q10 80 10 50 L10 16 Z' fill='white'/>`) },
+  { label: "Tag",            mode: "alpha", group: "Shapes", src: _s(`<path d='M10 10 H60 L90 50 L60 90 H10 Z' fill='white'/>`) },
+  { label: "Ribbon L",       mode: "alpha", group: "Shapes", src: _s(`<path d='M0 20 H70 L90 50 L70 80 H0 L20 50 Z' fill='white'/>`) },
+  { label: "Ribbon R",       mode: "alpha", group: "Shapes", src: _s(`<path d='M100 20 H30 L10 50 L30 80 H100 L80 50 Z' fill='white'/>`) },
+  { label: "Callout",        mode: "alpha", group: "Shapes", src: _s(`<path d='M8 8 H92 Q96 8 96 16 V60 Q96 68 92 68 H60 L50 82 L40 68 H8 Q4 68 4 60 V16 Q4 8 8 8 Z' fill='white'/>`) },
+  { label: "Pill H",         mode: "alpha", group: "Shapes", src: _s(`<rect x='4' y='28' width='92' height='44' rx='22' fill='white'/>`) },
+  { label: "Pill V",         mode: "alpha", group: "Shapes", src: _s(`<rect x='28' y='4' width='44' height='92' rx='22' fill='white'/>`) },
+  { label: "Cross",          mode: "alpha", group: "Shapes", src: _s(`<path d='M38 4 H62 V38 H96 V62 H62 V96 H38 V62 H4 V38 H38 Z' fill='white'/>`) },
+  { label: "Bowtie H",       mode: "alpha", group: "Shapes", src: _s(`<path d='M2 10 L50 50 L2 90 L2 10 Z M98 10 L50 50 L98 90 Z' fill='white'/>`) },
+  { label: "Bowtie V",       mode: "alpha", group: "Shapes", src: _s(`<path d='M10 2 L50 50 L90 2 Z M10 98 L50 50 L90 98 Z' fill='white'/>`) },
+  { label: "Wedge R",        mode: "alpha", group: "Shapes", src: _s(`<path d='M4 50 L96 4 L96 96 Z' fill='white'/>`) },
+  { label: "Wedge L",        mode: "alpha", group: "Shapes", src: _s(`<path d='M96 50 L4 4 L4 96 Z' fill='white'/>`) },
+  { label: "Wedge D",        mode: "alpha", group: "Shapes", src: _s(`<path d='M50 96 L4 4 L96 4 Z' fill='white'/>`) },
+  { label: "Wedge U",        mode: "alpha", group: "Shapes", src: _s(`<path d='M50 4 L96 96 L4 96 Z' fill='white'/>`) },
+  { label: "Flag",           mode: "alpha", group: "Shapes", src: _s(`<path d='M10 4 H80 L68 28 L80 52 H10 V96 H4 V4 Z' fill='white'/>`) },
+  { label: "Burst 8",        mode: "alpha", group: "Shapes", src: _s(`<polygon points='${_star(8,50,50,46,36)}' fill='white'/>`) },
+  { label: "Burst 12",       mode: "alpha", group: "Shapes", src: _s(`<polygon points='${_star(12,50,50,46,38)}' fill='white'/>`) },
+  { label: "Burst 16",       mode: "alpha", group: "Shapes", src: _s(`<polygon points='${_star(16,50,50,46,40)}' fill='white'/>`) },
+  { label: "Cog",            mode: "alpha", group: "Shapes", src: _s(`<polygon points='${_star(8,50,50,46,32)}' fill='white'/><circle cx='50' cy='50' r='18' fill='black'/>`) },
+  { label: "Flower 6",       mode: "alpha", group: "Shapes", src: _s(`<circle cx='50' cy='50' r='22' fill='white'/>${[0,1,2,3,4,5].map(i=>`<ellipse cx='${50+32*Math.cos(i*Math.PI/3)}' cy='${50+32*Math.sin(i*Math.PI/3)}' rx='16' ry='22' transform='rotate(${i*60},${50+32*Math.cos(i*Math.PI/3)},${50+32*Math.sin(i*Math.PI/3)})' fill='white'/>`).join("")}`) },
+
+  // ── Extra Organic (alpha) ────────────────────────────────────────────────
+  { label: "Petal",          mode: "alpha", group: "Organic", src: _s(`<path d='M50 10 C68 10 82 28 82 50 C82 72 68 90 50 90 C32 90 18 72 18 50 C18 28 32 10 50 10 Z' fill='white'/>`) },
+  { label: "Crescent",       mode: "alpha", group: "Organic", src: _s(`<path d='M50 4 A46 46 0 1 1 50 96 A30 30 0 1 0 50 4 Z' fill='white'/>`) },
+  { label: "Pac Man",        mode: "alpha", group: "Organic", src: _s(`<path d='M50 50 L96 22 A46 46 0 1 0 96 78 Z' fill='white'/>`) },
+  { label: "Half Circle T",  mode: "alpha", group: "Organic", src: _s(`<path d='M4 50 A46 46 0 0 1 96 50 Z' fill='white'/>`) },
+  { label: "Half Circle B",  mode: "alpha", group: "Organic", src: _s(`<path d='M4 50 A46 46 0 0 0 96 50 L4 50 Z' fill='white'/>`) },
+  { label: "Blob Soft",      mode: "alpha", group: "Organic", src: _s(`<path d='M44 6 C62 2 84 14 90 32 C96 50 88 78 66 90 C44 102 18 88 8 66 C-2 44 10 14 30 6 C36 4 38 8 44 6 Z' fill='white'/>`) },
+  { label: "Blob Wide",      mode: "alpha", group: "Organic", src: _s(`<path d='M14 36 C20 16 38 6 58 8 C78 10 94 26 94 46 C94 66 80 86 60 90 C40 94 16 82 8 62 C2 48 8 56 14 36 Z' fill='white'/>`) },
+  { label: "Splash Lg",      mode: "alpha", group: "Organic", src: _s(`<circle cx='50' cy='50' r='26' fill='white'/>${[0,1,2,3,4,5,6,7].map(i=>`<circle cx='${50+36*Math.cos(i*Math.PI/4)}' cy='${50+36*Math.sin(i*Math.PI/4)}' r='${8+4*(i%2)}' fill='white'/>`).join("")}`) },
+  { label: "Galaxy Arm",     mode: "alpha", group: "Organic", src: _s(`<path d='M50 50 C60 30 80 26 82 46 C84 66 66 82 50 86 C34 90 14 80 10 60 C6 40 22 16 42 14 C62 12 78 24 80 44 Z' fill='none' stroke='white' stroke-width='8' stroke-linecap='round'/>`) },
+  { label: "Smoke Puff",     mode: "alpha", group: "Organic", src: _s(`<circle cx='50' cy='68' r='26' fill='white'/><circle cx='32' cy='52' r='20' fill='white'/><circle cx='66' cy='50' r='22' fill='white'/><circle cx='46' cy='34' r='18' fill='white'/><circle cx='60' cy='26' r='14' fill='white'/>`) },
+
+  // ── Extra Waves (luminance) ──────────────────────────────────────────────
+  { label: "Multi-Wave ↑",   mode: "luminance", group: "Waves", src: _s(`<path d='M0 70 Q12.5 55 25 70 Q37.5 85 50 70 Q62.5 55 75 70 Q87.5 85 100 70 V100 H0 Z' fill='white'/>`) },
+  { label: "Curved Split",   mode: "luminance", group: "Waves", src: _s(`<path d='M0 0 H100 Q50 100 0 100 Z' fill='white'/>`) },
+  { label: "Curved Split 2", mode: "luminance", group: "Waves", src: _s(`<path d='M100 0 H0 Q50 100 100 100 Z' fill='white'/>`) },
+  { label: "Shark Fin",      mode: "luminance", group: "Waves", src: _s(`<path d='M0 0 H100 V60 Q80 30 50 60 Q20 90 0 60 Z' fill='white'/>`) },
+  { label: "Ink Edge",       mode: "luminance", group: "Waves", src: _s(`<path d='M0 0 H100 V100 H0 Z' fill='white'/><path d='M0 50 Q14 38 28 50 Q42 62 56 50 Q70 38 84 50 Q92 56 100 50' fill='none' stroke='black' stroke-width='20'/>`) },
+  { label: "Flame Edge",     mode: "luminance", group: "Waves", src: _s(`<path d='M0 100 V65 C6 58 10 44 16 50 C22 56 24 36 30 42 C36 48 38 30 44 36 C50 42 52 26 58 32 C64 38 66 52 72 46 C78 40 80 56 86 50 C92 44 96 58 100 65 V100 Z' fill='white'/>`) },
+  { label: "Feather Edge H", mode: "luminance", group: "Waves", src: _s(`<defs>${_lg("g",0,0,0,0,`<stop offset='0' stop-color='black'/><stop offset='0.15' stop-color='white'/><stop offset='0.85' stop-color='white'/><stop offset='1' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(#g)'/>`) },
+  { label: "Feather Edge V", mode: "luminance", group: "Waves", src: _s(`<defs>${_lg("g",0,0,0,1,`<stop offset='0' stop-color='black'/><stop offset='0.15' stop-color='white'/><stop offset='0.85' stop-color='white'/><stop offset='1' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(#g)'/>`) },
+  { label: "Trapezoid ↑",    mode: "luminance", group: "Waves", src: _s(`<path d='M20 0 L80 0 L100 100 H0 Z' fill='white'/>`) },
+  { label: "Trapezoid ↓",    mode: "luminance", group: "Waves", src: _s(`<path d='M0 0 H100 L80 100 H20 Z' fill='white'/>`) },
+  { label: "Funnel ↓",       mode: "luminance", group: "Waves", src: _s(`<path d='M0 0 H100 L60 100 H40 Z' fill='white'/>`) },
+  { label: "Funnel ↑",       mode: "luminance", group: "Waves", src: _s(`<path d='M40 0 H60 L100 100 H0 Z' fill='white'/>`) },
+
+  // ── Extra Animated (alpha/luminance) ─────────────────────────────────────
+  { label: "Loading Ring",   mode: "alpha", group: "Animated", src: _s(`<circle cx='50' cy='50' r='40' fill='none' stroke='white' stroke-width='8' stroke-dasharray='60 190'><animateTransform attributeName='transform' type='rotate' from='0 50 50' to='360 50 50' dur='1.5s' repeatCount='indefinite'/></circle>`) },
+  { label: "Comet →",        mode: "luminance", group: "Animated", src: _s(`<defs>${_lg("g",0,0,1,0,`<stop offset='0' stop-color='black'/><stop offset='0.6' stop-color='white'/><stop offset='1' stop-color='white'/>`)}</defs><rect width='100' height='100' fill='url(#g)'><animateTransform attributeName='transform' type='translate' from='-100 0' to='200 0' dur='2s' repeatCount='indefinite'/></rect>`) },
+  { label: "Reveal Circle",  mode: "alpha", group: "Animated", src: _s(`<circle cx='50' cy='50' fill='none' stroke='white' stroke-width='50'><animate attributeName='r' values='0;70;70;0' keyTimes='0;0.4;0.8;1' dur='3s' repeatCount='indefinite'/><animate attributeName='stroke-width' values='50;50;50;50' dur='3s' repeatCount='indefinite'/></circle>`) },
+  { label: "Sweep CW",       mode: "luminance", group: "Animated", src: _s(`<circle cx='50' cy='50' r='50' fill='white' opacity='0.2'/><path fill='white' d='M50 50 L50 0'><animateTransform attributeName='transform' type='rotate' from='0 50 50' to='360 50 50' dur='3s' repeatCount='indefinite'/></path>`) },
+  { label: "Blink",          mode: "alpha", group: "Animated", src: _s(`<rect width='100' height='100' fill='white'><animate attributeName='opacity' values='1;0;1' dur='1s' repeatCount='indefinite'/></rect>`) },
+  { label: "Breathing Ring", mode: "alpha", group: "Animated", src: _s(`<circle cx='50' cy='50' fill='none' stroke='white' stroke-width='6'><animate attributeName='r' values='20;42;20' dur='3s' repeatCount='indefinite'/><animate attributeName='opacity' values='0.5;1;0.5' dur='3s' repeatCount='indefinite'/></circle>`) },
+  { label: "Radar Sweep",    mode: "luminance", group: "Animated", src: _s(`<rect width='100' height='100' fill='black'/><line x1='50' y1='50' x2='50' y2='4' stroke='white' stroke-width='3'><animateTransform attributeName='transform' type='rotate' from='0 50 50' to='360 50 50' dur='4s' repeatCount='indefinite'/></line><circle cx='50' cy='50' r='46' fill='none' stroke='white' stroke-width='1' opacity='0.5'/>`) },
+  { label: "Sonar",          mode: "alpha", group: "Animated", src: _s(`<circle cx='50' cy='50' fill='none' stroke='white' stroke-width='2'><animate attributeName='r' values='5;46' dur='2s' repeatCount='indefinite'/><animate attributeName='opacity' values='1;0' dur='2s' repeatCount='indefinite'/></circle><circle cx='50' cy='50' fill='none' stroke='white' stroke-width='2'><animate attributeName='r' values='5;46' begin='0.5s' dur='2s' repeatCount='indefinite'/><animate attributeName='opacity' values='1;0' begin='0.5s' dur='2s' repeatCount='indefinite'/></circle><circle cx='50' cy='50' fill='none' stroke='white' stroke-width='2'><animate attributeName='r' values='5;46' begin='1s' dur='2s' repeatCount='indefinite'/><animate attributeName='opacity' values='1;0' begin='1s' dur='2s' repeatCount='indefinite'/></circle>`) },
+  { label: "Matrix Fall",    mode: "luminance", group: "Animated", src: _s(`<defs>${_lg("g",0,0,0,1,`<stop offset='0' stop-color='white'/><stop offset='0.2' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(#g)'><animateTransform attributeName='transform' type='translate' from='0 -100' to='0 100' dur='2s' repeatCount='indefinite'/></rect>`) },
+
+  // ── Extra Bokeh (luminance) ──────────────────────────────────────────────
+  { label: "Vignette Full",  mode: "luminance", group: "Bokeh", src: _s(`<defs>${_rg("g",50,50,50,`<stop offset='0.3' stop-color='white'/><stop offset='0.7' stop-color='#808080'/><stop offset='1' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(#g)'/>`) },
+  { label: "Oval Vignette",  mode: "luminance", group: "Bokeh", src: _s(`<defs>${_rg("g",50,50,50,`<stop offset='0.2' stop-color='white'/><stop offset='0.65' stop-color='#a0a0a0'/><stop offset='1' stop-color='black'/>`)}</defs><ellipse cx='50' cy='50' rx='100' ry='64' fill='url(#g)'/>`) },
+  { label: "Spotlight Top",  mode: "luminance", group: "Bokeh", src: _s(`<defs>${_rg("g",50,0,50,`<stop offset='0' stop-color='white'/><stop offset='0.6' stop-color='#808080'/><stop offset='1' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(#g)'/>`) },
+  { label: "Spotlight Bot",  mode: "luminance", group: "Bokeh", src: _s(`<defs>${_rg("g",50,100,50,`<stop offset='0' stop-color='white'/><stop offset='0.6' stop-color='#808080'/><stop offset='1' stop-color='black'/>`)}</defs><rect width='100' height='100' fill='url(#g)'/>`) },
+  { label: "Bi-Color H",     mode: "luminance", group: "Bokeh", src: _s(`<defs>${_lg("g",0,0,1,0,`<stop offset='0' stop-color='white'/><stop offset='0.5' stop-color='black'/><stop offset='1' stop-color='white'/>`)}</defs><rect width='100' height='100' fill='url(#g)'/>`) },
+  { label: "Bi-Color V",     mode: "luminance", group: "Bokeh", src: _s(`<defs>${_lg("g",0,0,0,1,`<stop offset='0' stop-color='white'/><stop offset='0.5' stop-color='black'/><stop offset='1' stop-color='white'/>`)}</defs><rect width='100' height='100' fill='url(#g)'/>`) },
+  { label: "Spotlight Grid", mode: "luminance", group: "Bokeh", src: _s(`${[0,33,66].flatMap(x=>[0,33,66].map(y=>`<circle cx='${x+16.5}' cy='${y+16.5}' r='12' fill='white' opacity='${0.4+Math.random()*0.5}'/>`)).join("")}`) },
+  { label: "Dust Scatter",   mode: "luminance", group: "Bokeh", src: _s(`<rect width='100' height='100' fill='black'/>${Array.from({length:24},(_,i)=>`<circle cx='${4+i*4}' cy='${20+i%5*16}' r='${1+i%3*1.5}' fill='white' opacity='${0.3+i%4*0.15}'/>`).join("")}`) },
 ];
 
 export const MASK_GROUP_ORDER: string[] = [

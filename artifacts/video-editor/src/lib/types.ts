@@ -26,7 +26,16 @@ export type MediaType =
   // `clip.particleKind` plus a handful of physics knobs. The same
   // deterministic-RNG simulation is shared between preview (Canvas) and
   // export (use-export.ts) so the playback matches the rendered file.
-  | "particles";
+  | "particles"
+  // Animated wave overlay — draws one or more animated sine/cosine waves
+  // across the clip rectangle. Driven by clip.waveKind and physics knobs.
+  | "waves"
+  // Gradient clip — renders an animated gradient background (solid, linear,
+  // radial, conic, mesh, or noise) that can be keyframed and blended.
+  | "gradient"
+  // Audio visualizer — reads clip's volume to draw an equalizer bar or
+  // waveform visualizer. Driven by clip.visualizerKind.
+  | "visualizer";
 
 export interface ChromaKey {
   // Enable toggle so users can adjust controls without immediately seeing the
@@ -432,6 +441,28 @@ export interface Clip {
   particleDirection?: "down" | "up" | "left" | "right" | "burst" | "swirl" | "rise";
   particleGravity?: number;      // -2..2 multiplier
   particleTwinkle?: number;      // 0..1 — alpha pulsation amplitude
+  // waves clip type
+  waveKind?: string;             // preset key from waves.ts
+  waveCount?: number;            // 1..8 number of wave layers
+  waveAmplitude?: number;        // 0..1
+  waveFrequency?: number;        // 0.5..10
+  waveSpeed?: number;            // 0.1..5 multiplier
+  waveColor?: string;
+  waveColor2?: string;
+  waveOpacity?: number;          // 0..1
+  waveFill?: boolean;            // filled waves vs stroke-only
+  waveDirection?: "horizontal" | "vertical" | "radial";
+  // gradient clip type
+  gradientKind?: "linear" | "radial" | "conic" | "mesh" | "noise";
+  gradientAngle?: number;        // 0..360
+  gradientStops?: [number, string][];  // [[0, "#ff0000"], [1, "#0000ff"]]
+  gradientAnimated?: boolean;    // true = angle/position animates over time
+  gradientAnimSpeed?: number;    // 0.1..5
+  // visualizer clip type
+  visualizerKind?: "bars" | "wave" | "circle" | "spectrum" | "dots";
+  visualizerColor?: string;
+  visualizerColor2?: string;
+  visualizerSensitivity?: number;
 }
 
 export interface DrawPath {

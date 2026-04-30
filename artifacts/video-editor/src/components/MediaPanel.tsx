@@ -10,6 +10,7 @@ import { TEMPLATES } from "../lib/templates";
 import { SHAPE_LIBRARY } from "../lib/shape-library";
 import { PARTICLE_LIBRARY } from "../lib/particles";
 import { SPECIAL_LAYERS } from "../lib/special-layers";
+import { WAVE_LIBRARY } from "../lib/waves";
 import { loadPresets, deletePreset, type CustomPreset } from "../lib/custom-library";
 import { TEXT_PRESETS as ALL_TEXT_PRESETS, TEXT_PRESET_CATEGORIES, type TextPreset, type TextPresetCategory } from "../lib/text-presets";
 import { buildMotionKeyframes } from "../lib/motion-paths";
@@ -740,6 +741,135 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
                 aria-label={p.label}
               >
                 <span aria-hidden="true">{p.emoji}</span>
+              </button>
+            ))}
+          </div>
+
+          <Separator />
+
+          {/* Waves — animated waveform overlays */}
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Waves ({WAVE_LIBRARY.length})</p>
+          <div className="grid grid-cols-5 gap-1">
+            {WAVE_LIBRARY.map((w) => (
+              <button
+                key={w.key}
+                onClick={() => {
+                  dispatch({
+                    type: "ADD_CLIP",
+                    payload: makeClip({
+                      label: w.label,
+                      mediaType: "waves",
+                      waveKind: w.key,
+                      waveCount: w.defaults.count,
+                      waveAmplitude: w.defaults.amplitude,
+                      waveFrequency: w.defaults.frequency,
+                      waveSpeed: w.defaults.speed,
+                      waveColor: w.defaults.color,
+                      waveColor2: w.defaults.color2,
+                      waveOpacity: w.defaults.opacity,
+                      waveFill: w.defaults.fill,
+                      waveDirection: w.defaults.direction,
+                      trackIndex: 0,
+                      startTime: state.currentTime,
+                      duration: 5,
+                      x: 0, y: 0, width: 1, height: 1,
+                      color: w.defaults.color,
+                    }),
+                  });
+                }}
+                title={`${w.label} — ${w.description}`}
+                className="aspect-square rounded border border-border hover:border-primary/60 hover:scale-105 transition-transform flex items-center justify-center text-2xl bg-background"
+                aria-label={w.label}
+              >
+                <span aria-hidden="true">{w.emoji}</span>
+              </button>
+            ))}
+          </div>
+
+          <Separator />
+
+          {/* Gradient — static or animated gradient fills */}
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Gradients</p>
+          <div className="grid grid-cols-5 gap-1">
+            {[
+              { label: "Sunset", stops: [[0,"#ff6b6b"],[0.5,"#ffd93d"],[1,"#ff6b6b"]] as [number,string][], angle: 135, kind: "linear" as const },
+              { label: "Ocean", stops: [[0,"#0ea5e9"],[1,"#0f172a"]] as [number,string][], angle: 180, kind: "linear" as const },
+              { label: "Aurora", stops: [[0,"#4ade80"],[0.5,"#818cf8"],[1,"#c084fc"]] as [number,string][], angle: 135, kind: "linear" as const },
+              { label: "Fire", stops: [[0,"#fbbf24"],[0.5,"#f97316"],[1,"#7f1d1d"]] as [number,string][], angle: 0, kind: "radial" as const },
+              { label: "Neon", stops: [[0,"#f0abfc"],[0.5,"#818cf8"],[1,"#22d3ee"]] as [number,string][], angle: 90, kind: "linear" as const },
+              { label: "Gold", stops: [[0,"#92400e"],[0.5,"#fbbf24"],[1,"#92400e"]] as [number,string][], angle: 135, kind: "linear" as const },
+              { label: "Night", stops: [[0,"#1e1b4b"],[0.5,"#3730a3"],[1,"#0f172a"]] as [number,string][], angle: 0, kind: "radial" as const },
+              { label: "Berry", stops: [[0,"#7c3aed"],[0.5,"#db2777"],[1,"#7c3aed"]] as [number,string][], angle: 135, kind: "linear" as const },
+              { label: "Forest", stops: [[0,"#14532d"],[0.5,"#4ade80"],[1,"#14532d"]] as [number,string][], angle: 45, kind: "linear" as const },
+              { label: "Conic", stops: [[0,"#ef4444"],[0.33,"#eab308"],[0.67,"#3b82f6"],[1,"#ef4444"]] as [number,string][], angle: 0, kind: "conic" as const },
+            ].map((g) => {
+              const stopStr = g.stops.map(([p,c])=>`${c} ${(p*100).toFixed(0)}%`).join(", ");
+              const bg = g.kind === "radial" ? `radial-gradient(circle, ${stopStr})` : g.kind === "conic" ? `conic-gradient(from 0deg, ${stopStr})` : `linear-gradient(${g.angle}deg, ${stopStr})`;
+              return (
+                <button
+                  key={g.label}
+                  onClick={() => {
+                    dispatch({
+                      type: "ADD_CLIP",
+                      payload: makeClip({
+                        label: `${g.label} Gradient`,
+                        mediaType: "gradient",
+                        gradientKind: g.kind,
+                        gradientAngle: g.angle,
+                        gradientStops: g.stops,
+                        trackIndex: 0,
+                        startTime: state.currentTime,
+                        duration: 5,
+                        x: 0, y: 0, width: 1, height: 1,
+                        color: g.stops[0][1],
+                      }),
+                    });
+                  }}
+                  title={g.label}
+                  className="aspect-square rounded border border-border hover:border-primary/60 hover:scale-105 transition-transform"
+                  style={{ background: bg }}
+                  aria-label={`${g.label} gradient`}
+                />
+              );
+            })}
+          </div>
+
+          <Separator />
+
+          {/* Visualizer — audio-reactive placeholder bars */}
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Visualizers</p>
+          <div className="grid grid-cols-5 gap-1">
+            {[
+              { key: "bars", label: "Bars", color: "#22d3ee" },
+              { key: "wave", label: "Wave", color: "#a855f7" },
+              { key: "circle", label: "Circle", color: "#f97316" },
+              { key: "spectrum", label: "Spectrum", color: "#4ade80" },
+              { key: "dots", label: "Dots", color: "#fbbf24" },
+            ].map((v) => (
+              <button
+                key={v.key}
+                onClick={() => {
+                  dispatch({
+                    type: "ADD_CLIP",
+                    payload: makeClip({
+                      label: `${v.label} Visualizer`,
+                      mediaType: "visualizer",
+                      visualizerKind: v.key as "bars"|"wave"|"circle"|"spectrum"|"dots",
+                      visualizerColor: v.color,
+                      trackIndex: 0,
+                      startTime: state.currentTime,
+                      duration: 5,
+                      x: 0, y: 0, width: 1, height: 1,
+                      color: v.color,
+                    }),
+                  });
+                }}
+                title={v.label}
+                className="aspect-square rounded border border-border hover:border-primary/60 hover:scale-105 transition-transform flex items-center justify-center text-2xl"
+                style={{ background: `${v.color}22` }}
+                aria-label={`${v.label} visualizer`}
+              >
+                <span style={{ color: v.color }} className="text-lg font-bold">{v.label[0]}</span>
               </button>
             ))}
           </div>

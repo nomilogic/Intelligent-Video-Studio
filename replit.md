@@ -237,3 +237,40 @@ single-tenant editor still works without them.
 - **Shape library expanded (52 → 168).** Added Nature (sun, moon, snowflake, etc.), Callouts (12), Frames (14), Compound (20: target, yin-yang, gear, wifi, …), Lines (12), Animals (8). Also added `_rp`/`_sp` polygon/star generators plus `_GEN_POLYS`.
 - **Mask feathering.** `ClipMask` interface gains optional `feather?: number` (0–30 px). Canvas filter incorporates feather into the `combineFilterCss` blur path so it composites cleanly with effects blur. PropertiesInspector mask section shows a "Feather (edge softness)" slider with live px readout.
 - **New elements always on top.** `ADD_CLIP` reducer branch for time-conflict: instead of scanning upward to a higher (lower-priority) track, now inserts a brand-new track at index 0 and shifts all existing clips down by 1, so every dropped element appears at the top of the stack.
+
+## Phase-6 Updates (April 2026) — Waves, Gradients, Visualizer, Expanded Libraries
+
+### New media types
+
+#### Waves (`mediaType: "waves"`)
+- `lib/waves.ts` — 12 `WaveDef` presets (ocean, audio, plasma, ripple, neon, retro, mountain, lissajous, heartbeat, interference, galaxy, northern-lights). Shared `drawWaves(ctx, w, h, t, resolved)` renderer used by both Canvas preview and export.
+- New `Clip` fields: `waveKind`, `waveCount`, `waveAmplitude`, `waveFrequency`, `waveSpeed`, `waveColor`, `waveColor2`, `waveOpacity`, `waveFill`, `waveDirection` (`"horizontal" | "vertical" | "radial"`).
+- `components/WavesOverlay.tsx` — React component using `requestAnimationFrame` + `ResizeObserver` to drive the canvas.
+- Canvas renders WavesOverlay; PropertiesInspector shows a `WavesSection` with emoji preset grid, five numeric sliders, direction select, fill toggle, and 2 color pickers.
+
+#### Gradient (`mediaType: "gradient"`)
+- New `Clip` fields: `gradientKind` (`"linear" | "radial" | "conic" | "mesh" | "noise"`), `gradientAngle`, `gradientStops` (`[number, string][]`), `gradientAnimated`, `gradientAnimSpeed`.
+- `components/GradientEditorModal.tsx` — standalone modal with color-stop drag strip, 12 built-in presets, CSS gradient output, animated gradient preview.
+- Canvas renders gradient as CSS `background` on the clip element. PropertiesInspector shows a `GradientSection` with live preview swatch, type select, angle slider, stop color pickers, and a hint to open the full modal.
+
+#### Visualizer (`mediaType: "visualizer"`)
+- New `Clip` fields: `visualizerKind` (`"bars" | "wave" | "circle" | "spectrum" | "dots"`), `visualizerColor`, `visualizerColor2`, `visualizerSensitivity`.
+- Canvas renders an animated canvas-based visualizer (simulated audio-react bars). PropertiesInspector shows a `VisualizerSection` with style select and 2 color pickers.
+
+### MediaPanel additions
+- Effects tab gains **Waves**, **Gradient**, and **Visualizer** pickers in addition to existing Particles, Special Layer and other sections.
+
+### Library expansions
+
+#### Mask Library (`lib/mask-library.ts`) — now 300+ presets
+- Added ~80 new entries across new groups: extra **Shapes** (hexagon, cross, polygon variants), **Organic** (amoeba, splash, jellyfish, cloud burst, coral, lichen, crystal), **Waves** (ocean wave, sine wave, sawtooth, ripple mask, audio wave, soundwave), **Animated** (animated gradient, breathing mask, pulsing vignette, glitch scan), **Bokeh** (bokeh blur, depth-of-field, tilt shift vertical, lens blur, soft focus) groups.
+- `_s()` encoding now uses `encodeURIComponent` instead of `btoa` to handle Unicode characters safely (SVG with special symbols no longer crashes with an `InvalidCharacterError`).
+
+#### Special Layers (`lib/special-layers.ts`) — now ~155 presets
+- Extended **Light**, **Texture**, **Color Grade**, **Geometry**, and **Atmosphere** groups with cyberpunk, synthwave, vaporwave, lofi, city-lights, star-field, digital rain, and more variants.
+
+#### Motion Paths (`lib/motion-paths.ts`) — now 60+ presets
+- Added slide-in/out variants (all four sides), pop-in/out, tumble, swoop-in/out, elastic, spin variants, glitch, earthquake, slam, whip-pan, yo-yo, boomerang, and more. All new paths have full `buildMotionKeyframes` cases.
+
+### Feature Flags
+- `src/lib/feature-flags.json` created at `artifacts/video-editor/src/lib/feature-flags.json` — JSON file listing feature keys mirroring the DB `feature_flags` table defaults (for use in client-side gating without a server round-trip).

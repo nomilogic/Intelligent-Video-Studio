@@ -6,6 +6,7 @@ import { TRANSITION_LIBRARY as TRANSITION_CATALOG, TRANSITION_CATEGORIES } from 
 import { SHAPE_LIBRARY } from "../lib/shape-library";
 import { SPECIAL_LAYERS } from "../lib/special-layers";
 import { PARTICLE_LIBRARY, getParticleDef } from "../lib/particles";
+import { WAVE_LIBRARY, getWaveDef } from "../lib/waves";
 import { TRANSITION_PRESETS, TRANSITION_PRESET_CATEGORIES, getTransitionPreset } from "../lib/transition-presets";
 import { MOTION_PATHS, buildMotionKeyframes } from "../lib/motion-paths";
 import { savePreset, loadPresets, deletePreset, type CustomPreset } from "../lib/custom-library";
@@ -881,6 +882,127 @@ function ParticleSection({
 }
 
 /**
+ * WavesSection — inspector for `mediaType === "waves"` clips.
+ */
+function WavesSection({ clip, dispatch }: { clip: Clip; dispatch: React.Dispatch<EditorAction> }) {
+  const update = (updates: Partial<Clip>) =>
+    dispatch({ type: "UPDATE_CLIP", payload: { id: clip.id, updates } });
+  const def = getWaveDef(clip.waveKind);
+  return (
+    <Section title="Waves">
+      <div className="grid grid-cols-4 gap-1 max-h-44 overflow-y-auto pr-1">
+        {WAVE_LIBRARY.map((w) => (
+          <button key={w.key}
+            onClick={() => update({ waveKind: w.key, waveCount: undefined, waveAmplitude: undefined, waveFrequency: undefined, waveSpeed: undefined, waveColor: w.defaults.color, waveColor2: w.defaults.color2, waveOpacity: undefined, waveFill: undefined, waveDirection: undefined, label: w.label, color: w.defaults.color })}
+            className={`aspect-square rounded border text-lg flex flex-col items-center justify-center gap-0.5 transition-colors p-0.5 ${clip.waveKind === w.key ? "border-primary bg-primary/15" : "border-border hover:bg-muted/40"}`}
+            title={w.label}
+          >
+            <span>{w.emoji}</span>
+          </button>
+        ))}
+      </div>
+      <NumPair label="Count"     value={clip.waveCount     ?? def?.defaults.count     ?? 3}   min={1}   max={8}   step={1}    onChange={(v) => update({ waveCount: v })} />
+      <NumPair label="Amplitude" value={clip.waveAmplitude ?? def?.defaults.amplitude  ?? 0.15} min={0}   max={1}   step={0.01} onChange={(v) => update({ waveAmplitude: v })} />
+      <NumPair label="Frequency" value={clip.waveFrequency ?? def?.defaults.frequency  ?? 2}   min={0.5} max={10}  step={0.1}  onChange={(v) => update({ waveFrequency: v })} />
+      <NumPair label="Speed"     value={clip.waveSpeed     ?? def?.defaults.speed      ?? 1}   min={0.1} max={5}   step={0.05} onChange={(v) => update({ waveSpeed: v })} snapPoints={[1]} />
+      <NumPair label="Opacity"   value={clip.waveOpacity   ?? def?.defaults.opacity    ?? 0.9} min={0}   max={1}   step={0.05} onChange={(v) => update({ waveOpacity: v })} />
+      <div className="flex items-center gap-2">
+        <Label className="text-[10px] text-muted-foreground w-14">Direction</Label>
+        <Select value={clip.waveDirection ?? def?.defaults.direction ?? "horizontal"} onValueChange={(v) => update({ waveDirection: v as "horizontal"|"vertical"|"radial" })}>
+          <SelectTrigger className="h-7 text-xs flex-1"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="horizontal" className="text-xs">Horizontal</SelectItem>
+            <SelectItem value="vertical" className="text-xs">Vertical</SelectItem>
+            <SelectItem value="radial" className="text-xs">Radial</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex items-center gap-2">
+        <Label className="text-[10px] text-muted-foreground w-14">Fill</Label>
+        <input type="checkbox" checked={clip.waveFill ?? def?.defaults.fill ?? true} onChange={(e) => update({ waveFill: e.target.checked })} className="cursor-pointer" />
+        <Label className="text-[10px] text-muted-foreground w-10">Color 1</Label>
+        <input type="color" value={clip.waveColor ?? def?.defaults.color ?? "#0ea5e9"} onChange={(e) => update({ waveColor: e.target.value, color: e.target.value })} className="h-7 w-10 rounded border border-border p-0.5 cursor-pointer" />
+        <Label className="text-[10px] text-muted-foreground w-10">Color 2</Label>
+        <input type="color" value={clip.waveColor2 ?? def?.defaults.color2 ?? "#0284c7"} onChange={(e) => update({ waveColor2: e.target.value })} className="h-7 w-10 rounded border border-border p-0.5 cursor-pointer" />
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * GradientSection — inspector for `mediaType === "gradient"` clips.
+ */
+function GradientSection({ clip, dispatch }: { clip: Clip; dispatch: React.Dispatch<EditorAction> }) {
+  const update = (updates: Partial<Clip>) =>
+    dispatch({ type: "UPDATE_CLIP", payload: { id: clip.id, updates } });
+  const stops = clip.gradientStops ?? [[0, "#6366f1"], [1, "#ec4899"]] as [number, string][];
+  const stopStr = stops.map(([p, c]) => `${c} ${(p * 100).toFixed(0)}%`).join(", ");
+  const kind = clip.gradientKind ?? "linear";
+  const angle = clip.gradientAngle ?? 135;
+  const bg = kind === "radial" ? `radial-gradient(circle, ${stopStr})` : kind === "conic" ? `conic-gradient(from ${angle}deg, ${stopStr})` : `linear-gradient(${angle}deg, ${stopStr})`;
+  return (
+    <Section title="Gradient">
+      <div className="w-full h-14 rounded-lg border border-border mb-1" style={{ background: bg }} />
+      <div className="flex items-center gap-2">
+        <Label className="text-[10px] text-muted-foreground w-14">Type</Label>
+        <Select value={kind} onValueChange={(v) => update({ gradientKind: v as "linear"|"radial"|"conic"|"mesh"|"noise" })}>
+          <SelectTrigger className="h-7 text-xs flex-1"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="linear" className="text-xs">Linear</SelectItem>
+            <SelectItem value="radial" className="text-xs">Radial</SelectItem>
+            <SelectItem value="conic" className="text-xs">Conic</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {(kind === "linear" || kind === "conic") && (
+        <NumPair label="Angle" value={angle} min={0} max={360} step={1} onChange={(v) => update({ gradientAngle: v })} />
+      )}
+      <div className="space-y-1">
+        <Label className="text-[10px] text-muted-foreground">Color Stops</Label>
+        {stops.map(([pos, color], i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input type="color" value={color} onChange={(e) => { const s = [...stops]; s[i] = [s[i][0], e.target.value]; update({ gradientStops: s as [number, string][] }); }} className="h-7 w-10 rounded border border-border p-0.5 cursor-pointer" />
+            <span className="text-[10px] text-muted-foreground w-8">{(pos * 100).toFixed(0)}%</span>
+          </div>
+        ))}
+      </div>
+      <p className="text-[10px] text-muted-foreground">Open the Gradient Editor from Effects tab for full stop control.</p>
+    </Section>
+  );
+}
+
+/**
+ * VisualizerSection — inspector for `mediaType === "visualizer"` clips.
+ */
+function VisualizerSection({ clip, dispatch }: { clip: Clip; dispatch: React.Dispatch<EditorAction> }) {
+  const update = (updates: Partial<Clip>) =>
+    dispatch({ type: "UPDATE_CLIP", payload: { id: clip.id, updates } });
+  return (
+    <Section title="Visualizer">
+      <div className="flex items-center gap-2">
+        <Label className="text-[10px] text-muted-foreground w-14">Style</Label>
+        <Select value={clip.visualizerKind ?? "bars"} onValueChange={(v) => update({ visualizerKind: v as "bars"|"wave"|"circle"|"spectrum"|"dots" })}>
+          <SelectTrigger className="h-7 text-xs flex-1"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="bars" className="text-xs">Bars</SelectItem>
+            <SelectItem value="wave" className="text-xs">Wave</SelectItem>
+            <SelectItem value="circle" className="text-xs">Circle</SelectItem>
+            <SelectItem value="spectrum" className="text-xs">Spectrum</SelectItem>
+            <SelectItem value="dots" className="text-xs">Dots</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex items-center gap-2">
+        <Label className="text-[10px] text-muted-foreground w-14">Color</Label>
+        <input type="color" value={clip.visualizerColor ?? "#22d3ee"} onChange={(e) => update({ visualizerColor: e.target.value, color: e.target.value })} className="h-7 w-10 rounded border border-border p-0.5 cursor-pointer" />
+        <Label className="text-[10px] text-muted-foreground w-14">Color 2</Label>
+        <input type="color" value={clip.visualizerColor2 ?? "#818cf8"} onChange={(e) => update({ visualizerColor2: e.target.value })} className="h-7 w-10 rounded border border-border p-0.5 cursor-pointer" />
+      </div>
+    </Section>
+  );
+}
+
+/**
  * TransitionPresetPicker — search + category filter on top of the 500+
  * transition preset library. Picking a preset compiles to a
  * `ClipTransition` with `type: "param"` so the renderer can build the
@@ -1661,6 +1783,24 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
                 <>
                   <Separator />
                   <ParticleSection clip={clip} dispatch={dispatch} />
+                </>
+              )}
+              {clip.mediaType === "waves" && (
+                <>
+                  <Separator />
+                  <WavesSection clip={clip} dispatch={dispatch} />
+                </>
+              )}
+              {clip.mediaType === "gradient" && (
+                <>
+                  <Separator />
+                  <GradientSection clip={clip} dispatch={dispatch} />
+                </>
+              )}
+              {clip.mediaType === "visualizer" && (
+                <>
+                  <Separator />
+                  <VisualizerSection clip={clip} dispatch={dispatch} />
                 </>
               )}
 
