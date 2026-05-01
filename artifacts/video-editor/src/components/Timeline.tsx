@@ -51,6 +51,41 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [dragTrackIdx, setDragTrackIdx] = useState<number | null>(null);
   const [dropTrackIdx, setDropTrackIdx] = useState<number | null>(null);
+  const [clipboardClips, setClipboardClips] = useState<Clip[]>([]);
+  const [clipCtxMenu, setClipCtxMenu] = useState<{ x: number; y: number; clipId: string } | null>(null);
+
+  // ── Clip copy/paste keyboard shortcuts ────────────────────────────────────
+  useEffect(() => {
+    const copySelected = () => {
+      const selected = state.clips.filter((c) => state.selectedClipIds.includes(c.id));
+      if (selected.length) setClipboardClips(selected);
+    };
+    const pasteClips = () => {
+      if (!clipboardClips.length) return;
+      dispatch({ type: "PASTE_CLIPS", payload: { clips: clipboardClips, pasteTime: state.currentTime } });
+    };
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if ((e.metaKey || e.ctrlKey) && e.key === "c") { e.preventDefault(); copySelected(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "v") { e.preventDefault(); pasteClips(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "d") {
+        e.preventDefault();
+        state.selectedClipIds.forEach((id) => dispatch({ type: "DUPLICATE_CLIP", payload: id }));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [state.clips, state.selectedClipIds, state.currentTime, clipboardClips, dispatch]);
+
+  // Close context menu on outside click
+  useEffect(() => {
+    if (!clipCtxMenu) return;
+    const close = () => setClipCtxMenu(null);
+    window.addEventListener("click", close);
+    window.addEventListener("contextmenu", close);
+    return () => { window.removeEventListener("click", close); window.removeEventListener("contextmenu", close); };
+  }, [clipCtxMenu]);
 
   useEffect(() => {
     if (dragTrackIdx === null) return;
@@ -946,6 +981,14 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
                           e.stopPropagation();
                           dispatch({ type: "SELECT_CLIP", payload: clip.id });
                         }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (!state.selectedClipIds.includes(clip.id)) {
+                            dispatch({ type: "SELECT_CLIP", payload: clip.id });
+                          }
+                          setClipCtxMenu({ x: e.clientX, y: e.clientY, clipId: clip.id });
+                        }}
                       >
                         {/* Image thumbnail backdrop */}
                         {clip.mediaType === "image" && clip.src && (
@@ -1101,6 +1144,52 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
           </div>
         </div>
       </div>
+
+      {/* ── Clip right-click context menu ─────────────────────────────── */}
+      {clipCtxMenu && (() => {
+        const ctxClip = state.clips.find((c) => c.id === clipCtxMenu.clipId);
+        if (!ctxClip) return null;
+        const multiSelected = state.selectedClipIds.length > 1;
+        const label = multiSelected ? `${state.selectedClipIds.length} clips` : (ctxClip.label || "Clip");
+        return (
+          <div
+            className="fixed z-[9999] min-w-[180px] rounded-md border border-border bg-popover shadow-xl text-sm overflow-hidden"
+            style={{ left: clipCtxMenu.x, top: clipCtxMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-1.5 text-[10px] text-muted-foreground border-b border-border">{label}</div>
+            <button className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/60 text-left" onClick={() => {
+              const toCopy = multiSelected ? state.clips.filter((c) => state.selectedClipIds.includes(c.id)) : [ctxClip];
+              setClipboardClips(toCopy);
+              setClipCtxMenu(null);
+            }}>
+              <Copy className="w-3.5 h-3.5 text-muted-foreground" /> Copy <span className="ml-auto text-[10px] text-muted-foreground">Ctrl+C</span>
+            </button>
+            <button className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/60 text-left disabled:opacity-40" disabled={!clipboardClips.length} onClick={() => {
+              if (!clipboardClips.length) return;
+              dispatch({ type: "PASTE_CLIPS", payload: { clips: clipboardClips, pasteTime: state.currentTime } });
+              setClipCtxMenu(null);
+            }}>
+              <Copy className="w-3.5 h-3.5 text-muted-foreground rotate-180" /> Paste <span className="ml-auto text-[10px] text-muted-foreground">Ctrl+V</span>
+            </button>
+            <button className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/60 text-left" onClick={() => {
+              const ids = multiSelected ? state.selectedClipIds : [ctxClip.id];
+              ids.forEach((id) => dispatch({ type: "DUPLICATE_CLIP", payload: id }));
+              setClipCtxMenu(null);
+            }}>
+              <Copy className="w-3.5 h-3.5 text-muted-foreground" /> Duplicate <span className="ml-auto text-[10px] text-muted-foreground">Ctrl+D</span>
+            </button>
+            <div className="border-t border-border" />
+            <button className="w-full flex items-center gap-2 px-3 py-2 hover:bg-destructive/20 text-destructive text-left" onClick={() => {
+              const ids = multiSelected ? state.selectedClipIds : [ctxClip.id];
+              ids.forEach((id) => dispatch({ type: "DELETE_CLIP", payload: id }));
+              setClipCtxMenu(null);
+            }}>
+              <Trash2 className="w-3.5 h-3.5" /> Delete <span className="ml-auto text-[10px] text-muted-foreground opacity-60">Del</span>
+            </button>
+          </div>
+        );
+      })()}
     </div>
   );
 }

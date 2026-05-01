@@ -27,7 +27,7 @@ import {
   Maximize2, Minimize2, Move, Square,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
-  Layers,
+  Layers, ChevronDown, ChevronRight as ChevronRightIcon,
 } from "lucide-react";
 import { Dispatch, useEffect, useRef, useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -67,14 +67,37 @@ const FILTER_PRESETS = [
   { name: "Dreamy", key: "dreamy" },
 ];
 
-function Section({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
+function Section({
+  title, action, children, defaultOpen = true, storageKey,
+}: {
+  title: string; action?: React.ReactNode; children: React.ReactNode;
+  defaultOpen?: boolean; storageKey?: string;
+}) {
+  const key = storageKey ?? `pi-section-${title.replace(/\s+/g, "-").toLowerCase()}`;
+  const [open, setOpen] = useState<boolean>(() => {
+    try { const v = localStorage.getItem(key); return v === null ? defaultOpen : v === "1"; }
+    catch { return defaultOpen; }
+  });
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    try { localStorage.setItem(key, next ? "1" : "0"); } catch {}
+  };
   return (
     <div>
-      <div className="flex items-center justify-between px-3 py-1.5 bg-muted/10">
-        <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-medium">{title}</p>
-        {action}
+      <div
+        className="flex items-center justify-between px-3 py-1.5 bg-muted/10 cursor-pointer select-none hover:bg-muted/20 transition-colors"
+        onClick={toggle}
+      >
+        <div className="flex items-center gap-1.5">
+          {open
+            ? <ChevronDown className="w-3 h-3 text-muted-foreground" />
+            : <ChevronRightIcon className="w-3 h-3 text-muted-foreground" />}
+          <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-medium">{title}</p>
+        </div>
+        {action && <div onClick={(e) => e.stopPropagation()}>{action}</div>}
       </div>
-      <div className="px-3 pb-3 pt-2 space-y-2.5">{children}</div>
+      {open && <div className="px-3 pb-3 pt-2 space-y-2.5">{children}</div>}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
-import { Plus, Trash2, Film, Music, Image as ImageIcon, Type, Square, Sparkles, Layout, Droplets, Shapes, Bookmark } from "lucide-react";
+import { Plus, Trash2, Film, Music, Image as ImageIcon, Type, Square, Sparkles, Layout, Droplets, Shapes, Bookmark, Scissors, ChevronDown, ChevronRight } from "lucide-react";
+import { SmartEditsPanel } from "./SmartEditsPanel";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
@@ -71,9 +72,247 @@ async function probeDuration(src: string, type: "video" | "audio"): Promise<numb
   });
 }
 
+// ─── Collapsible group for the Effects tab ─────────────────────────────────
+function EffectsGroup({ title, children, defaultOpen = true }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
+  const key = `mp-effects-${title.replace(/\s+/g, "-").toLowerCase()}`;
+  const [open, setOpen] = useState<boolean>(() => {
+    try { const v = localStorage.getItem(key); return v === null ? defaultOpen : v === "1"; }
+    catch { return defaultOpen; }
+  });
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    try { localStorage.setItem(key, next ? "1" : "0"); } catch {}
+  };
+  return (
+    <div className="border border-border/40 rounded-md overflow-hidden">
+      <button
+        className="w-full flex items-center gap-1.5 px-2 py-1.5 bg-muted/20 hover:bg-muted/40 transition-colors text-left select-none"
+        onClick={toggle}
+      >
+        {open ? <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" /> : <ChevronRight className="w-3 h-3 text-muted-foreground shrink-0" />}
+        <span className="text-[10px] uppercase tracking-widest font-medium text-muted-foreground flex-1">{title}</span>
+      </button>
+      {open && <div className="p-2 space-y-1.5">{children}</div>}
+    </div>
+  );
+}
+
+// ─── Effects tab — fully reorganized with collapsible sections ─────────────
+function EffectsTabContent({ state, dispatch }: { state: EditorState; dispatch: React.Dispatch<EditorAction> }) {
+  const addAtCurrentTime = (payload: Parameters<typeof makeClip>[0]) => {
+    dispatch({
+      type: "ADD_CLIP",
+      payload: makeClip({ ...payload, trackIndex: 0, startTime: state.currentTime, duration: 5, x: 0, y: 0, width: 1, height: 1 }),
+    });
+  };
+
+  const GRADIENT_PRESETS = [
+    { label: "Sunset", stops: [[0,"#ff6b6b"],[0.5,"#ffd93d"],[1,"#ff6b6b"]] as [number,string][], angle: 135, kind: "linear" as const },
+    { label: "Ocean", stops: [[0,"#0ea5e9"],[1,"#0f172a"]] as [number,string][], angle: 180, kind: "linear" as const },
+    { label: "Aurora", stops: [[0,"#4ade80"],[0.5,"#818cf8"],[1,"#c084fc"]] as [number,string][], angle: 135, kind: "linear" as const },
+    { label: "Fire", stops: [[0,"#fbbf24"],[0.5,"#f97316"],[1,"#7f1d1d"]] as [number,string][], angle: 0, kind: "radial" as const },
+    { label: "Neon", stops: [[0,"#f0abfc"],[0.5,"#818cf8"],[1,"#22d3ee"]] as [number,string][], angle: 90, kind: "linear" as const },
+    { label: "Gold", stops: [[0,"#92400e"],[0.5,"#fbbf24"],[1,"#92400e"]] as [number,string][], angle: 135, kind: "linear" as const },
+    { label: "Night", stops: [[0,"#1e1b4b"],[0.5,"#3730a3"],[1,"#0f172a"]] as [number,string][], angle: 0, kind: "radial" as const },
+    { label: "Berry", stops: [[0,"#7c3aed"],[0.5,"#db2777"],[1,"#7c3aed"]] as [number,string][], angle: 135, kind: "linear" as const },
+    { label: "Forest", stops: [[0,"#14532d"],[0.5,"#4ade80"],[1,"#14532d"]] as [number,string][], angle: 45, kind: "linear" as const },
+    { label: "Conic", stops: [[0,"#ef4444"],[0.33,"#eab308"],[0.67,"#3b82f6"],[1,"#ef4444"]] as [number,string][], angle: 0, kind: "conic" as const },
+  ];
+
+  const VISUALIZER_PRESETS = [
+    { key: "bars", label: "Bars", color: "#22d3ee", icon: "▮▮▮" },
+    { key: "wave", label: "Wave", color: "#a855f7", icon: "〜" },
+    { key: "circle", label: "Circle", color: "#f97316", icon: "◎" },
+    { key: "spectrum", label: "Spectrum", color: "#4ade80", icon: "≋" },
+    { key: "dots", label: "Dots", color: "#fbbf24", icon: "···" },
+  ];
+
+  const specialCategories = [...new Set(SPECIAL_LAYERS.map((s) => s.category))];
+
+  return (
+    <div className="flex flex-col flex-1 overflow-y-auto p-2 space-y-2">
+      {/* ── Animated Particles ─── */}
+      <EffectsGroup title={`✨ Particles (${PARTICLE_LIBRARY.length})`}>
+        <p className="text-[9px] text-muted-foreground">Animated overlays — snow, fire, confetti and more. Tune in the inspector.</p>
+        <div className="grid grid-cols-5 gap-1">
+          {PARTICLE_LIBRARY.map((p) => (
+            <button
+              key={p.key}
+              onClick={() => addAtCurrentTime({ label: p.label, mediaType: "particles", particleKind: p.key, color: p.defaults.color })}
+              title={`${p.label} — ${p.description}`}
+              className="aspect-square rounded border border-border hover:border-primary/60 hover:scale-105 transition-transform flex items-center justify-center text-2xl bg-background"
+              data-testid={`particle-${p.key}`}
+              aria-label={p.label}
+            >
+              <span aria-hidden="true">{p.emoji}</span>
+            </button>
+          ))}
+        </div>
+      </EffectsGroup>
+
+      {/* ── Animated Waves ─── */}
+      <EffectsGroup title={`🌊 Waves (${WAVE_LIBRARY.length})`}>
+        <p className="text-[9px] text-muted-foreground">Animated canvas waves. Colors & speed tunable in inspector.</p>
+        <div className="grid grid-cols-5 gap-1">
+          {WAVE_LIBRARY.map((w) => (
+            <button
+              key={w.key}
+              onClick={() => addAtCurrentTime({ label: w.label, mediaType: "waves", waveKind: w.key, waveCount: w.defaults.count, waveAmplitude: w.defaults.amplitude, waveFrequency: w.defaults.frequency, waveSpeed: w.defaults.speed, waveColor: w.defaults.color, waveColor2: w.defaults.color2, waveOpacity: w.defaults.opacity, waveFill: w.defaults.fill, waveDirection: w.defaults.direction, color: w.defaults.color })}
+              title={`${w.label} — ${w.description}`}
+              className="aspect-square rounded border border-border hover:border-primary/60 hover:scale-105 transition-transform flex items-center justify-center text-2xl bg-background"
+              aria-label={w.label}
+            >
+              <span aria-hidden="true">{w.emoji}</span>
+            </button>
+          ))}
+        </div>
+      </EffectsGroup>
+
+      {/* ── Gradients ─── */}
+      <EffectsGroup title="🎨 Gradients">
+        <div className="grid grid-cols-5 gap-1">
+          {GRADIENT_PRESETS.map((g) => {
+            const stopStr = g.stops.map(([p, c]) => `${c} ${(p * 100).toFixed(0)}%`).join(", ");
+            const bg = g.kind === "radial" ? `radial-gradient(circle, ${stopStr})` : g.kind === "conic" ? `conic-gradient(from 0deg, ${stopStr})` : `linear-gradient(${g.angle}deg, ${stopStr})`;
+            return (
+              <button
+                key={g.label}
+                onClick={() => dispatch({ type: "ADD_CLIP", payload: makeClip({ label: `${g.label} Gradient`, mediaType: "gradient", gradientKind: g.kind, gradientAngle: g.angle, gradientStops: g.stops, trackIndex: 0, startTime: state.currentTime, duration: 5, x: 0, y: 0, width: 1, height: 1, color: g.stops[0][1] }) })}
+                title={g.label}
+                className="aspect-square rounded border border-border hover:border-primary/60 hover:scale-105 transition-transform"
+                style={{ background: bg }}
+                aria-label={`${g.label} gradient`}
+              />
+            );
+          })}
+        </div>
+      </EffectsGroup>
+
+      {/* ── Visualizers ─── */}
+      <EffectsGroup title="🎵 Visualizers (Audio-React)">
+        <div className="grid grid-cols-5 gap-1">
+          {VISUALIZER_PRESETS.map((v) => (
+            <button
+              key={v.key}
+              onClick={() => addAtCurrentTime({ label: `${v.label} Visualizer`, mediaType: "visualizer", visualizerKind: v.key as "bars"|"wave"|"circle"|"spectrum"|"dots", visualizerColor: v.color, color: v.color })}
+              title={v.label}
+              className="aspect-square rounded border border-border hover:border-primary/60 hover:scale-105 transition-transform flex flex-col items-center justify-center gap-0.5"
+              style={{ background: `${v.color}18` }}
+              aria-label={`${v.label} visualizer`}
+            >
+              <span style={{ color: v.color }} className="text-xs font-bold">{v.icon}</span>
+              <span className="text-[8px] text-muted-foreground">{v.label}</span>
+            </button>
+          ))}
+        </div>
+      </EffectsGroup>
+
+      {/* ── Adjustment Layers ─── */}
+      <EffectsGroup title="🔧 Adjustment Layers">
+        <p className="text-[9px] text-muted-foreground">Non-destructive adjustment layers that affect clips beneath them.</p>
+        <Button
+          variant="outline" size="sm" className="w-full h-7 text-xs gap-2 justify-start"
+          data-testid="add-mask-layer"
+          onClick={() => dispatch({ type: "ADD_CLIP", payload: makeClip({ label: "Mask Layer", mediaType: "maskLayer", trackIndex: Math.min(state.clips.length, state.tracks.length - 1), startTime: state.currentTime, duration: 5, x: 0.2, y: 0.2, width: 0.6, height: 0.6, color: "#a855f7" }) })}
+        >
+          <Shapes className="w-3 h-3" /> Mask Layer
+        </Button>
+        <Button
+          variant="outline" size="sm" className="w-full h-7 text-xs gap-2 justify-start"
+          data-testid="add-logo-blur"
+          onClick={() => dispatch({ type: "ADD_CLIP", payload: makeClip({ label: "Logo Blur", mediaType: "logoBlur", trackIndex: Math.min(state.clips.length, state.tracks.length - 1), startTime: state.currentTime, duration: 5, x: 0.7, y: 0.05, width: 0.25, height: 0.1, color: "#f97316", blurAmount: 16 }) })}
+        >
+          <Droplets className="w-3 h-3" /> Logo Blur
+        </Button>
+        <Button
+          variant="outline" size="sm" className="w-full h-7 text-xs gap-2 justify-start"
+          data-testid="add-effects-layer"
+          onClick={() => { const preset = SPECIAL_LAYERS.find((s) => s.key === "tealOrange") ?? SPECIAL_LAYERS[0]; dispatch({ type: "ADD_CLIP", payload: makeClip({ label: "Effects Layer", mediaType: "specialLayer", specialKind: preset.key, specialIntensity: preset.intensity, specialColor: preset.color, blendMode: preset.blend, trackIndex: 0, startTime: state.currentTime, duration: 5, x: 0, y: 0, width: 1, height: 1, color: preset.color }) }); }}
+        >
+          <Sparkles className="w-3 h-3" /> Color Grade Layer
+        </Button>
+      </EffectsGroup>
+
+      {/* ── Animated Text Layers ─── */}
+      <EffectsGroup title={`✍️ Animated Text (${ANIMATED_TEXT_LAYERS.length})`} defaultOpen={false}>
+        <p className="text-[9px] text-muted-foreground">One click adds styled text with motion keyframes. Edit content in inspector.</p>
+        <div className="grid grid-cols-2 gap-1.5">
+          {ANIMATED_TEXT_LAYERS.map((atl) => (
+            <button
+              key={atl.key}
+              title={atl.description}
+              className="relative rounded border border-border hover:border-primary/60 bg-black/40 hover:bg-black/60 transition-colors overflow-hidden text-left p-2"
+              style={{ borderLeft: `3px solid ${atl.clipColor}` }}
+              onClick={() => {
+                const t0 = state.currentTime;
+                const dur = 5;
+                const clipId = crypto.randomUUID();
+                dispatch({ type: "ADD_CLIP", payload: makeClip({ id: clipId, label: atl.label, mediaType: "text", text: atl.text, textStyle: { ...DEFAULT_TEXT_STYLE, ...atl.style } as TextStyle, animationIn: atl.animationIn, animationOut: atl.animationOut, trackIndex: 0, startTime: t0, duration: dur, x: atl.x, y: atl.y, width: atl.w, height: atl.h, color: atl.clipColor }) });
+                if (atl.motionPath !== "none") {
+                  const snapshot = { id: clipId, startTime: t0, duration: dur, x: atl.x, y: atl.y, scale: 1, rotation: 0 };
+                  buildMotionKeyframes(atl.motionPath, snapshot).forEach(({ property, time, value, easing }) => {
+                    dispatch({ type: "ADD_KEYFRAME", payload: { clipId, property, time, value, easing } });
+                  });
+                }
+              }}
+              data-testid={`atl-${atl.key}`}
+            >
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <span className="text-base leading-none">{atl.emoji}</span>
+                <span className="text-[10px] font-medium text-foreground leading-tight">{atl.label}</span>
+              </div>
+              <p className="text-[9px] text-muted-foreground leading-snug line-clamp-2">{atl.description}</p>
+            </button>
+          ))}
+        </div>
+      </EffectsGroup>
+
+      {/* ── Cinematic Overlays / Special Layers (at bottom) ─── */}
+      {specialCategories.map((cat) => {
+        const catLayers = SPECIAL_LAYERS.filter((s) => s.category === cat);
+        const catLabel = {
+          "Light": "💡 Light Leaks & Lens Effects",
+          "Texture": "🌿 Texture Overlays",
+          "Color Grade": "🎨 Color Grades & LUTs",
+          "Geometry": "📐 Geometric Overlays",
+          "Atmosphere": "🌫 Atmosphere & Environment",
+          "Extended Light": "✨ Extended Light Effects",
+          "Extended Texture": "🌾 Extended Textures",
+          "Extended Grade": "🎞 Extended Color Grades",
+          "Extended Geometry": "🔷 Extended Geometry",
+          "Extended Atmosphere": "🌌 Extended Atmosphere",
+        }[cat] ?? `🎬 ${cat}`;
+        return (
+          <EffectsGroup key={cat} title={catLabel} defaultOpen={false}>
+            <div className="grid grid-cols-6 gap-1">
+              {catLayers.map((s) => (
+                <button
+                  key={s.key}
+                  onClick={() => dispatch({ type: "ADD_CLIP", payload: makeClip({ label: s.name, mediaType: "specialLayer", specialKind: s.key, specialIntensity: s.intensity, specialColor: s.color, blendMode: s.blend, trackIndex: 0, startTime: state.currentTime, duration: 5, x: 0, y: 0, width: 1, height: 1, color: s.color }) })}
+                  title={`${s.name} · ${s.category}`}
+                  className="aspect-square rounded border border-border hover:border-primary/60 hover:scale-105 transition-transform"
+                  style={{ background: `linear-gradient(135deg, ${s.color}, ${s.color}55)` }}
+                  data-testid={`special-${s.key}`}
+                  aria-label={s.name}
+                />
+              ))}
+            </div>
+          </EffectsGroup>
+        );
+      })}
+
+      <div className="text-[9px] text-muted-foreground p-2 leading-relaxed border border-border/30 rounded">
+        <p className="font-medium mb-1 flex items-center gap-1"><Sparkles className="w-3 h-3" /> Pro Tip</p>
+        <p>Use the AI bar at the top to generate effects, animations, transitions, and more with natural language.</p>
+      </div>
+    </div>
+  );
+}
+
 export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [activeTab, setActiveTab] = useState<"media" | "gallery" | "effects" | "assets" | "templates">("media");
+  const [activeTab, setActiveTab] = useState<"media" | "gallery" | "effects" | "assets" | "templates" | "smartedits">("media");
   const [gallerySubTab, setGallerySubTab] = useState<"stock" | "saved" | "text">("stock");
   // Asset library tab state
   const [assetProvider, setAssetProvider] = useState<"giphy" | "pexels" | "iconify" | "lottie">("giphy");
@@ -368,18 +607,19 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
 
   return (
     <div data-testid="media-panel" className="w-60 flex flex-col border-r border-border bg-card shrink-0 overflow-hidden">
-      <div className="flex border-b border-border">
+      <div className="flex border-b border-border overflow-x-auto scrollbar-none">
         {[
           { key: "media" as const, label: "Media" },
           { key: "gallery" as const, label: "Gallery" },
           { key: "effects" as const, label: "Effects" },
+          { key: "smartedits" as const, label: "Smart" },
           { key: "assets" as const, label: "Assets" },
           { key: "templates" as const, label: "Templates" },
         ].map((t) => (
           <button
             key={t.key}
             className={cn(
-              "flex-1 text-xs font-medium py-2 transition-colors",
+              "shrink-0 flex-1 text-xs font-medium py-2 transition-colors",
               activeTab === t.key ? "text-primary border-b-2 border-primary" : "text-muted-foreground hover:text-foreground",
             )}
             onClick={() => setActiveTab(t.key)}
@@ -388,6 +628,11 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
           </button>
         ))}
       </div>
+      {activeTab === "smartedits" && (
+        <div className="flex-1 overflow-hidden flex flex-col">
+          <SmartEditsPanel state={state} dispatch={dispatch} />
+        </div>
+      )}
 
       {activeTab === "media" && (
         <div className="flex flex-col flex-1 overflow-hidden">
@@ -660,366 +905,7 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
       )}
 
       {activeTab === "effects" && (
-        <div className="flex flex-col flex-1 overflow-y-auto p-2 space-y-2">
-          {/*
-            Special Layers — 50 cinematic overlays (light leaks, grain,
-            vignette, color grades, geometry overlays, atmosphere). Each
-            adds a `mediaType: "specialLayer"` clip configured with the
-            preset's intensity & tint color.
-          */}
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Special Layers ({SPECIAL_LAYERS.length})</p>
-          {/*
-            Special Layers grid — name labels removed; the inspector panel
-            covers all configuration once a layer is added. Hover for the
-            tooltip to see the preset name + category.
-          */}
-          <div className="grid grid-cols-6 gap-1">
-            {SPECIAL_LAYERS.map((s) => (
-              <button
-                key={s.key}
-                onClick={() => {
-                  dispatch({
-                    type: "ADD_CLIP",
-                    payload: makeClip({
-                      label: s.name,
-                      mediaType: "specialLayer",
-                      specialKind: s.key,
-                      specialIntensity: s.intensity,
-                      specialColor: s.color,
-                      blendMode: s.blend,
-                      trackIndex: 0, // overlay track
-                      startTime: state.currentTime,
-                      duration: 5,
-                      x: 0, y: 0, width: 1, height: 1,
-                      color: s.color,
-                    }),
-                  });
-                }}
-                title={`${s.name} · ${s.category}`}
-                className="aspect-square rounded border border-border hover:border-primary/60 hover:scale-105 transition-transform"
-                style={{
-                  background: `linear-gradient(135deg, ${s.color}, ${s.color}55)`,
-                }}
-                data-testid={`special-${s.key}`}
-                aria-label={s.name}
-              />
-            ))}
-          </div>
-
-          <Separator />
-
-          {/*
-            Particles — animated overlays (snow, confetti, sparkles, rain,
-            etc.) rendered in real time via the shared `drawParticles()`
-            helper. Each picker entry adds a `mediaType: "particles"`
-            clip seeded with the kind's defaults; the inspector exposes
-            count / size / speed / color / direction sliders for tuning.
-          */}
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Particles ({PARTICLE_LIBRARY.length})</p>
-          <div className="grid grid-cols-5 gap-1">
-            {PARTICLE_LIBRARY.map((p) => (
-              <button
-                key={p.key}
-                onClick={() => {
-                  dispatch({
-                    type: "ADD_CLIP",
-                    payload: makeClip({
-                      label: p.label,
-                      mediaType: "particles",
-                      particleKind: p.key,
-                      trackIndex: 0, // overlay track
-                      startTime: state.currentTime,
-                      duration: 5,
-                      x: 0, y: 0, width: 1, height: 1,
-                      color: p.defaults.color,
-                    }),
-                  });
-                }}
-                title={`${p.label} — ${p.description}`}
-                className="aspect-square rounded border border-border hover:border-primary/60 hover:scale-105 transition-transform flex items-center justify-center text-2xl bg-background"
-                data-testid={`particle-${p.key}`}
-                aria-label={p.label}
-              >
-                <span aria-hidden="true">{p.emoji}</span>
-              </button>
-            ))}
-          </div>
-
-          <Separator />
-
-          {/* Waves — animated waveform overlays */}
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Waves ({WAVE_LIBRARY.length})</p>
-          <div className="grid grid-cols-5 gap-1">
-            {WAVE_LIBRARY.map((w) => (
-              <button
-                key={w.key}
-                onClick={() => {
-                  dispatch({
-                    type: "ADD_CLIP",
-                    payload: makeClip({
-                      label: w.label,
-                      mediaType: "waves",
-                      waveKind: w.key,
-                      waveCount: w.defaults.count,
-                      waveAmplitude: w.defaults.amplitude,
-                      waveFrequency: w.defaults.frequency,
-                      waveSpeed: w.defaults.speed,
-                      waveColor: w.defaults.color,
-                      waveColor2: w.defaults.color2,
-                      waveOpacity: w.defaults.opacity,
-                      waveFill: w.defaults.fill,
-                      waveDirection: w.defaults.direction,
-                      trackIndex: 0,
-                      startTime: state.currentTime,
-                      duration: 5,
-                      x: 0, y: 0, width: 1, height: 1,
-                      color: w.defaults.color,
-                    }),
-                  });
-                }}
-                title={`${w.label} — ${w.description}`}
-                className="aspect-square rounded border border-border hover:border-primary/60 hover:scale-105 transition-transform flex items-center justify-center text-2xl bg-background"
-                aria-label={w.label}
-              >
-                <span aria-hidden="true">{w.emoji}</span>
-              </button>
-            ))}
-          </div>
-
-          <Separator />
-
-          {/* Gradient — static or animated gradient fills */}
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Gradients</p>
-          <div className="grid grid-cols-5 gap-1">
-            {[
-              { label: "Sunset", stops: [[0,"#ff6b6b"],[0.5,"#ffd93d"],[1,"#ff6b6b"]] as [number,string][], angle: 135, kind: "linear" as const },
-              { label: "Ocean", stops: [[0,"#0ea5e9"],[1,"#0f172a"]] as [number,string][], angle: 180, kind: "linear" as const },
-              { label: "Aurora", stops: [[0,"#4ade80"],[0.5,"#818cf8"],[1,"#c084fc"]] as [number,string][], angle: 135, kind: "linear" as const },
-              { label: "Fire", stops: [[0,"#fbbf24"],[0.5,"#f97316"],[1,"#7f1d1d"]] as [number,string][], angle: 0, kind: "radial" as const },
-              { label: "Neon", stops: [[0,"#f0abfc"],[0.5,"#818cf8"],[1,"#22d3ee"]] as [number,string][], angle: 90, kind: "linear" as const },
-              { label: "Gold", stops: [[0,"#92400e"],[0.5,"#fbbf24"],[1,"#92400e"]] as [number,string][], angle: 135, kind: "linear" as const },
-              { label: "Night", stops: [[0,"#1e1b4b"],[0.5,"#3730a3"],[1,"#0f172a"]] as [number,string][], angle: 0, kind: "radial" as const },
-              { label: "Berry", stops: [[0,"#7c3aed"],[0.5,"#db2777"],[1,"#7c3aed"]] as [number,string][], angle: 135, kind: "linear" as const },
-              { label: "Forest", stops: [[0,"#14532d"],[0.5,"#4ade80"],[1,"#14532d"]] as [number,string][], angle: 45, kind: "linear" as const },
-              { label: "Conic", stops: [[0,"#ef4444"],[0.33,"#eab308"],[0.67,"#3b82f6"],[1,"#ef4444"]] as [number,string][], angle: 0, kind: "conic" as const },
-            ].map((g) => {
-              const stopStr = g.stops.map(([p,c])=>`${c} ${(p*100).toFixed(0)}%`).join(", ");
-              const bg = g.kind === "radial" ? `radial-gradient(circle, ${stopStr})` : g.kind === "conic" ? `conic-gradient(from 0deg, ${stopStr})` : `linear-gradient(${g.angle}deg, ${stopStr})`;
-              return (
-                <button
-                  key={g.label}
-                  onClick={() => {
-                    dispatch({
-                      type: "ADD_CLIP",
-                      payload: makeClip({
-                        label: `${g.label} Gradient`,
-                        mediaType: "gradient",
-                        gradientKind: g.kind,
-                        gradientAngle: g.angle,
-                        gradientStops: g.stops,
-                        trackIndex: 0,
-                        startTime: state.currentTime,
-                        duration: 5,
-                        x: 0, y: 0, width: 1, height: 1,
-                        color: g.stops[0][1],
-                      }),
-                    });
-                  }}
-                  title={g.label}
-                  className="aspect-square rounded border border-border hover:border-primary/60 hover:scale-105 transition-transform"
-                  style={{ background: bg }}
-                  aria-label={`${g.label} gradient`}
-                />
-              );
-            })}
-          </div>
-
-          <Separator />
-
-          {/* Visualizer — audio-reactive placeholder bars */}
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Visualizers</p>
-          <div className="grid grid-cols-5 gap-1">
-            {[
-              { key: "bars", label: "Bars", color: "#22d3ee" },
-              { key: "wave", label: "Wave", color: "#a855f7" },
-              { key: "circle", label: "Circle", color: "#f97316" },
-              { key: "spectrum", label: "Spectrum", color: "#4ade80" },
-              { key: "dots", label: "Dots", color: "#fbbf24" },
-            ].map((v) => (
-              <button
-                key={v.key}
-                onClick={() => {
-                  dispatch({
-                    type: "ADD_CLIP",
-                    payload: makeClip({
-                      label: `${v.label} Visualizer`,
-                      mediaType: "visualizer",
-                      visualizerKind: v.key as "bars"|"wave"|"circle"|"spectrum"|"dots",
-                      visualizerColor: v.color,
-                      trackIndex: 0,
-                      startTime: state.currentTime,
-                      duration: 5,
-                      x: 0, y: 0, width: 1, height: 1,
-                      color: v.color,
-                    }),
-                  });
-                }}
-                title={v.label}
-                className="aspect-square rounded border border-border hover:border-primary/60 hover:scale-105 transition-transform flex items-center justify-center text-2xl"
-                style={{ background: `${v.color}22` }}
-                aria-label={`${v.label} visualizer`}
-              >
-                <span style={{ color: v.color }} className="text-lg font-bold">{v.label[0]}</span>
-              </button>
-            ))}
-          </div>
-
-          <Separator />
-
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Adjustment Layers</p>
-          <p className="text-[10px] text-muted-foreground leading-snug">
-            These sit on the timeline like normal clips and affect the visual composite within their rectangle. Animate position, size and rotation with keyframes.
-          </p>
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full h-7 text-xs gap-2 justify-start"
-            data-testid="add-mask-layer"
-            onClick={() => {
-              dispatch({
-                type: "ADD_CLIP",
-                payload: makeClip({
-                  label: "Mask Layer",
-                  mediaType: "maskLayer",
-                  trackIndex: Math.min(state.clips.length, state.tracks.length - 1),
-                  startTime: state.currentTime,
-                  duration: 5,
-                  x: 0.2, y: 0.2, width: 0.6, height: 0.6,
-                  color: "#a855f7",
-                }),
-              });
-            }}
-          >
-            <Shapes className="w-3 h-3" /> Mask Layer
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full h-7 text-xs gap-2 justify-start"
-            data-testid="add-logo-blur"
-            onClick={() => {
-              dispatch({
-                type: "ADD_CLIP",
-                payload: makeClip({
-                  label: "Logo Blur",
-                  mediaType: "logoBlur",
-                  trackIndex: Math.min(state.clips.length, state.tracks.length - 1),
-                  startTime: state.currentTime,
-                  duration: 5,
-                  x: 0.7, y: 0.05, width: 0.25, height: 0.1,
-                  color: "#f97316",
-                  blurAmount: 16,
-                }),
-              });
-            }}
-          >
-            <Droplets className="w-3 h-3" /> Logo Blur
-          </Button>
-          {/*
-            Effects Layer — a full-frame color/grade adjustment built on
-            top of the existing `specialLayer` infrastructure. We seed it
-            with the "tealOrange" colorWash preset so users get a visible
-            cinematic grade immediately; the inspector lets them swap the
-            preset, intensity and tint colors afterwards.
-          */}
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full h-7 text-xs gap-2 justify-start"
-            data-testid="add-effects-layer"
-            onClick={() => {
-              const preset = SPECIAL_LAYERS.find((s) => s.key === "tealOrange") ?? SPECIAL_LAYERS[0];
-              dispatch({
-                type: "ADD_CLIP",
-                payload: makeClip({
-                  label: "Effects Layer",
-                  mediaType: "specialLayer",
-                  specialKind: preset.key,
-                  specialIntensity: preset.intensity,
-                  specialColor: preset.color,
-                  blendMode: preset.blend,
-                  trackIndex: 0,
-                  startTime: state.currentTime,
-                  duration: 5,
-                  x: 0, y: 0, width: 1, height: 1,
-                  color: preset.color,
-                }),
-              });
-            }}
-          >
-            <Sparkles className="w-3 h-3" /> Effects Layer
-          </Button>
-
-          <Separator />
-
-          {/* ── Animated Text Layers ─────────────────────────────────── */}
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Animated Text Layers ({ANIMATED_TEXT_LAYERS.length})</p>
-          <p className="text-[10px] text-muted-foreground leading-snug">
-            One click adds a styled text clip with motion keyframes already applied. Edit the text content in the inspector.
-          </p>
-          <div className="grid grid-cols-2 gap-1.5">
-            {ANIMATED_TEXT_LAYERS.map((atl) => (
-              <button
-                key={atl.key}
-                title={atl.description}
-                className="relative rounded border border-border hover:border-primary/60 bg-black/40 hover:bg-black/60 transition-colors overflow-hidden text-left p-2"
-                style={{ borderLeft: `3px solid ${atl.clipColor}` }}
-                onClick={() => {
-                  const t0 = state.currentTime;
-                  const dur = 5;
-                  const clipId = crypto.randomUUID();
-                  dispatch({
-                    type: "ADD_CLIP",
-                    payload: makeClip({
-                      id: clipId,
-                      label: atl.label,
-                      mediaType: "text",
-                      text: atl.text,
-                      textStyle: { ...DEFAULT_TEXT_STYLE, ...atl.style } as TextStyle,
-                      animationIn: atl.animationIn,
-                      animationOut: atl.animationOut,
-                      trackIndex: 0,
-                      startTime: t0,
-                      duration: dur,
-                      x: atl.x, y: atl.y, width: atl.w, height: atl.h,
-                      color: atl.clipColor,
-                    }),
-                  });
-                  if (atl.motionPath !== "none") {
-                    const snapshot = { id: clipId, startTime: t0, duration: dur, x: atl.x, y: atl.y, scale: 1, rotation: 0 };
-                    buildMotionKeyframes(atl.motionPath, snapshot).forEach(({ property, time, value, easing }) => {
-                      dispatch({ type: "ADD_KEYFRAME", payload: { clipId, property, time, value, easing } });
-                    });
-                  }
-                }}
-                data-testid={`atl-${atl.key}`}
-              >
-                <div className="flex items-center gap-1.5 mb-0.5">
-                  <span className="text-base leading-none">{atl.emoji}</span>
-                  <span className="text-[10px] font-medium text-foreground leading-tight">{atl.label}</span>
-                </div>
-                <p className="text-[9px] text-muted-foreground leading-snug line-clamp-2">{atl.description}</p>
-              </button>
-            ))}
-          </div>
-
-          <Separator />
-
-          <div className="text-[10px] text-muted-foreground p-2 leading-relaxed">
-            <p className="font-medium mb-1 flex items-center gap-1"><Sparkles className="w-3 h-3" /> Pro Tip</p>
-            <p>Use the AI bar at the top to generate effects, animations, transitions, and more with natural language.</p>
-          </div>
-        </div>
+        <EffectsTabContent state={state} dispatch={dispatch} />
       )}
 
       {activeTab === "assets" && (
