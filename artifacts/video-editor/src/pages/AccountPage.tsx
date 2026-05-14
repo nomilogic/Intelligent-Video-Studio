@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Film, Cloud, ShieldCheck, Mail, FolderOpen, FileVideo, FileAudio, FileImage, File, ChevronRight, X, FolderClosed, Download } from "lucide-react";
+import { Loader2, Film, Cloud, ShieldCheck, Mail, FolderOpen, FileVideo, FileAudio, FileImage, File, ChevronRight, X, FolderClosed, Download, Plus } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { useToast } from "@/hooks/use-toast";
@@ -41,10 +41,10 @@ function CloudBrowserModal({
   const loadFolder = useCallback(async (folderId: string) => {
     setLoading(true);
     try {
-      const data = await apiFetch<CloudFolderItem[]>(
+      const data = await apiFetch<{ items: CloudFolderItem[] }>(
         `/cloud/${provider}/list${folderId !== "root" ? `?folderId=${encodeURIComponent(folderId)}` : ""}`,
       );
-      setItems(data);
+      setItems(data.items ?? []);
     } catch (err: any) {
       toast({ title: "Failed to list folder", description: err.message, variant: "destructive" });
     } finally {
@@ -121,7 +121,7 @@ function CloudBrowserModal({
               {items.map((item) => (
                 <div
                   key={item.id}
-                  className={`flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors ${item.kind === "folder" ? "cursor-pointer" : ""}`}
+                  className={`group flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors ${item.kind === "folder" ? "cursor-pointer" : ""}`}
                   onClick={() => item.kind === "folder" ? openFolder(item) : undefined}
                 >
                   {fileIcon(item)}
@@ -131,8 +131,8 @@ function CloudBrowserModal({
                   </div>
                   {item.kind === "file" && (
                     <button
-                      title="Download / import"
-                      className="opacity-0 hover:opacity-100 group-hover:opacity-60 shrink-0 p-1 rounded hover:bg-muted/60 transition-all"
+                      title="Download file"
+                      className="opacity-0 group-hover:opacity-100 shrink-0 p-1 rounded hover:bg-muted/60 transition-all"
                       onClick={(e) => { e.stopPropagation(); handleDownload(item); }}
                     >
                       <Download className="w-3.5 h-3.5 text-muted-foreground" />

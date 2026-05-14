@@ -108,6 +108,8 @@ export interface ExportStatus {
   progress: number;
   errorMsg?: string;
   downloadedFile?: string;
+  exportBlob?: Blob;
+  exportFilename?: string;
   mode?: ExportMode;
 }
 
@@ -1718,7 +1720,7 @@ export function useExport(state: EditorState) {
 
       const filename = `export-${Date.now()}.${ext}`;
       downloadBlob(blob, filename);
-      setExportStatus({ phase: "done", progress: 1, downloadedFile: filename, mode: config.mode });
+      setExportStatus({ phase: "done", progress: 1, downloadedFile: filename, exportBlob: blob, exportFilename: filename, mode: config.mode });
     } catch (err: any) {
       console.error("Export error:", err);
       if (err?.message === "Cancelled") {
@@ -1815,7 +1817,7 @@ export function useExport(state: EditorState) {
       const filename = `audio-export-${Date.now()}.${ext}`;
       downloadBlob(blob, filename);
       audioCtx.close();
-      setExportStatus({ phase: "done", progress: 1, downloadedFile: filename });
+      setExportStatus({ phase: "done", progress: 1, downloadedFile: filename, exportBlob: blob, exportFilename: filename });
     } catch (err: any) {
       console.error("Audio export error:", err);
       setExportStatus({ phase: "error", progress: 0, errorMsg: err?.message ?? String(err) });

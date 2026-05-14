@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import {
   Plus,
   Trash2,
@@ -15,7 +15,17 @@ import {
   Scissors,
   ChevronDown,
   ChevronRight,
+  Cloud,
+  FolderClosed,
+  FileVideo,
+  FileAudio,
+  FileImage,
+  File,
+  Loader2,
+  RefreshCw,
 } from "lucide-react";
+import { apiFetch } from "@/lib/api-client";
+import { useAuth } from "@/lib/auth-context";
 import { SmartEditsPanel } from "./SmartEditsPanel";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -1169,9 +1179,84 @@ function EffectsTabContent({
 
 export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<
-    "media" | "gallery" | "effects" | "assets" | "templates" | "smartedits"
+    "media" | "gallery" | "effects" | "assets" | "templates" | "smartedits" | "cloud"
   >("media");
+
+  // ── Cloud Drive state ──────────────────────────────────────────
+  interface CloudFolderItem {
+    id: string; name: string; kind: "folder" | "file";
+    mimeType?: string; size?: number; modifiedAt?: string; thumbnail?: string;
+  }
+  interface CloudProviderRow {
+    provider: string; connected: boolean;
+    accountEmail?: string | null; accountName?: string | null;
+  }
+  const [cloudProviders, setCloudProviders] = useState<CloudProviderRow[]>([]);
+  const [cloudProvider, setCloudProvider] = useState<string | null>(null);
+  const [cloudPath, setCloudPath] = useState<{ id: string; name: string }[]>([{ id: "root", name: "Root" }]);
+  const [cloudItems, setCloudItems] = useState<CloudFolderItem[]>([]);
+  const [cloudLoading, setCloudLoading] = useState(false);
+  const [cloudProvidersLoaded, setCloudProvidersLoaded] = useState(false);
+
+  const CLOUD_LABELS: Record<string, string> = {
+    google_drive: "Google Drive",
+    dropbox: "Dropbox",
+    onedrive: "OneDrive",
+    terabox: "TeraBox",
+  };
+
+  const loadCloudProviders = useCallback(async () => {
+    if (!user) return;
+    try {
+      const data = await apiFetch<{ providers: { provider: string; configured: boolean }[]; connections: Record<string, { connected: boolean; accountEmail?: string | null; accountName?: string | null }> }>("/cloud/providers");
+      const connected = data.providers
+        .filter((p) => data.connections[p.provider]?.connected)
+        .map((p) => ({ provider: p.provider, ...data.connections[p.provider] }));
+      setCloudProviders(connected);
+      if (connected.length > 0 && !cloudProvider) setCloudProvider(connected[0].provider);
+      setCloudProvidersLoaded(true);
+    } catch { setCloudProvidersLoaded(true); }
+  }, [user, cloudProvider]);
+
+  const cloudFolderId = cloudPath[cloudPath.length - 1].id;
+
+  const loadCloudFolder = useCallback(async (folderId: string, provider: string | null) => {
+    if (!provider) return;
+    setCloudLoading(true);
+    try {
+      const data = await apiFetch<{ items: CloudFolderItem[] }>(
+        `/cloud/${provider}/list${folderId !== "root" ? `?folderId=${encodeURIComponent(folderId)}` : ""}`,
+      );
+      setCloudItems(data.items ?? []);
+    } catch { setCloudItems([]); }
+    finally { setCloudLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "cloud" && !cloudProvidersLoaded) loadCloudProviders();
+  }, [activeTab, cloudProvidersLoaded, loadCloudProviders]);
+
+  useEffect(() => {
+    if (activeTab === "cloud" && cloudProvider) loadCloudFolder(cloudFolderId, cloudProvider);
+  }, [activeTab, cloudProvider, cloudFolderId, loadCloudFolder]);
+
+  const addCloudFileToTimeline = (item: CloudFolderItem) => {
+    if (!cloudProvider) return;
+    const mt = item.mimeType ?? "";
+    const mediaType: "video" | "audio" | "image" = mt.startsWith("video/") ? "video" : mt.startsWith("audio/") ? "audio" : mt.startsWith("image/") ? "image" : "video";
+    const src = `/api/cloud/${cloudProvider}/download/${encodeURIComponent(item.id)}`;
+    const asset = {
+      id: `cloud-${cloudProvider}-${item.id}`,
+      name: item.name.replace(/\.[^.]+$/, ""),
+      src,
+      mediaType,
+      duration: mediaType === "image" ? 5 : 10,
+    };
+    dispatch({ type: "ADD_ASSET", payload: asset });
+    addAssetToTimeline(asset);
+  };
   const [gallerySubTab, setGallerySubTab] = useState<
     "stock" | "saved" | "text"
   >("stock");
@@ -1604,6 +1689,7 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
           { key: "smartedits" as const, label: "Smart" },
           { key: "assets" as const, label: "Assets" },
           { key: "templates" as const, label: "Templates" },
+          { key: "cloud" as const, label: "Cloud" },
         ].map((t) => (
           <button
             key={t.key}
@@ -2281,6 +2367,134 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
                 </div>
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Cloud Drive Tab ─────────────────────────────────────── */}
+      {activeTab === "cloud" && (
+        <div className="flex flex-col flex-1 overflow-hidden">
+          {!user ? (
+            <div className="flex flex-col items-center justify-center flex-1 gap-3 px-6 text-center">
+              <Cloud className="w-8 h-8 text-muted-foreground/40" />
+              <p className="text-sm font-medium">Cloud Drive</p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Sign in to browse and import files from your connected Google Drive, Dropbox, or OneDrive.
+              </p>
+            </div>
+          ) : !cloudProvidersLoaded ? (
+            <div className="flex items-center justify-center flex-1">
+              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : cloudProviders.length === 0 ? (
+            <div className="flex flex-col items-center justify-center flex-1 gap-3 px-6 text-center">
+              <Cloud className="w-8 h-8 text-muted-foreground/40" />
+              <p className="text-sm font-medium">No cloud drives connected</p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Connect Google Drive, Dropbox, or OneDrive in Account settings to import files directly.
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Provider selector */}
+              {cloudProviders.length > 1 && (
+                <div className="flex gap-1 px-2 pt-2">
+                  {cloudProviders.map((p) => (
+                    <button
+                      key={p.provider}
+                      className={`flex-1 text-[10px] py-1 rounded-md border transition-colors ${cloudProvider === p.provider ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted/30"}`}
+                      onClick={() => {
+                        setCloudProvider(p.provider);
+                        setCloudPath([{ id: "root", name: "Root" }]);
+                      }}
+                    >
+                      {CLOUD_LABELS[p.provider] ?? p.provider}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Breadcrumb */}
+              <div className="flex items-center gap-1 px-2 py-1.5 overflow-x-auto scrollbar-none">
+                {cloudPath.map((crumb, i) => (
+                  <span key={crumb.id} className="flex items-center gap-1 shrink-0">
+                    {i > 0 && <ChevronRight className="w-3 h-3 text-muted-foreground" />}
+                    <button
+                      className={`text-[10px] px-1 py-0.5 rounded transition-colors ${i === cloudPath.length - 1 ? "text-foreground font-medium" : "text-muted-foreground hover:text-foreground"}`}
+                      onClick={() => {
+                        if (i < cloudPath.length - 1) setCloudPath(cloudPath.slice(0, i + 1));
+                      }}
+                    >
+                      {crumb.name}
+                    </button>
+                  </span>
+                ))}
+                <button
+                  className="ml-auto p-1 rounded hover:bg-muted/40 transition-colors shrink-0"
+                  title="Refresh"
+                  onClick={() => loadCloudFolder(cloudFolderId, cloudProvider)}
+                >
+                  <RefreshCw className="w-3 h-3 text-muted-foreground" />
+                </button>
+              </div>
+
+              {/* File list */}
+              <div className="flex-1 overflow-y-auto">
+                {cloudLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : cloudItems.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground">
+                    <FolderClosed className="w-6 h-6 opacity-40" />
+                    <p className="text-xs">Empty folder</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-border/30">
+                    {cloudItems.map((item) => {
+                      const mt = item.mimeType ?? "";
+                      const isVideo = mt.startsWith("video/");
+                      const isAudio = mt.startsWith("audio/");
+                      const isImage = mt.startsWith("image/");
+                      const Icon = item.kind === "folder" ? FolderClosed : isVideo ? FileVideo : isAudio ? FileAudio : isImage ? FileImage : File;
+                      return (
+                        <div
+                          key={item.id}
+                          className={`group flex items-center gap-2 px-3 py-2 hover:bg-muted/30 transition-colors ${item.kind === "folder" ? "cursor-pointer" : ""}`}
+                          onClick={() => {
+                            if (item.kind === "folder") {
+                              setCloudPath([...cloudPath, { id: item.id, name: item.name }]);
+                            }
+                          }}
+                        >
+                          <Icon className={`w-3.5 h-3.5 shrink-0 ${item.kind === "folder" ? "text-amber-400" : "text-muted-foreground"}`} />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs truncate text-foreground">{item.name}</div>
+                            {item.size && (
+                              <div className="text-[9px] text-muted-foreground">
+                                {item.size > 1024 * 1024 ? `${(item.size / 1024 / 1024).toFixed(1)} MB` : `${Math.round(item.size / 1024)} KB`}
+                              </div>
+                            )}
+                          </div>
+                          {item.kind === "file" && (item.mimeType?.startsWith("video/") || item.mimeType?.startsWith("audio/") || item.mimeType?.startsWith("image/")) && (
+                            <button
+                              title="Add to timeline"
+                              className="opacity-0 group-hover:opacity-100 shrink-0 p-1 rounded bg-primary/80 hover:bg-primary transition-all"
+                              onClick={(e) => { e.stopPropagation(); addCloudFileToTimeline(item); }}
+                            >
+                              <Plus className="w-3 h-3 text-white" />
+                            </button>
+                          )}
+                          {item.kind === "folder" && (
+                            <ChevronRight className="w-3 h-3 text-muted-foreground shrink-0" />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}

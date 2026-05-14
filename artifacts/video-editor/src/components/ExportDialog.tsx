@@ -1,5 +1,7 @@
-import { useState } from "react";
-import { Download, X, Loader2, Music, Video, EyeOff, Zap, Sparkles } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Download, X, Loader2, Music, Video, EyeOff, Zap, Sparkles, Cloud, CheckCircle2 } from "lucide-react";
+import { apiFetch } from "@/lib/api-client";
+import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -27,10 +29,64 @@ export default function ExportDialog({
   state, open, onOpenChange,
   exportStatus, onStart, onAudioExport, onCancel, onReset,
 }: ExportDialogProps) {
+  const { user } = useAuth();
   const [resolution, setResolution] = useState<Resolution>("full");
   const [format, setFormat] = useState<ExportFormat>("mp4");
   const [fps, setFps] = useState<FpsOption>(DEFAULT_FPS);
   const [mode, setMode] = useState<ExportMode>("optimized");
+
+  // Cloud save state
+  const [cloudProviders, setCloudProviders] = useState<{ provider: string; label: string }[]>([]);
+  const [cloudSaveProvider, setCloudSaveProvider] = useState<string>("");
+  const [cloudSaving, setCloudSaving] = useState(false);
+  const [cloudSaved, setCloudSaved] = useState<string | null>(null);
+  const [cloudError, setCloudError] = useState<string | null>(null);
+
+  const CLOUD_LABELS: Record<string, string> = {
+    google_drive: "Google Drive",
+    dropbox: "Dropbox",
+    onedrive: "OneDrive",
+  };
+
+  useEffect(() => {
+    if (!user || exportStatus.phase !== "done") return;
+    apiFetch<{ providers: { provider: string; configured: boolean }[]; connections: Record<string, { connected: boolean }> }>("/cloud/providers")
+      .then((data) => {
+        const connected = data.providers
+          .filter((p) => data.connections[p.provider]?.connected)
+          .map((p) => ({ provider: p.provider, label: CLOUD_LABELS[p.provider] ?? p.provider }));
+        setCloudProviders(connected);
+        if (connected.length > 0) setCloudSaveProvider(connected[0].provider);
+      })
+      .catch(() => {});
+  }, [user, exportStatus.phase]);
+
+  const handleCloudSave = async () => {
+    if (!exportStatus.exportBlob || !cloudSaveProvider) return;
+    setCloudSaving(true);
+    setCloudError(null);
+    setCloudSaved(null);
+    try {
+      const ext = exportStatus.exportFilename?.split(".").pop() ?? "mp4";
+      const mimeType = ext === "webm" ? "video/webm" : ext === "gif" ? "image/gif" : "video/mp4";
+      const filename = exportStatus.exportFilename ?? `export.${ext}`;
+      // Convert blob → base64 (backend expects JSON { base64, filename, mimeType })
+      const arrayBuf = await exportStatus.exportBlob.arrayBuffer();
+      const uint8 = new Uint8Array(arrayBuf);
+      let binary = "";
+      for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i]);
+      const base64 = btoa(binary);
+      const result = await apiFetch<{ name: string; id: string }>(`/cloud/${cloudSaveProvider}/export`, {
+        method: "POST",
+        body: { base64, filename, mimeType },
+      });
+      setCloudSaved(result.name ?? filename);
+    } catch (err: any) {
+      setCloudError(err?.message ?? "Upload failed");
+    } finally {
+      setCloudSaving(false);
+    }
+  };
 
   const isRunning = exportStatus.phase === "loading" || exportStatus.phase === "rendering" || exportStatus.phase === "encoding";
 
@@ -274,12 +330,62 @@ export default function ExportDialog({
 
         {/* Done */}
         {exportStatus.phase === "done" && (
-          <div className="space-y-3 text-center py-2">
-            <div className="text-2xl">✅</div>
-            <p className="text-sm font-medium">Export complete!</p>
-            {exportStatus.downloadedFile && (
-              <p className="text-xs text-muted-foreground font-mono break-all">{exportStatus.downloadedFile}</p>
+          <div className="space-y-3 py-2">
+            <div className="text-center space-y-1">
+              <div className="text-2xl">✅</div>
+              <p className="text-sm font-medium">Export complete!</p>
+              {exportStatus.downloadedFile && (
+                <p className="text-xs text-muted-foreground font-mono break-all">{exportStatus.downloadedFile}</p>
+              )}
+            </div>
+
+            {/* Cloud Save section */}
+            {user && cloudProviders.length > 0 && (
+              <div className="border border-border rounded-lg p-3 space-y-2">
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium flex items-center gap-1.5">
+                  <Cloud className="w-3 h-3" />
+                  Save to Cloud
+                </p>
+
+                {cloudSaved ? (
+                  <div className="flex items-center gap-2 text-xs text-green-500">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">Saved: {cloudSaved}</span>
+                  </div>
+                ) : (
+                  <>
+                    {cloudProviders.length > 1 && (
+                      <select
+                        className="w-full text-xs bg-muted/30 border border-border rounded px-2 py-1.5 text-foreground"
+                        value={cloudSaveProvider}
+                        onChange={(e) => setCloudSaveProvider(e.target.value)}
+                      >
+                        {cloudProviders.map((p) => (
+                          <option key={p.provider} value={p.provider}>{p.label}</option>
+                        ))}
+                      </select>
+                    )}
+                    {cloudProviders.length === 1 && (
+                      <p className="text-xs text-muted-foreground">{cloudProviders[0].label}</p>
+                    )}
+                    {cloudError && (
+                      <p className="text-[10px] text-destructive">{cloudError}</p>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full gap-1.5 text-xs"
+                      disabled={cloudSaving || !exportStatus.exportBlob}
+                      onClick={handleCloudSave}
+                    >
+                      {cloudSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Cloud className="w-3 h-3" />}
+                      {cloudSaving ? "Uploading…" : `Upload to ${cloudProviders.find(p => p.provider === cloudSaveProvider)?.label ?? "Cloud"}`}
+                    </Button>
+                  </>
+                )}
+              </div>
             )}
+
             <Button variant="outline" size="sm" className="w-full" onClick={onReset}>
               Export again
             </Button>
