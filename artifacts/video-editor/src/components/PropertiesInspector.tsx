@@ -1827,6 +1827,57 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
                 </>
               )}
 
+              {clip.mediaType === "adjustment" && (
+                <>
+                  <Separator />
+                  <Section title="Adjustments">
+                    <p className="text-[10px] text-muted-foreground leading-relaxed">
+                      Non-destructive color grading applied to all clips beneath this layer.
+                    </p>
+                    {([
+                      { key: "brightness", label: "Brightness", min: 0, max: 200, def: 100 },
+                      { key: "contrast", label: "Contrast", min: 0, max: 200, def: 100 },
+                      { key: "saturation", label: "Saturation", min: 0, max: 200, def: 100 },
+                      { key: "temperature", label: "Temperature", min: -100, max: 100, def: 0 },
+                      { key: "tint", label: "Tint", min: -100, max: 100, def: 0 },
+                      { key: "highlights", label: "Highlights", min: -100, max: 100, def: 0 },
+                      { key: "shadows", label: "Shadows", min: -100, max: 100, def: 0 },
+                      { key: "clarity", label: "Clarity", min: -50, max: 100, def: 0 },
+                      { key: "sharpness", label: "Sharpness", min: -50, max: 100, def: 0 },
+                      { key: "vignette", label: "Vignette", min: 0, max: 100, def: 0 },
+                      { key: "grain", label: "Grain", min: 0, max: 100, def: 0 },
+                      { key: "fade", label: "Fade", min: 0, max: 100, def: 0 },
+                      { key: "hue", label: "Hue Shift", min: -180, max: 180, def: 0 },
+                    ] as { key: keyof import("../lib/types").AdjustmentSettings; label: string; min: number; max: number; def: number }[]).map(({ key, label, min, max, def }) => {
+                      const val = (clip.adjustments as any)?.[key] ?? def;
+                      return (
+                        <div key={key}>
+                          <div className="flex items-center justify-between mb-1">
+                            <Label className="text-[10px] text-muted-foreground">{label}</Label>
+                            <span className="text-[10px] font-mono text-foreground tabular-nums w-10 text-right">{Math.round(val)}</span>
+                          </div>
+                          <Slider
+                            value={[val]}
+                            min={min}
+                            max={max}
+                            step={1}
+                            onValueChange={([v]) => update({ adjustments: { ...(clip.adjustments ?? {}), [key]: v } })}
+                          />
+                        </div>
+                      );
+                    })}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full mt-1 text-[10px]"
+                      onClick={() => update({ adjustments: {} })}
+                    >
+                      Reset All Adjustments
+                    </Button>
+                  </Section>
+                </>
+              )}
+
               <Separator />
 
               <Section title="Saved Presets">

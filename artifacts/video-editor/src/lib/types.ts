@@ -35,7 +35,14 @@ export type MediaType =
   | "gradient"
   // Audio visualizer — reads clip's volume to draw an equalizer bar or
   // waveform visualizer. Driven by clip.visualizerKind.
-  | "visualizer";
+  | "visualizer"
+  // Adjustment layer — applies color correction / grading to all clips
+  // on tracks below it within its time range (like After Effects adjustment
+  // layers). Uses CSS backdrop-filter in preview, pixel ops in export.
+  | "adjustment"
+  // Callout — speech-bubble / label / arrow overlay. Uses clip.calloutKind
+  // to pick the shape and clip.text for the bubble label.
+  | "callout";
 
 export interface ChromaKey {
   // Enable toggle so users can adjust controls without immediately seeing the
@@ -463,6 +470,12 @@ export interface Clip {
   visualizerColor?: string;
   visualizerColor2?: string;
   visualizerSensitivity?: number;
+  // adjustment clip type — color correction / grading that affects clips below
+  adjustments?: Partial<AdjustmentSettings>;
+  // callout clip type — speech bubble, label, or arrow overlay
+  calloutKind?: "bubble" | "rounded-bubble" | "label" | "arrow-left" | "arrow-right" | "flag" | "pin" | "bracket";
+  calloutTailX?: number;    // 0..1 — relative tail X position on the bubble
+  calloutTailY?: number;    // 0..1 — relative tail Y position
 }
 
 export interface DrawPath {
@@ -516,7 +529,16 @@ export interface AIMessage {
   timestamp: number;
 }
 
-export type ToolMode = "select" | "blade" | "draw";
+export type ToolMode =
+  | "select"       // Default: move/resize/rotate clips on canvas
+  | "blade"        // Split clips by clicking on timeline
+  | "draw"         // Freehand draw brush overlay
+  | "rect-select"  // Drag-rectangle to multi-select canvas clips
+  | "lasso"        // Freehand lasso to multi-select canvas clips
+  | "magic-wand"   // Click-to-select clips of the same color/type
+  | "hand"         // Pan the canvas viewport
+  | "pen"          // Bezier pen tool — creates vector path clip
+  | "crop";        // Free crop/trim tool for media clips
 
 /**
  * Active brush settings for the draw tool. Stored on EditorState so the
@@ -544,6 +566,56 @@ export interface Marker {
   color?: string;
 }
 
+// ── Grid & Guide System ───────────────────────────────────────────────────────
+export interface GridSettings {
+  show: boolean;
+  size: number;         // grid cell size in canvas pixels (at 100% zoom)
+  color: string;
+  opacity: number;      // 0-1
+  snap: boolean;        // snap dragged elements to grid intersections
+  showRulers: boolean;  // px rulers on canvas left/top edges
+  showCrosshair: boolean;
+  subdivisions: number; // sub-lines per cell (1 = none, 2 = halves, 4 = quarters)
+}
+
+export const DEFAULT_GRID_SETTINGS: GridSettings = {
+  show: false, size: 100, color: "#4488ff", opacity: 0.25,
+  snap: false, showRulers: false, showCrosshair: false, subdivisions: 2,
+};
+
+export interface Guide {
+  id: string;
+  orientation: "h" | "v";
+  position: number;   // 0..1 — normalized canvas coordinate
+  color: string;
+  locked: boolean;
+}
+
+// ── Adjustment Layer ─────────────────────────────────────────────────────────
+/** Color-correction / grading settings for adjustment clips and per-clip corrections. */
+export interface AdjustmentSettings {
+  brightness: number;     // 0-200  (100 = neutral)
+  contrast: number;       // 0-200  (100 = neutral)
+  saturation: number;     // 0-200  (100 = neutral)
+  hue: number;            // -180 to 180
+  temperature: number;    // -100 to 100 (cool → warm)
+  tint: number;           // -100 to 100 (green → magenta)
+  highlights: number;     // -100 to 100
+  shadows: number;        // -100 to 100
+  sharpness: number;      // 0-100
+  exposure: number;       // -100 to 100
+  vignette: number;       // 0-100
+  grain: number;          // 0-100
+  fade: number;           // 0-100 (lifts blacks / reduces contrast for film look)
+  clarity: number;        // -100 to 100 (local contrast)
+}
+
+export const DEFAULT_ADJUSTMENT_SETTINGS: AdjustmentSettings = {
+  brightness: 100, contrast: 100, saturation: 100, hue: 0,
+  temperature: 0, tint: 0, highlights: 0, shadows: 0,
+  sharpness: 0, exposure: 0, vignette: 0, grain: 0, fade: 0, clarity: 0,
+};
+
 export interface EditorState {
   clips: Clip[];
   transitions: Transition[];
@@ -564,6 +636,11 @@ export interface EditorState {
   drawBrush: DrawBrush;
   aiHistory: AIMessage[];
   background: string;
+  /** Grid, rulers, and guide-line system. */
+  gridSettings: GridSettings;
+  guides: Guide[];
+  /** Show extracted video-frame thumbnails inside timeline clip bars. */
+  showFrameThumbnails: boolean;
 }
 
 export interface HistoryEntry {
@@ -619,7 +696,19 @@ export type EditorAction =
   | { type: "APPLY_TEMPLATE"; payload: { templateKey: string } }
   | { type: "UNDO" }
   | { type: "REDO" }
-  | { type: "RESET" };
+  | { type: "RESET" }
+  // Grid & Guide system
+  | { type: "SET_GRID"; payload: Partial<GridSettings> }
+  | { type: "ADD_GUIDE"; payload: { orientation: "h" | "v"; position: number; color?: string } }
+  | { type: "REMOVE_GUIDE"; payload: string }
+  | { type: "UPDATE_GUIDE"; payload: { id: string; updates: Partial<Guide> } }
+  | { type: "CLEAR_GUIDES" }
+  // Frame thumbnails toggle
+  | { type: "TOGGLE_FRAME_THUMBNAILS" }
+  // Beat sync — add markers at audio beat timestamps
+  | { type: "BEAT_SYNC_MARKS"; payload: { beats: number[]; color?: string } }
+  // Smart enhancement preset application
+  | { type: "APPLY_SMART_PRESET"; payload: { clipId?: string; adjustments: Partial<AdjustmentSettings> } };
 
 export const DEFAULT_FILTERS: ClipFilters = {
   brightness: 100,

@@ -27,6 +27,8 @@ import {
 import { apiFetch } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { SmartEditsPanel } from "./SmartEditsPanel";
+import { SmartPresetsPanel } from "./SmartPresetsPanel";
+import { TemplateWizardModal } from "./TemplateWizardModal";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
@@ -1181,8 +1183,9 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<
-    "media" | "gallery" | "effects" | "assets" | "templates" | "smartedits" | "cloud"
+    "media" | "gallery" | "effects" | "assets" | "templates" | "smartedits" | "cloud" | "presets"
   >("media");
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   // ── Cloud Drive state ──────────────────────────────────────────
   interface CloudFolderItem {
@@ -1688,6 +1691,7 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
           { key: "effects" as const, label: "Effects" },
           { key: "smartedits" as const, label: "Smart" },
           { key: "assets" as const, label: "Assets" },
+          { key: "presets" as const, label: "Presets" },
           { key: "templates" as const, label: "Templates" },
           { key: "cloud" as const, label: "Cloud" },
         ].map((t) => (
@@ -1710,6 +1714,14 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
           <SmartEditsPanel state={state} dispatch={dispatch} />
         </div>
       )}
+
+      {activeTab === "presets" && (
+        <div className="flex-1 overflow-y-auto">
+          <SmartPresetsPanel state={state} dispatch={dispatch} />
+        </div>
+      )}
+
+      <TemplateWizardModal open={wizardOpen} onOpenChange={setWizardOpen} state={state} dispatch={dispatch} />
 
       {activeTab === "media" && (
         <div className="flex flex-col flex-1 overflow-hidden">
@@ -2159,6 +2171,14 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
 
       {activeTab === "templates" && (
         <div className="flex flex-col flex-1 overflow-y-auto p-2 space-y-2">
+          <Button
+            size="sm"
+            variant="default"
+            className="w-full text-xs gap-1.5 h-8"
+            onClick={() => setWizardOpen(true)}
+          >
+            <Sparkles className="w-3.5 h-3.5" /> Template Wizard
+          </Button>
           <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
             Project Templates · {TEMPLATES.length.toLocaleString()}
           </p>

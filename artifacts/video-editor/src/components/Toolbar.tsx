@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Undo2, Redo2, Save, ZoomIn, ZoomOut, Film, Loader2, Keyboard, Settings2, Download } from "lucide-react";
+import { Undo2, Redo2, Save, ZoomIn, ZoomOut, Film, Loader2, Keyboard, Settings2, Download, Grid3x3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
@@ -19,6 +19,8 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import ExportDialog from "./ExportDialog";
 import SettingsDialog from "./SettingsDialog";
+import { GridConfigPanel } from "./GridOverlay";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 interface ToolbarProps {
   state: EditorState;
@@ -259,6 +261,31 @@ export default function Toolbar({ state, dispatch, projectId, projectName: initi
         >
           <ZoomIn className="w-4 h-4" />
         </Button>
+
+        <Separator orientation="vertical" className="h-6" />
+
+        {/* Grid & Guide settings */}
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`w-8 h-8 ${state.gridSettings?.show ? "text-primary bg-primary/10" : ""}`}
+              title="Grid & Guide settings"
+            >
+              <Grid3x3 className="w-4 h-4" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="p-0 w-auto" align="start">
+            <GridConfigPanel
+              settings={state.gridSettings ?? { show: false, snap: false, size: 80, subdivisions: 2, color: "#ffffff", opacity: 0.15, showRulers: false }}
+              onChange={(patch) => dispatch({ type: "SET_GRID", payload: patch })}
+              onAddGuide={(orientation) => dispatch({ type: "ADD_GUIDE", payload: { orientation, position: 0.5 } })}
+              guides={state.guides ?? []}
+              onClearGuides={() => dispatch({ type: "CLEAR_GUIDES" })}
+            />
+          </PopoverContent>
+        </Popover>
 
         <Separator orientation="vertical" className="h-6" />
 

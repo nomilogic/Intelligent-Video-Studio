@@ -5,10 +5,12 @@ import {
   Track,
   Marker,
   Keyframe,
+  Guide,
   EasingType,
   DEFAULT_FILTERS,
   DEFAULT_TEXT_STYLE,
   DEFAULT_DRAW_BRUSH,
+  DEFAULT_GRID_SETTINGS,
 } from "./types";
 import { getTemplateByKey } from "./templates";
 
@@ -25,6 +27,8 @@ const HISTORY_IGNORED_ACTIONS = new Set([
   "TOGGLE_SNAP",
   "SET_TOOL",
   "ADD_AI_MESSAGE",
+  "SET_GRID",
+  "TOGGLE_FRAME_THUMBNAILS",
   "UNDO",
   "REDO",
 ]);
@@ -150,6 +154,9 @@ export const initialState: EditorState = {
   drawBrush: { ...DEFAULT_DRAW_BRUSH },
   aiHistory: [],
   background: "#000000",
+  gridSettings: { ...DEFAULT_GRID_SETTINGS },
+  guides: [],
+  showFrameThumbnails: true,
 };
 
 interface RootState {
@@ -903,8 +910,79 @@ function presentReducer(state: EditorState, action: EditorAction): EditorState {
       return rippleDelete(state, action.payload);
     case "APPLY_OPERATIONS":
       return applyOps(state, action.payload);
+    // ── Grid & Guide system ────────────────────────────────────────────────
+    case "SET_GRID":
+      return { ...state, gridSettings: { ...(state.gridSettings ?? DEFAULT_GRID_SETTINGS), ...action.payload } };
+    case "ADD_GUIDE": {
+      const guide: Guide = {
+        id: uid("guide"),
+        orientation: action.payload.orientation,
+        position: action.payload.position,
+        color: action.payload.color ?? "#00d4ff",
+        locked: false,
+      };
+      return { ...state, guides: [...(state.guides ?? []), guide] };
+    }
+    case "REMOVE_GUIDE":
+      return { ...state, guides: (state.guides ?? []).filter((g) => g.id !== action.payload) };
+    case "UPDATE_GUIDE":
+      return {
+        ...state,
+        guides: (state.guides ?? []).map((g) =>
+          g.id === action.payload.id ? { ...g, ...action.payload.updates } : g,
+        ),
+      };
+    case "CLEAR_GUIDES":
+      return { ...state, guides: [] };
+    case "TOGGLE_FRAME_THUMBNAILS":
+      return { ...state, showFrameThumbnails: !state.showFrameThumbnails };
+    case "BEAT_SYNC_MARKS": {
+      const color = action.payload.color ?? "#f97316";
+      const newMarkers = action.payload.beats.map((b) => ({
+        id: uid("mk"),
+        time: b,
+        label: "♪",
+        color,
+      }));
+      return { ...state, markers: [...(state.markers ?? []), ...newMarkers] };
+    }
+    case "APPLY_SMART_PRESET": {
+      const { clipId, adjustments } = action.payload;
+      if (clipId) {
+        return {
+          ...state,
+          clips: state.clips.map((c) =>
+            c.id === clipId ? { ...c, adjustments: { ...(c.adjustments ?? {}), ...adjustments } } : c,
+          ),
+        };
+      }
+      // No clipId — apply as a full-canvas adjustment layer at playhead
+      const adjClip = makeClip({
+        label: "Adjustment Layer",
+        mediaType: "adjustment",
+        trackIndex: 0,
+        startTime: state.currentTime,
+        duration: state.duration - state.currentTime,
+        x: 0, y: 0, width: state.canvasWidth, height: state.canvasHeight,
+        adjustments,
+      });
+      const conflict2 = state.clips.some((c) => c.trackIndex === 0 && c.startTime < adjClip.startTime + adjClip.duration && adjClip.startTime < c.startTime + c.duration);
+      if (!conflict2) {
+        return { ...state, clips: [...state.clips, adjClip], keyframes: [...state.keyframes, ...defaultClipKeyframes(adjClip)] };
+      }
+      const shifted2 = state.clips.map((c) => ({ ...c, trackIndex: c.trackIndex + 1 }));
+      const newTrack2 = makeTrack({ type: "overlay", name: "Adjustment" });
+      return { ...state, tracks: [newTrack2, ...state.tracks], clips: [...shifted2, adjClip], keyframes: [...state.keyframes, ...defaultClipKeyframes(adjClip)] };
+    }
     case "REPLACE_STATE":
-      return { ...action.payload, isPlaying: false };
+      return {
+        ...initialState,
+        ...action.payload,
+        isPlaying: false,
+        gridSettings: action.payload.gridSettings ?? DEFAULT_GRID_SETTINGS,
+        guides: action.payload.guides ?? [],
+        showFrameThumbnails: action.payload.showFrameThumbnails ?? true,
+      };
     case "APPLY_TEMPLATE": {
       const tpl = getTemplateByKey(action.payload.templateKey);
       if (!tpl) return state;

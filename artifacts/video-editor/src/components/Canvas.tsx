@@ -1,6 +1,8 @@
 import { useRef, useState, useCallback, useEffect, useMemo, memo } from "react";
 import { EditorState, EditorAction, Clip, ClipMask } from "../lib/types";
 import { makeClip } from "../lib/reducer";
+import { GridOverlay } from "./GridOverlay";
+import { SelectionOverlay } from "./SelectionOverlay";
 import {
   resolveClip,
   clipVisibleAt,
@@ -1888,6 +1890,59 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
         </div>
 
         {/*
+          Adjustment layer clips. Each covers the canvas and applies CSS
+          filters from `clip.adjustments` as a backdrop-filter-style overlay.
+          Non-destructive — removing the clip reverts the look.
+        */}
+        {visibleClips.filter((c) => c.mediaType === "adjustment").map((clip) => {
+          const r = resolveClip(clip, state.keyframes, state.currentTime);
+          if (!r.visible) return null;
+          const isSelected = state.selectedClipIds.includes(clip.id);
+          const adj = clip.adjustments ?? {};
+          const brightness = (adj.brightness ?? 100) / 100;
+          const contrast = (adj.contrast ?? 100) / 100;
+          const saturation = (adj.saturation ?? 100) / 100;
+          const hue = adj.hue ?? 0;
+          const grain = adj.grain ?? 0;
+          const filterStr = `brightness(${brightness}) contrast(${contrast}) saturate(${saturation}) hue-rotate(${hue}deg)${adj.sharpness && adj.sharpness !== 0 ? ` contrast(${1 + adj.sharpness / 200})` : ""}`;
+          return (
+            <div
+              key={clip.id}
+              data-testid={`canvas-clip-${clip.id}`}
+              className={cn(
+                "absolute inset-0 pointer-events-auto",
+                isSelected && "outline outline-2 outline-blue-400 outline-dashed",
+              )}
+              style={{
+                opacity: r.opacity,
+                backdropFilter: filterStr,
+                WebkitBackdropFilter: filterStr,
+                mixBlendMode: (clip.blendMode as any) ?? "normal",
+                zIndex: 38,
+              }}
+              onMouseDown={(e) => startDrag(e, clip, "move")}
+            >
+              {/* Grain overlay for noise effect */}
+              {grain > 0 && (
+                <div
+                  className="absolute inset-0 pointer-events-none"
+                  style={{
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='${grain / 100}'/%3E%3C/svg%3E")`,
+                    opacity: grain / 100,
+                    mixBlendMode: "overlay",
+                  }}
+                />
+              )}
+              {!isSelected && (
+                <div className="absolute top-0.5 left-1 text-[10px] text-blue-300/70 pointer-events-none select-none font-medium">
+                  Adj
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/*
           Logo-blur clips. Rendered ABOVE the masked composite so their
           backdrop-filter samples whatever is beneath. Each is selectable and
           draggable just like a normal clip; transforms come from the same
@@ -2156,6 +2211,33 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
               onClick={() => onCroppingChange(false)}
             >Done (Esc)</button>
           </div>
+        )}
+
+        {/* Grid overlay & ruler guides — rendered just above the clip layer */}
+        {(state.gridSettings?.show || (state.guides?.length ?? 0) > 0) && (
+          <GridOverlay
+            canvasW={displayW}
+            canvasH={displayH}
+            settings={state.gridSettings ?? { show: false, snap: false, size: 80, subdivisions: 2, color: "#ffffff", opacity: 0.15, showRulers: false }}
+            guides={state.guides ?? []}
+            onAddGuide={(guide) => dispatch({ type: "ADD_GUIDE", payload: guide })}
+            onUpdateGuide={(id, position) => dispatch({ type: "UPDATE_GUIDE", payload: { id, updates: { position } } })}
+            onRemoveGuide={(id) => dispatch({ type: "REMOVE_GUIDE", payload: id })}
+            scale={canvasZoom}
+          />
+        )}
+
+        {/* Selection overlay — active when a selection tool is chosen */}
+        {(state.tool === "rect-select" || state.tool === "lasso" || state.tool === "magic-wand") && (
+          <SelectionOverlay
+            tool={state.tool as "rect-select" | "lasso" | "magic-wand"}
+            clips={state.clips}
+            currentTime={state.currentTime}
+            canvasW={displayW}
+            canvasH={displayH}
+            onSelect={(ids) => dispatch({ type: "SELECT_CLIPS", payload: ids })}
+            scale={canvasZoom}
+          />
         )}
 
         {/* Snap guides */}

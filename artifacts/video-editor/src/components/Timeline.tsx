@@ -397,7 +397,7 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
     dispatch({ type: "SET_TIME", payload: state.currentTime + dir * (1 / FPS) });
   };
 
-  const setTool = (t: "select" | "blade" | "draw") => dispatch({ type: "SET_TOOL", payload: t });
+  const setTool = (t: "select" | "blade" | "draw" | "rect-select" | "lasso" | "magic-wand" | "hand" | "pen" | "crop") => dispatch({ type: "SET_TOOL", payload: t });
   const brush = state.drawBrush;
 
   return (
@@ -481,7 +481,47 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
           >
             <Pen className="w-3 h-3" /> Draw
           </button>
+          <button
+            className={cn(
+              "px-2 py-1 text-xs flex items-center gap-1.5 transition-colors border-l border-border",
+              state.tool === "rect-select" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/40",
+            )}
+            onClick={() => setTool("rect-select")}
+            title="Rectangular selection on the canvas"
+          >
+            ▦
+          </button>
+          <button
+            className={cn(
+              "px-2 py-1 text-xs flex items-center gap-1.5 transition-colors border-l border-border",
+              state.tool === "lasso" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/40",
+            )}
+            onClick={() => setTool("lasso")}
+            title="Lasso selection on the canvas"
+          >
+            ⌖
+          </button>
+          <button
+            className={cn(
+              "px-2 py-1 text-xs flex items-center gap-1.5 transition-colors border-l border-border",
+              state.tool === "magic-wand" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/40",
+            )}
+            onClick={() => setTool("magic-wand")}
+            title="Magic wand — select clips of the same type"
+          >
+            ✦
+          </button>
         </div>
+        <button
+          className={cn(
+            "ml-1 px-2 py-1 text-xs rounded border transition-colors",
+            state.showFrameThumbnails ? "border-primary/50 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted/30",
+          )}
+          onClick={() => dispatch({ type: "TOGGLE_FRAME_THUMBNAILS" })}
+          title="Toggle frame thumbnails on clips"
+        >
+          🎞
+        </button>
 
         {/* Brush picker — only shown when the draw tool is active. */}
         {state.tool === "draw" && (
