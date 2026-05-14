@@ -10,7 +10,15 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// Supabase transaction pooler (port 6543) does not support prepared statements.
+// Setting max to a low number avoids exhausting pooler connections.
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+  max: 5,
+});
+
+// prepared: false is required for Supabase Supavisor transaction-mode pooler
 export const db = drizzle(pool, { schema });
 
 export * from "./schema";
