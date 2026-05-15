@@ -404,7 +404,68 @@ const BULK_CATEGORIES: BulkCategory[] = [
       { bg: "#0c0a09", titleColor: "#facc15", fxColor: "#facc15" },
     ],
   },
+  {
+    cat: "gaming", pretty: "Gaming", emoji: "🎮",
+    titles: ["GAME\nON", "LEVEL\nUP", "GG\nEZ", "NEW\nHIGH SCORE", "BOSS\nFIGHT", "1ST\nPLACE", "RANKED\nUP", "CLUTCH\nPLAY", "SPEED\nRUN", "FINAL\nBOSS", "TRIPLE\nKILL", "NO\nMERCY"],
+    subtitles: ["Let's get it", "Watch till the end", "Road to rank 1", "Can't be stopped", "Highlights incoming", "GG no re"],
+    palette: [
+      { bg: "#020617", titleColor: "#22d3ee", fxColor: "#0ea5e9" },
+      { bg: "#0f0f1a", titleColor: "#a78bfa", fxColor: "#7c3aed" },
+      { bg: "#000", titleColor: "#fbbf24", fxColor: "#f59e0b" },
+      { bg: "#0d0221", titleColor: "#f43f5e", fxColor: "#e11d48" },
+    ],
+  },
+  {
+    cat: "beauty", pretty: "Beauty", emoji: "💄",
+    titles: ["GLOW\nUP", "NEW\nLOOK", "GET\nREADY", "GRWM", "SOFT\nGLAM", "NO\nFILTER", "SKIN\nCARE", "FULL\nFACE", "FRESH\nFACES", "DEWY\nSKIN", "BOLD\nLIP", "GLASS\nSKIN"],
+    subtitles: ["Swipe for details", "Products linked below", "Tutorial in caption", "No edits — raw look", "All drugstore products", "Filter-free glow"],
+    palette: [
+      { bg: "#18060a", titleColor: "#fda4af", fxColor: "#f43f5e" },
+      { bg: "#fdf2f8", titleColor: "#831843", fxColor: "#be185d" },
+      { bg: "#1a0a1e", titleColor: "#e879f9", fxColor: "#a21caf" },
+      { bg: "#fff7ed", titleColor: "#9a3412", fxColor: "#ea580c" },
+    ],
+  },
+  {
+    cat: "travel", pretty: "Travel", emoji: "✈️",
+    titles: ["PACK\nYOUR BAGS", "NEW\nDESTINATION", "SOLO\nTRIP", "ROAD\nTRIP", "BUCKET\nLIST", "HIDDEN\nGEM", "LOCAL\nLIFE", "TRAVEL\nDIARY", "EXPLORE\nMORE", "OFF THE\nGRID", "WORLD\nTOUR", "24H IN\nTOKYO"],
+    subtitles: ["Full guide in bio", "This place changed me", "Budget: $0 regrets", "No WiFi, no worries", "First time here!", "Links & tips below"],
+    palette: [
+      { bg: "#0c4a6e", titleColor: "#bae6fd", fxColor: "#38bdf8" },
+      { bg: "#064e3b", titleColor: "#6ee7b7", fxColor: "#10b981" },
+      { bg: "#1e1b4b", titleColor: "#fde68a", fxColor: "#fbbf24" },
+      { bg: "#0f172a", titleColor: "#fff", fxColor: "#94a3b8" },
+    ],
+  },
+  {
+    cat: "mindfulness", pretty: "Mindfulness", emoji: "🧘",
+    titles: ["BREATHE.", "LET GO.", "BE\nPRESENT.", "JUST\nBE.", "STILL\nMIND.", "SLOW\nDOWN.", "FIND\nPEACE.", "LESS\nNOISE.", "INNER\nCALM.", "RESET\nNOW.", "FOCUS\nIN.", "SIMPLY\nBE."],
+    subtitles: ["Take a moment", "3 deep breaths", "You are enough", "One thing at a time", "Let it come, let it go", "Peace begins here"],
+    palette: [
+      { bg: "#134e4a", titleColor: "#a7f3d0", fxColor: "#5eead4" },
+      { bg: "#1e1b4b", titleColor: "#c7d2fe", fxColor: "#818cf8" },
+      { bg: "#0f172a", titleColor: "#f0fdf4", fxColor: "#4ade80" },
+      { bg: "#f0fdf4", titleColor: "#14532d", fxColor: "#16a34a" },
+    ],
+  },
 ];
+
+const BULK_CAT_CATEGORY_MAP: Record<string, TemplateCategory> = {
+  sale: "Other",
+  launch: "Brand & Reveal",
+  event: "Events",
+  quote: "Quotes",
+  tutorial: "Other",
+  bts: "Cinematic",
+  recipe: "Food & Lifestyle",
+  fitness: "Other",
+  travel: "Social / Reels",
+  gaming: "Gaming",
+  beauty: "Social / Reels",
+  mindfulness: "Quotes",
+  recap: "Other",
+  music: "Social / Reels",
+};
 
 function buildBulkTemplates(): VideoTemplate[] {
   const out: VideoTemplate[] = [];
@@ -437,6 +498,7 @@ function buildBulkTemplates(): VideoTemplate[] {
             subtitle: sub,
             fxType: fx,
             fxColor: pal.fxColor,
+            category: BULK_CAT_CATEGORY_MAP[cat.cat] ?? "Other",
           }),
         );
       }
@@ -669,6 +731,7 @@ export const TEMPLATES: VideoTemplate[] = [
   // ────────────────────────────────────────────────────────────────────────
   ...buildExtendedTemplates(),
   ...buildEnhancedTemplates(),
+  ...buildWaveAllTemplates(),
 ];
 
 /**
@@ -690,6 +753,7 @@ function buildTitleTpl(opts: {
   subtitle?: string;
   fxType?: "vignette" | "glow" | "tint" | "scanlines" | "shake";
   fxColor?: string;
+  category?: TemplateCategory;
 }): VideoTemplate {
   const dur = opts.duration ?? 8;
   const fontSize =
@@ -703,6 +767,7 @@ function buildTitleTpl(opts: {
     canvasHeight: opts.height,
     duration: dur,
     background: opts.bg,
+    category: opts.category,
     build() {
       const fxs: Effect[] = opts.fxType
         ? [{ id: uid("fx"), type: opts.fxType, intensity: 0.55, color: opts.fxColor }]
@@ -1512,6 +1577,93 @@ function buildEnhancedTemplates(): VideoTemplate[] {
     ]));
   });
 
+  // ── Auto-assign categories via key-prefix map ──────────────────────────
+  const PREFIX_CAT: Array<[string, TemplateCategory]> = [
+    ["part-",          "Particles"],
+    ["sl-",            "Cinematic"],
+    ["grad-",          "Quotes"],
+    ["social-",        "Social / Reels"],
+    ["brand-",         "Brand & Reveal"],
+    ["typo-",          "Typography"],
+    ["wave-",          "Wave / Visualizer"],
+    ["combo-",         "Slideshow"],
+    ["corp-",          "Other"],
+    ["edu-",           "Other"],
+    ["sport-",         "Other"],
+    ["fitness-",       "Other"],
+    ["food-",          "Food & Lifestyle"],
+    ["lifestyle-",     "Food & Lifestyle"],
+    ["event-",         "Events"],
+    ["real-estate-",   "Real Estate"],
+    ["gaming-",        "Gaming"],
+    ["hook-",          "Social / Reels"],
+    ["countdown-",     "Countdown"],
+    ["quote-minimal-", "Quotes"],
+  ];
+  for (const t of ret) {
+    if (!t.category) {
+      for (const [pfx, cat] of PREFIX_CAT) {
+        if (t.key.startsWith(pfx)) { t.category = cat; break; }
+      }
+    }
+  }
+  return ret;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wave All-Variants — 12 wave keys × 4 aspect ratios = 48 templates
+// These ensure every WAVE_LIBRARY entry has at least 4 ready-made templates.
+// ─────────────────────────────────────────────────────────────────────────────
+function buildWaveAllTemplates(): VideoTemplate[] {
+  const aspects = [
+    { key: "v",  w: 1080, h: 1920, label: "9:16" },
+    { key: "sq", w: 1080, h: 1080, label: "1:1"  },
+    { key: "ld", w: 1920, h: 1080, label: "16:9" },
+    { key: "p",  w: 1080, h: 1350, label: "4:5"  },
+  ];
+  const waves: Array<{ key: string; name: string; emoji: string; titleColor: string; bgColor: string }> = [
+    { key: "ocean",          name: "Ocean Wave",       emoji: "🌊", titleColor: "#7dd3fc", bgColor: "#0c1445" },
+    { key: "audio",          name: "Audio Bars",       emoji: "🎙️", titleColor: "#a78bfa", bgColor: "#0f0f1a" },
+    { key: "plasma",         name: "Plasma Surge",     emoji: "⚡", titleColor: "#86efac", bgColor: "#042f2e" },
+    { key: "ripple",         name: "Ripple Wave",      emoji: "💧", titleColor: "#67e8f9", bgColor: "#082f49" },
+    { key: "neon",           name: "Neon Wave",        emoji: "🌈", titleColor: "#f0abfc", bgColor: "#1a0030" },
+    { key: "retro",          name: "Retro Grid Wave",  emoji: "📺", titleColor: "#fde68a", bgColor: "#1c1917" },
+    { key: "mountain",       name: "Mountain Wave",    emoji: "🏔️", titleColor: "#bbf7d0", bgColor: "#0f2e1a" },
+    { key: "lissajous",      name: "Lissajous Loop",   emoji: "🔄", titleColor: "#fda4af", bgColor: "#1f0010" },
+    { key: "heartbeat",      name: "Heartbeat",        emoji: "❤️", titleColor: "#f87171", bgColor: "#1a0000" },
+    { key: "interference",   name: "Interference",     emoji: "📡", titleColor: "#6ee7b7", bgColor: "#022c22" },
+    { key: "galaxy",         name: "Galaxy Spiral",    emoji: "🌌", titleColor: "#c4b5fd", bgColor: "#0d0221" },
+    { key: "northern-lights",name: "Northern Lights",  emoji: "🌠", titleColor: "#a7f3d0", bgColor: "#0a0e27" },
+  ];
+
+  const ret: VideoTemplate[] = [];
+  for (const wave of waves) {
+    for (const asp of aspects) {
+      const isLandscape = asp.w > asp.h;
+      const wH = isLandscape ? 0.35 : 0.25;
+      const wY = isLandscape ? 0.55 : 0.65;
+      ret.push({
+        key: `wave-all-${wave.key}-${asp.key}`,
+        name: `${wave.name} · ${asp.label}`,
+        description: `${wave.name} visualizer template in ${asp.w}×${asp.h}.`,
+        emoji: wave.emoji,
+        canvasWidth: asp.w,
+        canvasHeight: asp.h,
+        duration: 10,
+        background: wave.bgColor,
+        category: "Wave / Visualizer" as TemplateCategory,
+        build() {
+          const clips: Clip[] = [
+            templateClip({ label: "Background", mediaType: "blank", trackIndex: 2, startTime: 0, duration: 10, color: wave.bgColor }),
+            templateClip({ label: `${wave.name} Visualizer`, mediaType: "waves", waveKey: wave.key, trackIndex: 1, startTime: 0, duration: 10, x: 0, y: wY, width: 1, height: wH, color: wave.titleColor, opacity: 0.85 } as any),
+            templateClip({ label: "Title", mediaType: "text", text: "YOUR\nTITLE", textStyle: { ...DEFAULT_TEXT_STYLE, fontSize: isLandscape ? 140 : 180, fontWeight: 900, color: wave.titleColor }, trackIndex: 0, startTime: 0.5, duration: 9, x: 0.05, y: isLandscape ? 0.18 : 0.22, width: 0.9, height: isLandscape ? 0.35 : 0.3, animationIn: "fade", animationOut: "fade", animationInDuration: 1, color: wave.titleColor, effects: [{ id: uid("fx"), type: "glow", intensity: 0.6, color: wave.titleColor }] }),
+            templateClip({ label: "Subtitle", mediaType: "text", text: "add your subtitle here", textStyle: { ...DEFAULT_TEXT_STYLE, fontSize: isLandscape ? 44 : 65, fontWeight: 400, color: "#94a3b8", italic: true }, trackIndex: 0, startTime: 1, duration: 8.5, x: 0.1, y: isLandscape ? 0.52 : 0.56, width: 0.8, height: 0.08, animationIn: "slideUp", animationOut: "fade", color: "#94a3b8" }),
+          ];
+          return { clips, duration: 10, canvasWidth: asp.w, canvasHeight: asp.h, background: wave.bgColor, tracks: baseTracks, keyframes: [], transitions: [], markers: [] };
+        },
+      });
+    }
+  }
   return ret;
 }
 
