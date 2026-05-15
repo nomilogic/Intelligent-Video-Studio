@@ -1,13 +1,7 @@
 /**
- * AI Control Schema — a single export consumed by the AI assistant bar so
- * the language model has a complete, machine-readable picture of every
- * library, action and clip property it can mutate. The schema is built at
- * import time from the canonical libraries (no duplication) so adding a new
- * effect, transition, shape, special layer or template automatically shows
- * up in the AI's vocabulary.
- *
- * The shape of the exported `AI_SCHEMA` is deliberately flat and JSON-
- * friendly so it can be JSON.stringify'd into a system prompt as-is.
+ * AI Control Schema — single source of truth consumed by the AI bar.
+ * Every library, action, and mutable clip field is declared here so the
+ * language model has a complete, machine-readable vocabulary.
  */
 
 import { EFFECT_LIBRARY, EFFECT_CATEGORIES } from "./effect-library";
@@ -19,6 +13,7 @@ import { PARTICLE_LIBRARY } from "./particles";
 import { TEMPLATES } from "./templates";
 import { WAVE_LIBRARY } from "./waves";
 import { FONT_OPTIONS } from "./types";
+import { ANIMATED_MASK_PRESETS, ANIMATED_MASK_CATEGORIES } from "./mask-animations";
 
 export interface AISchemaLibraryEntry {
   key: string;
@@ -28,8 +23,6 @@ export interface AISchemaLibraryEntry {
 
 export interface AISchemaActionParam {
   name: string;
-  /** TypeScript-ish type hint — `"string" | "number" | "boolean" | "Clip"
-   * | "Partial<Clip>" | "EditorState"` etc. */
   type: string;
   required: boolean;
   description: string;
@@ -41,47 +34,71 @@ export interface AISchemaAction {
   params: AISchemaActionParam[];
 }
 
-/**
- * Reducer actions exposed to the AI. Mirror this with `lib/reducer.ts` —
- * adding a new action there should add it here too. Keep names stable;
- * the model is trained to use the exact strings.
- */
 export const AI_ACTIONS: AISchemaAction[] = [
   {
     type: "ADD_CLIP",
-    description: "Add a new clip to the timeline.",
+    description: "Add a new clip to the timeline. Set mediaType to one of: video, image, text, audio, blank, colorBlock, particles, wave, gradient, visualizer, shape, specialLayer, drawing, maskLayer, logoBlur.",
     params: [
-      { name: "clip", type: "Clip", required: true, description: "Full clip object — use makeClip() defaults then override." },
-    ],
-  },
-  {
-    type: "REMOVE_CLIP",
-    description: "Delete a clip from the timeline.",
-    params: [
-      { name: "clipId", type: "string", required: true, description: "id of the clip to remove" },
+      { name: "clip", type: "Clip", required: true, description: "Full clip object. Required: id (unique string starting 'clip-'), label, mediaType, trackIndex, startTime, duration, x, y, width, height." },
     ],
   },
   {
     type: "UPDATE_CLIP",
-    description: "Patch one or more properties on an existing clip.",
+    description: "Patch one or more properties on an existing clip. Only include the fields to change.",
     params: [
-      { name: "id", type: "string", required: true, description: "id of the clip to update" },
-      { name: "patch", type: "Partial<Clip>", required: true, description: "Object containing only the fields to change." },
+      { name: "id", type: "string", required: true, description: "id of the clip to update (from current state)" },
+      { name: "updates", type: "Partial<Clip>", required: true, description: "Object containing only the fields to change." },
+    ],
+  },
+  {
+    type: "DELETE_CLIP",
+    description: "Delete a single clip from the timeline.",
+    params: [
+      { name: "payload", type: "string", required: true, description: "The clip id to delete." },
+    ],
+  },
+  {
+    type: "DELETE_CLIPS",
+    description: "Delete multiple clips at once.",
+    params: [
+      { name: "payload", type: "string[]", required: true, description: "Array of clip ids to delete." },
+    ],
+  },
+  {
+    type: "DUPLICATE_CLIP",
+    description: "Duplicate a clip (creates an offset copy).",
+    params: [
+      { name: "payload", type: "string", required: true, description: "Clip id to duplicate." },
     ],
   },
   {
     type: "SELECT_CLIP",
     description: "Mark a clip as selected (drives the inspector panel).",
     params: [
-      { name: "clipId", type: "string|null", required: true, description: "Clip id, or null to clear selection." },
+      { name: "payload", type: "string|null", required: true, description: "Clip id, or null to clear selection." },
+    ],
+  },
+  {
+    type: "SPLIT_CLIP",
+    description: "Split a clip at a given time position into two clips.",
+    params: [
+      { name: "clipId", type: "string", required: true, description: "Target clip id" },
+      { name: "time", type: "number", required: true, description: "Absolute time in seconds at which to split." },
+    ],
+  },
+  {
+    type: "RIPPLE_DELETE",
+    description: "Delete a clip and shift all later clips on the same track left to close the gap.",
+    params: [
+      { name: "payload", type: "string", required: true, description: "Clip id to ripple-delete." },
     ],
   },
   {
     type: "ADD_EFFECT",
-    description: "Add an effect to a clip's effects list.",
+    description: "Add a visual effect to a clip's effects stack.",
     params: [
       { name: "clipId", type: "string", required: true, description: "Target clip id" },
-      { name: "effect", type: "Effect", required: true, description: "{ id, type, intensity, color? }" },
+      { name: "effect", type: "Effect", required: true, description: "{ id (unique), type (from effect library), intensity (0-1), color? }" },
     ],
   },
   {
@@ -89,7 +106,7 @@ export const AI_ACTIONS: AISchemaAction[] = [
     description: "Update one effect on a clip.",
     params: [
       { name: "clipId", type: "string", required: true, description: "Target clip id" },
-      { name: "effectId", type: "string", required: true, description: "Effect id (Effect.id)" },
+      { name: "effectId", type: "string", required: true, description: "Effect id" },
       { name: "patch", type: "Partial<Effect>", required: true, description: "Fields to change." },
     ],
   },
@@ -103,36 +120,57 @@ export const AI_ACTIONS: AISchemaAction[] = [
   },
   {
     type: "SET_TRANSITION",
-    description: "Set the incoming transition for a clip.",
+    description: "Set the incoming transition for a clip (plays at clip start).",
     params: [
       { name: "clipId", type: "string", required: true, description: "Target clip id" },
-      { name: "transition", type: "ClipTransition", required: true, description: "{ type, duration }" },
-    ],
-  },
-  {
-    type: "APPLY_TEMPLATE",
-    description: "Replace the current timeline with a built-in template.",
-    params: [
-      { name: "templateKey", type: "string", required: true, description: `One of: ${TEMPLATES.map((t) => t.key).join(", ")}` },
+      { name: "transition", type: "ClipTransition", required: true, description: "{ type: string, duration: number } OR { type: 'param', duration, presetKey: string } for a parametric preset." },
     ],
   },
   {
     type: "ADD_KEYFRAME",
-    description: "Insert a keyframe at the current time for a numeric property.",
+    description: "Insert a keyframe at a specific time for a numeric property (enables animation).",
     params: [
       { name: "clipId", type: "string", required: true, description: "Target clip id" },
-      { name: "property", type: "string", required: true, description: "Property name: x, y, width, height, opacity, rotation, scale, etc." },
+      { name: "property", type: "string", required: true, description: "Property to animate: x, y, width, height, opacity, rotation, scale, etc." },
       { name: "time", type: "number", required: true, description: "Absolute time in seconds." },
-      { name: "value", type: "number", required: true, description: "Numeric value at this time." },
-      { name: "easing", type: "EasingType", required: false, description: "linear|easeIn|easeOut|easeInOut" },
+      { name: "value", type: "number", required: true, description: "Numeric value at this keyframe." },
+      { name: "easing", type: "EasingType", required: false, description: "linear | quadIn | quadOut | quadInOut | cubicIn | cubicOut | cubicInOut | elasticOut | bounceOut | backInOut" },
+    ],
+  },
+  {
+    type: "APPLY_TEMPLATE",
+    description: "Replace the timeline with a built-in template.",
+    params: [
+      { name: "templateKey", type: "string", required: true, description: `One of: ${TEMPLATES.slice(0, 20).map((t) => t.key).join(", ")} … (${TEMPLATES.length} total)` },
+    ],
+  },
+  {
+    type: "ADD_TRACK",
+    description: "Add a new empty track lane to the timeline.",
+    params: [
+      { name: "name", type: "string", required: false, description: "Optional track label." },
+    ],
+  },
+  {
+    type: "SET_DURATION",
+    description: "Set the total project duration in seconds.",
+    params: [
+      { name: "payload", type: "number", required: true, description: "New duration in seconds." },
+    ],
+  },
+  {
+    type: "SET_CANVAS_SIZE",
+    description: "Change the canvas resolution / aspect ratio.",
+    params: [
+      { name: "width", type: "number", required: true, description: "Canvas width in pixels." },
+      { name: "height", type: "number", required: true, description: "Canvas height in pixels." },
     ],
   },
 ];
 
-/** All available libraries flattened to (key, label, category) tuples. */
 export const AI_SCHEMA = {
-  version: 2,
-  generatedAt: 0, // filled at runtime so tests can be deterministic
+  version: 3,
+  generatedAt: 0,
   libraries: {
     effects: EFFECT_LIBRARY.map<AISchemaLibraryEntry>((e) => ({
       key: e.type,
@@ -146,12 +184,6 @@ export const AI_SCHEMA = {
       category: t.category,
     })),
     transitionCategories: TRANSITION_CATEGORIES,
-    /**
-     * 500+ parametric transition presets. To use one, set
-     * `clip.transitionIn = { type: "param", duration, params, presetKey }`.
-     * The renderer reads `params` to build the visual mod — the AI never
-     * has to write a switch case per variant.
-     */
     transitionPresets: TRANSITION_PRESETS.map<AISchemaLibraryEntry>((p) => ({
       key: p.key,
       label: p.label,
@@ -168,101 +200,172 @@ export const AI_SCHEMA = {
       label: s.name,
       category: s.category,
     })),
-    /**
-     * Particle overlay kinds. To use, add a clip with
-     * `mediaType: "particles"` and set `particleKind` to one of these
-     * keys. The renderer fills in defaults; per-clip fields
-     * (`particleCount`, `particleSize`, `particleSpeed`, `particleColor`,
-     * `particleColor2`, `particleOpacity`, `particleSpread`,
-     * `particleDirection`, `particleGravity`, `particleTwinkle`)
-     * override them.
-     */
     particles: PARTICLE_LIBRARY.map<AISchemaLibraryEntry>((p) => ({
       key: p.key,
       label: p.label,
     })),
-    /**
-     * Wave / animated background kinds. To use, add a clip with
-     * `mediaType: "wave"` and set `waveKind` to one of these keys.
-     * Per-clip overrides: `waveColor`, `waveColor2`, `waveAmplitude`,
-     * `waveFrequency`, `waveSpeed`, `waveOpacity`.
-     */
     waves: WAVE_LIBRARY.map<AISchemaLibraryEntry>((w) => ({
       key: w.key,
       label: w.label,
     })),
+    animatedMasks: ANIMATED_MASK_PRESETS.slice(0, 100).map<AISchemaLibraryEntry>((m) => ({
+      key: m.key,
+      label: m.name,
+      category: m.category,
+    })),
+    animatedMaskCategories: ANIMATED_MASK_CATEGORIES,
     templates: TEMPLATES.map<AISchemaLibraryEntry>((t) => ({
       key: t.key,
       label: t.name,
     })),
     fonts: FONT_OPTIONS.map((f) => f.value),
   },
-  /** Subset of fields the AI is allowed to mutate via UPDATE_CLIP. Helps
-   * avoid the model trying to write reserved fields like `id`. */
   clipMutableFields: [
+    // Transform
     "label", "x", "y", "width", "height",
     "opacity", "rotation", "scale", "flipH", "flipV",
     "blendMode", "borderRadius", "preserveRatio",
+    // Crop / Visual
     "cropX", "cropY", "cropWidth", "cropHeight",
     "filters", "speed", "color",
+    // Text
     "text", "textStyle", "textAutoScale",
+    // Animations
     "animationIn", "animationOut",
     "animationInDuration", "animationOutDuration",
-    "volume", "muted", "locked", "hidden",
-    "effects", "transitionIn", "mask",
+    // Audio
+    "volume", "muted",
+    // State
+    "locked", "hidden",
+    // Effects / Mask / Chroma
+    "effects", "transitionIn", "mask", "animatedMask",
     "chromaKey", "blurAmount", "maskAffectsTracksBelow",
+    // Shapes
     "shapeKind", "fill", "strokeColor", "strokeWidth",
+    // Special Layers
     "specialKind", "specialIntensity", "specialColor",
+    // Particles
     "particleKind", "particleCount", "particleSize", "particleSpeed",
     "particleColor", "particleColor2", "particleOpacity", "particleSpread",
     "particleDirection", "particleGravity", "particleTwinkle",
+    // Waves
     "waveKind", "waveColor", "waveColor2", "waveAmplitude", "waveFrequency",
     "waveSpeed", "waveOpacity",
+    // Gradients
+    "gradientKind", "gradientStops", "gradientAngle",
+    // Visualizers
+    "visualizerKind", "visualizerColor", "visualizerBarCount",
+    // Timing (advanced)
+    "startTime", "duration", "trimStart", "trimEnd", "trackIndex",
   ],
   actions: AI_ACTIONS,
 };
 
-/** Build a freshly-stamped copy of the schema. Useful when serializing into
- * a prompt so timestamps don't bake into module init. */
 export function buildAiSchema() {
   return { ...AI_SCHEMA, generatedAt: Date.now() };
 }
 
-/** A compact human-readable Markdown summary of the schema, suitable for
- * dropping into the AI's system prompt. Generated lazily because it's
- * fairly large. */
 export function buildAiSchemaMarkdown(): string {
   const lines: string[] = [];
-  lines.push("# AI Control Schema");
+  lines.push("# AI Video Editor — Full Control Schema");
   lines.push("");
-  lines.push(`## Effects (${EFFECT_LIBRARY.length})`);
+  lines.push("You are the AI engine of a professional browser-based video editor.");
+  lines.push("You control every aspect of the timeline, canvas, and clips via JSON operations.");
+  lines.push("");
+
+  // ── Media types ──────────────────────────────────────────────────────────
+  lines.push("## Clip mediaType values");
+  lines.push("`video` `image` `text` `audio` `blank` `particles` `wave` `gradient` `visualizer` `shape` `specialLayer` `drawing` `maskLayer` `logoBlur`");
+  lines.push("");
+
+  // ── Effects ─────────────────────────────────────────────────────────────
+  lines.push(`## Effects library (${EFFECT_LIBRARY.length} effects)`);
+  lines.push("Add via ADD_EFFECT. Set `type` to one of:");
   for (const cat of EFFECT_CATEGORIES) {
     const items = EFFECT_LIBRARY.filter((e) => e.category === cat);
     if (items.length === 0) continue;
-    lines.push(`### ${cat}`);
-    lines.push(items.map((e) => `\`${e.type}\` — ${e.label}`).join(", "));
+    lines.push(`**${cat}**: ${items.map((e) => `\`${e.type}\``).join(", ")}`);
   }
   lines.push("");
-  lines.push(`## Transitions (${TRANSITION_LIBRARY.length})`);
-  for (const cat of TRANSITION_CATEGORIES) {
-    const items = TRANSITION_LIBRARY.filter((t) => t.category === cat);
-    if (items.length === 0) continue;
-    lines.push(`### ${cat}`);
-    lines.push(items.map((t) => `\`${t.type}\` — ${t.label}`).join(", "));
+
+  // ── Transitions ──────────────────────────────────────────────────────────
+  lines.push(`## Transitions (${TRANSITION_LIBRARY.length} standard + ${TRANSITION_PRESETS.length} presets)`);
+  lines.push("Standard: " + TRANSITION_LIBRARY.map((t) => `\`${t.type}\``).join(", "));
+  lines.push(`Parametric presets (use \`type:"param", presetKey\`): categories — ${TRANSITION_PRESET_CATEGORIES.join(", ")}`);
+  lines.push("Sample presets: " + TRANSITION_PRESETS.slice(0, 20).map((p) => `\`${p.key}\``).join(", ") + " …");
+  lines.push("");
+
+  // ── Shapes ───────────────────────────────────────────────────────────────
+  lines.push(`## Shape Library (${SHAPE_LIBRARY.length} shapes)`);
+  const shapeCategories = [...new Set(SHAPE_LIBRARY.map((s) => s.category))];
+  for (const cat of shapeCategories) {
+    const items = SHAPE_LIBRARY.filter((s) => s.category === cat);
+    lines.push(`**${cat}**: ${items.map((s) => `\`${s.key}\``).join(", ")}`);
   }
+  lines.push("Shape clip: `mediaType:\"shape\"`, `shapeKind`, `fill` (solid/linear/radial gradient), `strokeColor`, `strokeWidth`");
   lines.push("");
-  lines.push(`## Shapes (${SHAPE_LIBRARY.length}): ${SHAPE_LIBRARY.map((s) => s.key).join(", ")}`);
-  lines.push(`## Special Layers (${SPECIAL_LAYER_LIBRARY.length}): ${SPECIAL_LAYER_LIBRARY.map((s) => s.key).join(", ")}`);
-  lines.push(`## Particles (${PARTICLE_LIBRARY.length}): ${PARTICLE_LIBRARY.map((p) => p.key).join(", ")}`);
-  lines.push(`Use as \`mediaType: "particles"\` clip with \`particleKind\`. Tunable: count/size/speed/color/direction/gravity/twinkle.`);
-  lines.push(`## Transition Presets (${TRANSITION_PRESETS.length})`);
-  lines.push(`Use \`transitionIn: { type: "param", duration, params, presetKey }\` to apply. Categories: ${TRANSITION_PRESET_CATEGORIES.join(", ")}.`);
-  lines.push(`## Templates (${TEMPLATES.length}): ${TEMPLATES.map((t) => t.key).join(", ")}`);
-  lines.push(`## Fonts (${FONT_OPTIONS.length}): ${FONT_OPTIONS.map((f) => f.value).join(", ")}`);
+
+  // ── Special Layers ────────────────────────────────────────────────────────
+  lines.push(`## Special Layers / Overlays (${SPECIAL_LAYER_LIBRARY.length})`);
+  lines.push("Use `mediaType:\"specialLayer\"`, set `specialKind`. Tune `specialIntensity` (0-1) and `specialColor`.");
+  lines.push("Keys: " + SPECIAL_LAYER_LIBRARY.map((s) => `\`${s.key}\``).join(", "));
   lines.push("");
+
+  // ── Particles ────────────────────────────────────────────────────────────
+  lines.push(`## Particle Overlays (${PARTICLE_LIBRARY.length})`);
+  lines.push(`Use \`mediaType:"particles"\`, set \`particleKind\`. Keys: ${PARTICLE_LIBRARY.map((p) => `\`${p.key}\``).join(", ")}`);
+  lines.push("Tunable: `particleCount` (10-500), `particleSize` (0-1), `particleSpeed` (0-1), `particleColor`, `particleColor2`, `particleOpacity` (0-1), `particleSpread` (0-1), `particleDirection` (0-360°), `particleGravity` (-1 to 1), `particleTwinkle` (bool)");
+  lines.push("");
+
+  // ── Waves ────────────────────────────────────────────────────────────────
+  lines.push(`## Wave Backgrounds (${WAVE_LIBRARY.length})`);
+  lines.push(`Use \`mediaType:"wave"\`, set \`waveKind\`. Keys: ${WAVE_LIBRARY.map((w) => `\`${w.key}\``).join(", ")}`);
+  lines.push("Tunable: `waveColor`, `waveColor2`, `waveAmplitude` (0-1), `waveFrequency` (0-1), `waveSpeed` (0-1), `waveOpacity` (0-1)");
+  lines.push("");
+
+  // ── Animated Masks ───────────────────────────────────────────────────────
+  lines.push(`## Animated CSS Masks (${ANIMATED_MASK_PRESETS.length} presets)`);
+  lines.push(`Set \`animatedMask\` on any clip. Categories: ${ANIMATED_MASK_CATEGORIES.join(", ")}`);
+  lines.push("Sample keys: " + ANIMATED_MASK_PRESETS.slice(0, 15).map((m) => `\`${m.key}\``).join(", ") + " …");
+  lines.push("");
+
+  // ── Fonts ────────────────────────────────────────────────────────────────
+  lines.push(`## Fonts (${FONT_OPTIONS.length})`);
+  lines.push(FONT_OPTIONS.map((f) => `\`${f.value}\``).join(", "));
+  lines.push("");
+
+  // ── Templates ────────────────────────────────────────────────────────────
+  lines.push(`## Templates (${TEMPLATES.length})`);
+  lines.push("Apply with APPLY_TEMPLATE. Keys: " + TEMPLATES.map((t) => `\`${t.key}\``).join(", "));
+  lines.push("");
+
+  // ── Animation In/Out ─────────────────────────────────────────────────────
+  lines.push("## Animation In/Out values");
+  lines.push("`none` `fade` `slideLeft` `slideRight` `slideUp` `slideDown` `zoomIn` `zoomOut` `flipX` `flipY` `rotateIn` `blurIn` `bounceIn`");
+  lines.push("");
+
+  // ── Blend modes ──────────────────────────────────────────────────────────
+  lines.push("## Blend modes");
+  lines.push("`normal` `multiply` `screen` `overlay` `darken` `lighten` `color-dodge` `color-burn` `hard-light` `soft-light` `difference` `exclusion` `hue` `saturation` `color` `luminosity`");
+  lines.push("");
+
+  // ── Actions ──────────────────────────────────────────────────────────────
   lines.push(`## Reducer actions (${AI_ACTIONS.length})`);
   for (const a of AI_ACTIONS) {
-    lines.push(`- \`${a.type}\` — ${a.description}`);
+    lines.push(`### ${a.type}`);
+    lines.push(a.description);
+    const params = a.params.map((p) => `  - \`${p.name}\` (${p.type}${p.required ? ", required" : ""}): ${p.description}`).join("\n");
+    lines.push(params);
   }
+  lines.push("");
+
+  // ── Canvas coordinate system ─────────────────────────────────────────────
+  lines.push("## Coordinate system");
+  lines.push("All x/y/width/height are **0–1 fractions of the canvas** (e.g., x:0.5 = horizontal center).");
+  lines.push("Canvas origin (0,0) = top-left. x:1 = right edge, y:1 = bottom edge.");
+  lines.push("Clip position refers to the **top-left corner** of the clip bounding box.");
+  lines.push("Common layouts: full-screen = {x:0,y:0,w:1,h:1}; lower-third = {x:0,y:0.7,w:1,h:0.15}; centered title = {x:0.05,y:0.35,w:0.9,h:0.3}");
+  lines.push("");
+
   return lines.join("\n");
 }

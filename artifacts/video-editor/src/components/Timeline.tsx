@@ -4,6 +4,7 @@ import {
   Eye, EyeOff, Volume2, VolumeX, Lock, Unlock, Trash2, SkipBack, SkipForward,
   MousePointer2, Flag, ZoomIn, ZoomOut, Diamond, Pen, Settings, Copy,
 } from "lucide-react";
+import ClipContextMenu, { type ClipStyle } from "./ClipContextMenu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
@@ -52,6 +53,7 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
   const [dragTrackIdx, setDragTrackIdx] = useState<number | null>(null);
   const [dropTrackIdx, setDropTrackIdx] = useState<number | null>(null);
   const [clipboardClips, setClipboardClips] = useState<Clip[]>([]);
+  const [clipStyle, setClipStyle] = useState<ClipStyle | null>(null);
   const [clipCtxMenu, setClipCtxMenu] = useState<{ x: number; y: number; clipId: string } | null>(null);
 
   // ── Clip copy/paste keyboard shortcuts ────────────────────────────────────
@@ -78,14 +80,7 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [state.clips, state.selectedClipIds, state.currentTime, clipboardClips, dispatch]);
 
-  // Close context menu on outside click
-  useEffect(() => {
-    if (!clipCtxMenu) return;
-    const close = () => setClipCtxMenu(null);
-    window.addEventListener("click", close);
-    window.addEventListener("contextmenu", close);
-    return () => { window.removeEventListener("click", close); window.removeEventListener("contextmenu", close); };
-  }, [clipCtxMenu]);
+  // Context menu close handled by ClipContextMenu itself
 
   useEffect(() => {
     if (dragTrackIdx === null) return;
@@ -1226,50 +1221,20 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
       </div>
 
       {/* ── Clip right-click context menu ─────────────────────────────── */}
-      {clipCtxMenu && (() => {
-        const ctxClip = state.clips.find((c) => c.id === clipCtxMenu.clipId);
-        if (!ctxClip) return null;
-        const multiSelected = state.selectedClipIds.length > 1;
-        const label = multiSelected ? `${state.selectedClipIds.length} clips` : (ctxClip.label || "Clip");
-        return (
-          <div
-            className="fixed z-[9999] min-w-[180px] rounded-md border border-border bg-popover shadow-xl text-sm overflow-hidden"
-            style={{ left: clipCtxMenu.x, top: clipCtxMenu.y }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-3 py-1.5 text-[10px] text-muted-foreground border-b border-border">{label}</div>
-            <button className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/60 text-left" onClick={() => {
-              const toCopy = multiSelected ? state.clips.filter((c) => state.selectedClipIds.includes(c.id)) : [ctxClip];
-              setClipboardClips(toCopy);
-              setClipCtxMenu(null);
-            }}>
-              <Copy className="w-3.5 h-3.5 text-muted-foreground" /> Copy <span className="ml-auto text-[10px] text-muted-foreground">Ctrl+C</span>
-            </button>
-            <button className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/60 text-left disabled:opacity-40" disabled={!clipboardClips.length} onClick={() => {
-              if (!clipboardClips.length) return;
-              dispatch({ type: "PASTE_CLIPS", payload: { clips: clipboardClips, pasteTime: state.currentTime } });
-              setClipCtxMenu(null);
-            }}>
-              <Copy className="w-3.5 h-3.5 text-muted-foreground rotate-180" /> Paste <span className="ml-auto text-[10px] text-muted-foreground">Ctrl+V</span>
-            </button>
-            <button className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/60 text-left" onClick={() => {
-              const ids = multiSelected ? state.selectedClipIds : [ctxClip.id];
-              ids.forEach((id) => dispatch({ type: "DUPLICATE_CLIP", payload: id }));
-              setClipCtxMenu(null);
-            }}>
-              <Copy className="w-3.5 h-3.5 text-muted-foreground" /> Duplicate <span className="ml-auto text-[10px] text-muted-foreground">Ctrl+D</span>
-            </button>
-            <div className="border-t border-border" />
-            <button className="w-full flex items-center gap-2 px-3 py-2 hover:bg-destructive/20 text-destructive text-left" onClick={() => {
-              const ids = multiSelected ? state.selectedClipIds : [ctxClip.id];
-              ids.forEach((id) => dispatch({ type: "DELETE_CLIP", payload: id }));
-              setClipCtxMenu(null);
-            }}>
-              <Trash2 className="w-3.5 h-3.5" /> Delete <span className="ml-auto text-[10px] text-muted-foreground opacity-60">Del</span>
-            </button>
-          </div>
-        );
-      })()}
+      {clipCtxMenu && (
+        <ClipContextMenu
+          x={clipCtxMenu.x}
+          y={clipCtxMenu.y}
+          clipId={clipCtxMenu.clipId}
+          state={state}
+          dispatch={dispatch}
+          clipboardClips={clipboardClips}
+          setClipboardClips={setClipboardClips}
+          clipStyle={clipStyle}
+          setClipStyle={setClipStyle}
+          onClose={() => setClipCtxMenu(null)}
+        />
+      )}
     </div>
   );
 }
