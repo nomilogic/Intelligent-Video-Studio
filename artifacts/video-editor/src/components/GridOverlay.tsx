@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from "react";
+import React, { useRef, useState, useCallback } from "react";
 import type { GridSettings, Guide } from "@/lib/types";
 
 interface GridOverlayProps {
@@ -48,7 +48,7 @@ export function GridOverlay({
   if (!settings.show && guides.length === 0) return null;
 
   // Build grid lines
-  const gridLines: JSX.Element[] = [];
+  const gridLines: React.ReactElement[] = [];
   if (settings.show) {
     const cols = Math.ceil(canvasW / settings.size);
     const rows = Math.ceil(canvasH / settings.size);

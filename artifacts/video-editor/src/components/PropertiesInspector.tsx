@@ -23,11 +23,11 @@ import {
   Trash2, Diamond, Copy, FlipHorizontal2, FlipVertical2, Eye, EyeOff,
   Lock, Unlock, RotateCcw, Volume2, VolumeX, Wand2, Scissors, Crop,
   Activity, Minus, Link2, Link2Off,
-  // Canvas-fit / alignment iconography
   Maximize2, Minimize2, Move, Square,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   Layers, ChevronDown, ChevronRight as ChevronRightIcon,
+  FolderOpen, RefreshCw,
 } from "lucide-react";
 import { Dispatch, useEffect, useRef, useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -1783,6 +1783,61 @@ export default function PropertiesInspector({ state, dispatch, isCropping = fals
                     <Input type="number" step={0.1} value={clip.duration.toFixed(1)} onChange={(e) => update({ duration: parseFloat(e.target.value) })} className="h-7 text-xs" />
                   </div>
                 </div>
+                {(clip.mediaType === "video" || clip.mediaType === "image") && clip.src && (
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-muted-foreground">Source</Label>
+                    <p className="text-[10px] text-muted-foreground/70 truncate font-mono leading-tight">{clip.src.split("/").pop()?.slice(0, 36) ?? clip.src.slice(0, 36)}</p>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 text-[10px] gap-1 w-full"
+                        asChild
+                      >
+                        <span>
+                          <FolderOpen className="w-3 h-3" />
+                          Replace Media…
+                          <input
+                            type="file"
+                            accept={clip.mediaType === "video" ? "video/*" : "image/*"}
+                            className="sr-only"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              const url = URL.createObjectURL(file);
+                              update({ src: url, label: file.name.replace(/\.[^.]+$/, "") });
+                            }}
+                          />
+                        </span>
+                      </Button>
+                    </label>
+                  </div>
+                )}
+                {clip.mediaType === "audio" && clip.src && (
+                  <div className="space-y-1">
+                    <Label className="text-[10px] text-muted-foreground">Audio Source</Label>
+                    <p className="text-[10px] text-muted-foreground/70 truncate font-mono leading-tight">{clip.src.split("/").pop()?.slice(0, 36) ?? clip.src.slice(0, 36)}</p>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <Button variant="outline" size="sm" className="h-6 text-[10px] gap-1 w-full" asChild>
+                        <span>
+                          <RefreshCw className="w-3 h-3" />
+                          Replace Audio…
+                          <input
+                            type="file"
+                            accept="audio/*"
+                            className="sr-only"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              const url = URL.createObjectURL(file);
+                              update({ src: url, label: file.name.replace(/\.[^.]+$/, "") });
+                            }}
+                          />
+                        </span>
+                      </Button>
+                    </label>
+                  </div>
+                )}
               </Section>
 
               {/*

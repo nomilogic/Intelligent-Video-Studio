@@ -11,3 +11,4 @@ export * from "./admin-audit";
 export * from "./projects";
 export * from "./conversations";
 export * from "./messages";
+export * from "./shared-templates";

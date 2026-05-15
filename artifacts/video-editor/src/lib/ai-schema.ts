@@ -17,6 +17,7 @@ import { SHAPE_LIBRARY } from "./shape-library";
 import { SPECIAL_LAYERS as SPECIAL_LAYER_LIBRARY } from "./special-layers";
 import { PARTICLE_LIBRARY } from "./particles";
 import { TEMPLATES } from "./templates";
+import { WAVE_LIBRARY } from "./waves";
 import { FONT_OPTIONS } from "./types";
 
 export interface AISchemaLibraryEntry {
@@ -180,6 +181,16 @@ export const AI_SCHEMA = {
       key: p.key,
       label: p.label,
     })),
+    /**
+     * Wave / animated background kinds. To use, add a clip with
+     * `mediaType: "wave"` and set `waveKind` to one of these keys.
+     * Per-clip overrides: `waveColor`, `waveColor2`, `waveAmplitude`,
+     * `waveFrequency`, `waveSpeed`, `waveOpacity`.
+     */
+    waves: WAVE_LIBRARY.map<AISchemaLibraryEntry>((w) => ({
+      key: w.key,
+      label: w.label,
+    })),
     templates: TEMPLATES.map<AISchemaLibraryEntry>((t) => ({
       key: t.key,
       label: t.name,
@@ -205,6 +216,8 @@ export const AI_SCHEMA = {
     "particleKind", "particleCount", "particleSize", "particleSpeed",
     "particleColor", "particleColor2", "particleOpacity", "particleSpread",
     "particleDirection", "particleGravity", "particleTwinkle",
+    "waveKind", "waveColor", "waveColor2", "waveAmplitude", "waveFrequency",
+    "waveSpeed", "waveOpacity",
   ],
   actions: AI_ACTIONS,
 };

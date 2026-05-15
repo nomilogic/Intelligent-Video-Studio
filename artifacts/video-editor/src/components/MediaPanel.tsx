@@ -5,6 +5,7 @@ import {
   Film,
   Music,
   Image as ImageIcon,
+  Images,
   Type,
   Square,
   Sparkles,
@@ -23,6 +24,12 @@ import {
   File,
   Loader2,
   RefreshCw,
+  Upload,
+  Cpu,
+  Globe,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Layers,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
@@ -572,7 +579,14 @@ const ANIMATED_TEXT_LAYERS: Array<{
 interface MediaPanelProps {
   state: EditorState;
   dispatch: React.Dispatch<EditorAction>;
+  panelWidth?: number;
 }
+
+const SPECIAL_KIND_ICON: Record<string, string> = {
+  lightLeak: "🌟", lensFlare: "✨", linearGradient: "↕", radialGradient: "🔆",
+  vignette: "⬤", filmGrain: "📽", scanlines: "〓", vScanlines: "╫",
+  colorWash: "🎨", gridOverlay: "⊞", stripes: "▥", bokeh: "⊙", solidTint: "▨",
+};
 
 function detectMediaType(file: File): "video" | "audio" | "image" | "blank" {
   if (file.type.startsWith("video/")) return "video";
@@ -1116,6 +1130,7 @@ function EffectsTabContent({
           {
             Light: "💡 Light Leaks & Lens Effects",
             Texture: "🌿 Texture Overlays",
+            Grade: "🎨 Color Grades",
             "Color Grade": "🎨 Color Grades & LUTs",
             Geometry: "📐 Geometric Overlays",
             Atmosphere: "🌫 Atmosphere & Environment",
@@ -1153,13 +1168,17 @@ function EffectsTabContent({
                     })
                   }
                   title={`${s.name} · ${s.category}`}
-                  className="aspect-square rounded border border-border hover:border-primary/60 hover:scale-105 transition-transform"
+                  className="aspect-square rounded border border-border hover:border-primary/60 hover:scale-105 transition-transform flex items-center justify-center"
                   style={{
-                    background: `linear-gradient(135deg, ${s.color}, ${s.color}55)`,
+                    background: `linear-gradient(135deg, ${s.color}cc, ${s.color}44)`,
                   }}
                   data-testid={`special-${s.key}`}
                   aria-label={s.name}
-                />
+                >
+                  <span className="text-sm leading-none select-none" style={{ textShadow: "0 1px 3px rgba(0,0,0,0.7)" }}>
+                    {SPECIAL_KIND_ICON[s.kind] ?? "◻"}
+                  </span>
+                </button>
               ))}
             </div>
           </EffectsGroup>
@@ -1179,7 +1198,7 @@ function EffectsTabContent({
   );
 }
 
-export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
+export default function MediaPanel({ state, dispatch, panelWidth = 240 }: MediaPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<
@@ -1679,36 +1698,70 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
     },
   ];
 
+  const isCollapsed = panelWidth <= 56;
+  const showLabels = panelWidth >= 160;
+
+  const TABS: { key: typeof activeTab; label: string; Icon: React.ElementType }[] = [
+    { key: "media", label: "Media", Icon: Upload },
+    { key: "gallery", label: "Gallery", Icon: Images },
+    { key: "effects", label: "Effects", Icon: Sparkles },
+    { key: "smartedits", label: "Smart", Icon: Cpu },
+    { key: "assets", label: "Assets", Icon: Globe },
+    { key: "presets", label: "Presets", Icon: Bookmark },
+    { key: "templates", label: "Templates", Icon: Layout },
+    { key: "cloud", label: "Cloud", Icon: Cloud },
+  ];
+
   return (
     <div
       data-testid="media-panel"
-      className="w-60 flex flex-col border-r border-border bg-card shrink-0 overflow-hidden"
+      className="flex flex-col border-r border-border bg-card shrink-0 overflow-hidden transition-none"
+      style={{ width: panelWidth }}
     >
-      <div className="flex border-b border-border overflow-x-auto scrollbar-none">
-        {[
-          { key: "media" as const, label: "Media" },
-          { key: "gallery" as const, label: "Gallery" },
-          { key: "effects" as const, label: "Effects" },
-          { key: "smartedits" as const, label: "Smart" },
-          { key: "assets" as const, label: "Assets" },
-          { key: "presets" as const, label: "Presets" },
-          { key: "templates" as const, label: "Templates" },
-          { key: "cloud" as const, label: "Cloud" },
-        ].map((t) => (
-          <button
-            key={t.key}
-            className={cn(
-              "shrink-0 flex-1 text-xs font-medium py-2 transition-colors",
-              activeTab === t.key
-                ? "text-primary border-b-2 border-primary"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-            onClick={() => setActiveTab(t.key)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* ── Collapsed icon-strip ── */}
+      {isCollapsed ? (
+        <div className="flex flex-col items-center pt-1 gap-0.5 flex-1 overflow-y-auto">
+          {TABS.map(({ key, label, Icon }) => (
+            <button
+              key={key}
+              title={label}
+              onClick={() => setActiveTab(key)}
+              className={cn(
+                "w-10 h-10 rounded flex items-center justify-center transition-colors",
+                activeTab === key
+                  ? "bg-primary/20 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/20",
+              )}
+            >
+              <Icon className="w-4 h-4" />
+            </button>
+          ))}
+        </div>
+      ) : (
+        <>
+          {/* ── Tab bar ── */}
+          <div className={cn(
+            "border-b border-border shrink-0",
+            showLabels ? "flex overflow-x-auto scrollbar-none" : "grid grid-cols-4",
+          )}>
+            {TABS.map(({ key, label, Icon }) => (
+              <button
+                key={key}
+                title={label}
+                className={cn(
+                  "flex flex-col items-center justify-center gap-0.5 py-1.5 transition-colors shrink-0",
+                  showLabels ? "flex-1 px-1" : "py-2",
+                  activeTab === key
+                    ? "text-primary border-b-2 border-primary"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+                onClick={() => setActiveTab(key)}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {showLabels && <span className="text-[9px] font-medium leading-none">{label}</span>}
+              </button>
+            ))}
+          </div>
       {activeTab === "smartedits" && (
         <div className="flex-1 overflow-hidden flex flex-col">
           <SmartEditsPanel state={state} dispatch={dispatch} />
@@ -2517,6 +2570,8 @@ export default function MediaPanel({ state, dispatch }: MediaPanelProps) {
             </>
           )}
         </div>
+      )}
+        </>
       )}
     </div>
   );

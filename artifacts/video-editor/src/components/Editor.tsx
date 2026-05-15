@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useCallback, useState } from "react";
+import { useEffect, useReducer, useRef, useCallback, useState, useMemo } from "react";
 import { rootReducer, initialRootState } from "@/lib/reducer";
 import type { EditorAction, EditorState, Clip } from "@/lib/types";
 
@@ -30,6 +30,12 @@ export function Editor({ projectId, initialEditorState, projectName }: EditorPro
   const [isCropping, setIsCropping] = useState(false);
   const hydratedRef = useRef(false);
   const clipboardRef = useRef<Clip[]>([]);
+  const [leftPanelWidth, setLeftPanelWidth] = useState(240);
+  const [rightPanelWidth, setRightPanelWidth] = useState(280);
+  const [timelineHeight, setTimelineHeight] = useState(320);
+  const panelDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const rightDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const timelineDragRef = useRef<{ startY: number; startHeight: number } | null>(null);
 
   // Hydrate the reducer when async-loaded state arrives later (e.g. switching
   // between projects).
@@ -46,6 +52,41 @@ export function Editor({ projectId, initialEditorState, projectName }: EditorPro
   currentTimeRef.current = state.currentTime;
   durationRef.current = state.duration;
   playbackEndRef.current = playbackEnd;
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (panelDragRef.current) {
+        const dx = e.clientX - panelDragRef.current.startX;
+        const next = Math.max(48, Math.min(480, panelDragRef.current.startWidth + dx));
+        setLeftPanelWidth(next);
+      }
+      if (rightDragRef.current) {
+        const dx = rightDragRef.current.startX - e.clientX;
+        const next = Math.max(180, Math.min(520, rightDragRef.current.startWidth + dx));
+        setRightPanelWidth(next);
+      }
+      if (timelineDragRef.current) {
+        const dy = timelineDragRef.current.startY - e.clientY;
+        const next = Math.max(160, Math.min(600, timelineDragRef.current.startHeight + dy));
+        setTimelineHeight(next);
+      }
+    };
+    const onMouseUp = () => {
+      if (panelDragRef.current || rightDragRef.current || timelineDragRef.current) {
+        panelDragRef.current = null;
+        rightDragRef.current = null;
+        timelineDragRef.current = null;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      }
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
 
   useEffect(() => {
     if (state.clips.length === 0) return;
@@ -171,20 +212,54 @@ export function Editor({ projectId, initialEditorState, projectName }: EditorPro
       />
 
       <div className="flex-1 flex overflow-hidden min-h-0">
-        <MediaPanel state={state} dispatch={dispatchTyped} />
+        <MediaPanel state={state} dispatch={dispatchTyped} panelWidth={leftPanelWidth} />
+        {/* Drag-resize handle */}
+        <div
+          className="w-1 shrink-0 bg-border/50 hover:bg-primary/40 active:bg-primary/60 cursor-col-resize transition-colors"
+          onMouseDown={(e) => {
+            panelDragRef.current = { startX: e.clientX, startWidth: leftPanelWidth };
+            document.body.style.cursor = "col-resize";
+            document.body.style.userSelect = "none";
+            e.preventDefault();
+          }}
+        />
 
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-hidden bg-neutral-600">
             <Canvas state={state} dispatch={dispatchTyped} canvasZoom={canvasZoom} onCanvasZoomChange={setCanvasZoom} isCropping={isCropping} onCroppingChange={setIsCropping} />
           </div>
 
-          <div className="flex flex-col border-t border-border bg-card" style={{ height: 320 }}>
+          {/* Timeline resize handle */}
+          <div
+            className="h-1 shrink-0 bg-border/50 hover:bg-primary/40 active:bg-primary/60 cursor-row-resize transition-colors"
+            onMouseDown={(e) => {
+              timelineDragRef.current = { startY: e.clientY, startHeight: timelineHeight };
+              document.body.style.cursor = "row-resize";
+              document.body.style.userSelect = "none";
+              e.preventDefault();
+            }}
+          />
+
+          <div className="flex flex-col border-t border-border bg-card" style={{ height: timelineHeight }}>
             <AIInstructionBar state={state} dispatch={dispatchTyped} />
             <Timeline state={state} dispatch={dispatchTyped} />
           </div>
         </div>
 
-        <PropertiesInspector state={state} dispatch={dispatchTyped} isCropping={isCropping} onCroppingChange={setIsCropping} />
+        {/* Right panel resize handle */}
+        <div
+          className="w-1 shrink-0 bg-border/50 hover:bg-primary/40 active:bg-primary/60 cursor-col-resize transition-colors"
+          onMouseDown={(e) => {
+            rightDragRef.current = { startX: e.clientX, startWidth: rightPanelWidth };
+            document.body.style.cursor = "col-resize";
+            document.body.style.userSelect = "none";
+            e.preventDefault();
+          }}
+        />
+
+        <div style={{ width: rightPanelWidth }} className="shrink-0 overflow-hidden">
+          <PropertiesInspector state={state} dispatch={dispatchTyped} isCropping={isCropping} onCroppingChange={setIsCropping} />
+        </div>
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import { Link, useLocation, Route, Switch } from "wouter";
-import { Film, LayoutDashboard, Users, FolderKanban, Gem, ToggleLeft, BarChart3, FileClock, Settings } from "lucide-react";
+import { Film, LayoutDashboard, Users, FolderKanban, Gem, ToggleLeft, BarChart3, FileClock, Settings, Layers } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { useEffect } from "react";
@@ -11,11 +11,13 @@ import { AdminDiamonds } from "./admin/AdminDiamonds";
 import { AdminFeatures } from "./admin/AdminFeatures";
 import { AdminAnalytics } from "./admin/AdminAnalytics";
 import { AdminAudit } from "./admin/AdminAudit";
+import { AdminTemplates } from "./admin/AdminTemplates";
 
 const NAV: { href: string; label: string; Icon: typeof LayoutDashboard }[] = [
   { href: "/admin", label: "Dashboard", Icon: LayoutDashboard },
   { href: "/admin/users", label: "Users", Icon: Users },
   { href: "/admin/projects", label: "Projects", Icon: FolderKanban },
+  { href: "/admin/templates", label: "Templates", Icon: Layers },
   { href: "/admin/diamonds", label: "Diamonds & shop", Icon: Gem },
   { href: "/admin/features", label: "Feature flags", Icon: ToggleLeft },
   { href: "/admin/analytics", label: "Analytics", Icon: BarChart3 },
@@ -74,6 +76,7 @@ export function AdminLayout() {
             <Route path="/admin/diamonds" component={AdminDiamonds} />
             <Route path="/admin/features" component={AdminFeatures} />
             <Route path="/admin/analytics" component={AdminAnalytics} />
+            <Route path="/admin/templates" component={AdminTemplates} />
             <Route path="/admin/audit" component={AdminAudit} />
           </Switch>
         </main>
