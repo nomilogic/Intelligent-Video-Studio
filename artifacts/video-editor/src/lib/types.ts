@@ -476,6 +476,26 @@ export interface Clip {
   calloutKind?: "bubble" | "rounded-bubble" | "label" | "arrow-left" | "arrow-right" | "flag" | "pin" | "bracket";
   calloutTailX?: number;    // 0..1 — relative tail X position on the bubble
   calloutTailY?: number;    // 0..1 — relative tail Y position
+  // ── Acts-as-mask: any clip can contribute its alpha to mask clips below it ──
+  actsAsMask?: boolean;
+  actsAsMaskFeather?: number;   // 0–30 px edge softness
+  actsAsMaskInvert?: boolean;
+  actsAsMaskMode?: "alpha" | "luminance";
+  // ── Frame-break (Flash-style per-frame editing) ──────────────────────────
+  frameBreakEnabled?: boolean;
+  frameBreakFrames?: FrameBreakFrame[];
+  // ── Animated mask preset key from ANIMATED_MASK_PRESETS ─────────────────
+  animatedMask?: string;
+  /** Particle animation overlaid on a maskLayer clip. */
+  maskParticleKind?: string;
+  maskParticleIntensity?: number;
+}
+
+/** One custom frame override in frame-break editing mode. */
+export interface FrameBreakFrame {
+  frameIndex: number;
+  src?: string;        // data-URL of custom frame image
+  duration?: number;   // custom frame duration in seconds (default 1/fps)
 }
 
 export interface DrawPath {
@@ -538,7 +558,11 @@ export type ToolMode =
   | "magic-wand"   // Click-to-select clips of the same color/type
   | "hand"         // Pan the canvas viewport
   | "pen"          // Bezier pen tool — creates vector path clip
-  | "crop";        // Free crop/trim tool for media clips
+  | "crop"         // Free crop/trim tool for media clips
+  | "stamp"        // Clone stamp — copies pixels under sampled area
+  | "eraser"       // Erase drawing strokes from a drawing clip
+  | "vector-pen"   // Full bezier vector path tool
+  | "frame-edit";  // Frame-by-frame editor mode
 
 /**
  * Active brush settings for the draw tool. Stored on EditorState so the
@@ -549,7 +573,7 @@ export interface DrawBrush {
   width: number;
   opacity: number;
   /** "marker" = solid round, "pencil" = textured thin, "highlighter" = wide low-opacity. */
-  kind: "marker" | "pencil" | "highlighter" | "neon";
+  kind: "marker" | "pencil" | "highlighter" | "neon" | "eraser" | "stamp";
 }
 
 export const DEFAULT_DRAW_BRUSH: DrawBrush = {
@@ -641,6 +665,8 @@ export interface EditorState {
   guides: Guide[];
   /** Show extracted video-frame thumbnails inside timeline clip bars. */
   showFrameThumbnails: boolean;
+  /** Pending replace-media prompt: a new clip waiting for user to confirm replace vs new track. */
+  replacePrompt?: { sourceClipId: string; pendingClip: Partial<import("./types").Clip> } | null;
 }
 
 export interface HistoryEntry {
@@ -708,7 +734,16 @@ export type EditorAction =
   // Beat sync — add markers at audio beat timestamps
   | { type: "BEAT_SYNC_MARKS"; payload: { beats: number[]; color?: string } }
   // Smart enhancement preset application
-  | { type: "APPLY_SMART_PRESET"; payload: { clipId?: string; adjustments: Partial<AdjustmentSettings> } };
+  | { type: "APPLY_SMART_PRESET"; payload: { clipId?: string; adjustments: Partial<AdjustmentSettings> } }
+  // Replace source media on a clip keeping all effects/animations
+  | { type: "REPLACE_MEDIA"; payload: { clipId: string; src: string; mediaType: MediaType; label?: string } }
+  // Toggle acts-as-mask on any clip
+  | { type: "SET_ACTS_AS_MASK"; payload: { clipId: string; enabled: boolean; feather?: number; invert?: boolean; mode?: "alpha" | "luminance" } }
+  // Show/dismiss the replace-or-new-track popup
+  | { type: "SET_REPLACE_PROMPT"; payload: { sourceClipId: string; pendingClip: Partial<Clip> } | null }
+  // Frame-break editor actions
+  | { type: "SET_FRAME_BREAK"; payload: { clipId: string; enabled: boolean } }
+  | { type: "UPDATE_FRAME_BREAK_FRAME"; payload: { clipId: string; frame: FrameBreakFrame } };
 
 export const DEFAULT_FILTERS: ClipFilters = {
   brightness: 100,

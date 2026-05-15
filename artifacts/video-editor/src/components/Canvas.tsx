@@ -1214,6 +1214,12 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
     () => visibleClips.filter((c) => c.mediaType === "logoBlur"),
     [visibleClips],
   );
+  // Clips with `actsAsMask: true` contribute their bounding box as a
+  // window mask (white rectangle on black SVG) to all clips below them.
+  const actsAsMaskClips = useMemo(
+    () => visibleClips.filter((c) => c.actsAsMask === true),
+    [visibleClips],
+  );
 
   // Per-mask-layer reach: a mask at trackIndex T with depth N affects
   // clips on tracks (T-N .. T-1]. Depth 0/undefined = all tracks below.
@@ -1231,10 +1237,27 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
       })
       .filter((x): x is { c: typeof maskLayerClips[number]; r: ReturnType<typeof resolveClip> } => !!x);
 
+    // Pre-resolve acts-as-mask clips (any mediaType)
+    const resolvedActsMask = actsAsMaskClips
+      .map((c) => {
+        const r = resolveClip(c, state.keyframes, state.currentTime);
+        if (!r.visible) return null;
+        // Build a canvas-sized SVG with a white rect at the clip's position
+        const invert = c.actsAsMaskInvert ?? false;
+        const bgColor = invert ? "white" : "black";
+        const fgColor = invert ? "black" : "white";
+        const rx = Math.round(r.x), ry = Math.round(r.y), rw = Math.round(r.width), rh = Math.round(r.height);
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="${bgColor}"/><rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" fill="${fgColor}"/></svg>`;
+        const url = `data:image/svg+xml;base64,${btoa(svg)}`;
+        return { c, url };
+      })
+      .filter((x): x is { c: Clip; url: string } => !!x);
+
     return (clip: { trackIndex: number }): React.CSSProperties => {
-      if (resolvedMasks.length === 0) return {};
       const images: string[] = [];
       const modes: string[] = [];
+
+      // maskLayer contributions
       for (const { c, r } of resolvedMasks) {
         const depth = c.maskAffectsTracksBelow ?? 0;
         // In this timeline, lower trackIndex = displayed higher (top of timeline) = drawn beneath in canvas.
@@ -1249,6 +1272,16 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
         images.push(`url("${url}")`);
         modes.push(m.mode === "luminance" ? "luminance" : "alpha");
       }
+
+      // actsAsMask contributions (bounding-box window mask)
+      for (const { c, url } of resolvedActsMask) {
+        if (clip.trackIndex <= c.trackIndex) continue;
+        const depth = c.maskAffectsTracksBelow ?? 0;
+        if (depth > 0 && clip.trackIndex > c.trackIndex + depth) continue;
+        images.push(`url("${url}")`);
+        modes.push((c.actsAsMaskMode ?? "luminance") === "luminance" ? "luminance" : "alpha");
+      }
+
       if (images.length === 0) return {};
       const sizes = images.map(() => "100% 100%").join(", ");
       const positions = images.map(() => "0% 0%").join(", ");
@@ -1265,7 +1298,7 @@ export default function Canvas({ state, dispatch, canvasZoom, onCanvasZoomChange
         maskMode: modes.join(", ") as any,
       };
     };
-  }, [maskLayerClips, state.keyframes, state.currentTime, state.canvasWidth, state.canvasHeight]);
+  }, [maskLayerClips, actsAsMaskClips, state.keyframes, state.currentTime, state.canvasWidth, state.canvasHeight]);
 
   const onCanvasMouseDown = (e: React.MouseEvent) => {
     if (e.target === containerRef.current) {

@@ -66,6 +66,7 @@ import {
 } from "../lib/text-presets";
 import { buildMotionKeyframes } from "../lib/motion-paths";
 import { cn } from "@/lib/utils";
+import { ANIMATED_MASK_PRESETS, ANIMATED_MASK_CATEGORIES, type AnimatedMaskCategory } from "../lib/mask-animations";
 
 const CLIP_COLORS = [
   "#3b82f6",
@@ -670,6 +671,7 @@ function EffectsTabContent({
   state: EditorState;
   dispatch: React.Dispatch<EditorAction>;
 }) {
+  const [maskAnimCat, setMaskAnimCat] = useState<AnimatedMaskCategory>("Circles");
   const addAtCurrentTime = (payload: Parameters<typeof makeClip>[0]) => {
     dispatch({
       type: "ADD_CLIP",
@@ -1126,8 +1128,7 @@ function EffectsTabContent({
       {/* ── Cinematic Overlays / Special Layers (at bottom) ─── */}
       {specialCategories.map((cat) => {
         const catLayers = SPECIAL_LAYERS.filter((s) => s.category === cat);
-        const catLabel =
-          {
+        const catLabel = ({
             Light: "💡 Light Leaks & Lens Effects",
             Texture: "🌿 Texture Overlays",
             Grade: "🎨 Color Grades",
@@ -1139,7 +1140,7 @@ function EffectsTabContent({
             "Extended Grade": "🎞 Extended Color Grades",
             "Extended Geometry": "🔷 Extended Geometry",
             "Extended Atmosphere": "🌌 Extended Atmosphere",
-          }[cat] ?? `🎬 ${cat}`;
+          } as Record<string, string>)[cat] ?? `🎬 ${cat}`;
         return (
           <EffectsGroup key={cat} title={catLabel} defaultOpen={false}>
             <div className="grid grid-cols-6 gap-1">
@@ -1184,6 +1185,58 @@ function EffectsTabContent({
           </EffectsGroup>
         );
       })}
+
+      <EffectsGroup
+        title={`🎭 Animated Masks (${ANIMATED_MASK_PRESETS.length})`}
+        defaultOpen={false}
+      >
+        <p className="text-[9px] text-muted-foreground mb-2">
+          Apply to any clip in the inspector Effects tab. Adds a CSS clip-path
+          animation that cycles over the clip's duration.
+        </p>
+        <div className="flex gap-1 flex-wrap mb-2">
+          {ANIMATED_MASK_CATEGORIES.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setMaskAnimCat(cat)}
+              className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${maskAnimCat === cat ? "border-primary bg-primary/20 text-primary" : "border-border text-muted-foreground hover:border-primary/50"}`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-4 gap-1 max-h-48 overflow-y-auto">
+          {ANIMATED_MASK_PRESETS.filter((p) => p.category === maskAnimCat).map((p) => (
+            <button
+              key={p.key}
+              title={p.name}
+              className="h-12 rounded border border-border bg-black/40 hover:border-primary/60 text-center text-[9px] p-1 transition-colors overflow-hidden"
+              onClick={() => {
+                const clipId = crypto.randomUUID();
+                dispatch({
+                  type: "ADD_CLIP",
+                  payload: makeClip({
+                    id: clipId,
+                    label: p.name,
+                    mediaType: "blank",
+                    trackIndex: 0,
+                    startTime: state.currentTime,
+                    duration: 5,
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                    animatedMask: p.key,
+                  }),
+                });
+              }}
+            >
+              <div className="text-[9px] text-muted-foreground/60 font-mono truncate">{p.key.slice(0, 8)}</div>
+              <div className="text-muted-foreground truncate leading-tight">{p.name}</div>
+            </button>
+          ))}
+        </div>
+      </EffectsGroup>
 
       <div className="text-[9px] text-muted-foreground p-2 leading-relaxed border border-border/30 rounded">
         <p className="font-medium mb-1 flex items-center gap-1">

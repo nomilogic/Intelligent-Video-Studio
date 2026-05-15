@@ -1003,6 +1003,62 @@ function presentReducer(state: EditorState, action: EditorAction): EditorState {
         aiHistory: state.aiHistory,
       };
     }
+    case "REPLACE_MEDIA": {
+      const { clipId, src, mediaType, label } = action.payload;
+      return {
+        ...state,
+        clips: state.clips.map((c) =>
+          c.id === clipId
+            ? { ...c, src, mediaType: mediaType as Clip["mediaType"], ...(label ? { label } : {}) }
+            : c,
+        ),
+      };
+    }
+    case "SET_ACTS_AS_MASK": {
+      const { clipId, enabled, feather, invert, mode } = action.payload;
+      return {
+        ...state,
+        clips: state.clips.map((c) =>
+          c.id === clipId
+            ? {
+                ...c,
+                actsAsMask: enabled,
+                ...(feather !== undefined ? { actsAsMaskFeather: feather } : {}),
+                ...(invert !== undefined ? { actsAsMaskInvert: invert } : {}),
+                ...(mode !== undefined ? { actsAsMaskMode: mode } : {}),
+              }
+            : c,
+        ),
+      };
+    }
+    case "SET_REPLACE_PROMPT":
+      return { ...state, replacePrompt: action.payload };
+    case "SET_FRAME_BREAK": {
+      const { clipId, enabled } = action.payload;
+      return {
+        ...state,
+        clips: state.clips.map((c) =>
+          c.id === clipId
+            ? { ...c, frameBreakEnabled: enabled, frameBreakFrames: enabled ? (c.frameBreakFrames ?? []) : [] }
+            : c,
+        ),
+      };
+    }
+    case "UPDATE_FRAME_BREAK_FRAME": {
+      const { clipId, frame } = action.payload;
+      return {
+        ...state,
+        clips: state.clips.map((c) => {
+          if (c.id !== clipId) return c;
+          const existing = c.frameBreakFrames ?? [];
+          const idx = existing.findIndex((f) => f.frameIndex === frame.frameIndex);
+          const newFrames = idx >= 0
+            ? existing.map((f, i) => (i === idx ? frame : f))
+            : [...existing, frame].sort((a, b) => a.frameIndex - b.frameIndex);
+          return { ...c, frameBreakFrames: newFrames };
+        }),
+      };
+    }
     case "RESET":
       return initialState;
     default:

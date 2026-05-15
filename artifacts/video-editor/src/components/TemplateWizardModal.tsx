@@ -131,10 +131,29 @@ export function TemplateWizardModal({ open, onOpenChange, state, dispatch }: Tem
 
   const handleSelectTemplate = (key: string) => {
     setSelectedTemplate(key);
-    dispatch({ type: "APPLY_TEMPLATE", payload: { templateKey: key } });
     const tpl = TEMPLATES.find((t) => t.key === key);
     if (tpl) {
+      // Build once and use the SAME result for both state + slot extraction
+      // so the clip IDs always match when slots are applied.
       const built = tpl.build();
+      dispatch({
+        type: "REPLACE_STATE",
+        payload: {
+          ...state,
+          ...built,
+          currentTime: 0,
+          isPlaying: false,
+          selectedClipIds: [],
+          assets: state.assets,
+          zoom: state.zoom,
+          snapEnabled: state.snapEnabled,
+          tool: state.tool,
+          aiHistory: state.aiHistory,
+          gridSettings: state.gridSettings,
+          guides: state.guides,
+          showFrameThumbnails: state.showFrameThumbnails,
+        },
+      });
       setSlots(extractSlots(built.clips));
     }
     setActiveSlot(0);

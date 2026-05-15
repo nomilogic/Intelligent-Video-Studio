@@ -397,7 +397,7 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
     dispatch({ type: "SET_TIME", payload: state.currentTime + dir * (1 / FPS) });
   };
 
-  const setTool = (t: "select" | "blade" | "draw" | "rect-select" | "lasso" | "magic-wand" | "hand" | "pen" | "crop") => dispatch({ type: "SET_TOOL", payload: t });
+  const setTool = (t: "select" | "blade" | "draw" | "rect-select" | "lasso" | "magic-wand" | "hand" | "pen" | "crop" | "stamp" | "eraser" | "vector-pen" | "frame-edit") => dispatch({ type: "SET_TOOL", payload: t });
   const brush = state.drawBrush;
 
   return (
@@ -510,6 +510,46 @@ export default function Timeline({ state, dispatch }: TimelineProps) {
             title="Magic wand — select clips of the same type"
           >
             ✦
+          </button>
+          <button
+            className={cn(
+              "px-2 py-1 text-xs flex items-center gap-1.5 transition-colors border-l border-border",
+              state.tool === "stamp" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/40",
+            )}
+            onClick={() => setTool("stamp")}
+            title="Clone stamp — sample and paint pixels"
+          >
+            🔵
+          </button>
+          <button
+            className={cn(
+              "px-2 py-1 text-xs flex items-center gap-1.5 transition-colors border-l border-border",
+              state.tool === "eraser" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/40",
+            )}
+            onClick={() => setTool("eraser")}
+            title="Eraser — erase drawing strokes"
+          >
+            ⬜
+          </button>
+          <button
+            className={cn(
+              "px-2 py-1 text-xs flex items-center gap-1.5 transition-colors border-l border-border",
+              state.tool === "vector-pen" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/40",
+            )}
+            onClick={() => setTool("vector-pen")}
+            title="Vector pen — bezier path tool"
+          >
+            ✒
+          </button>
+          <button
+            className={cn(
+              "px-2 py-1 text-xs flex items-center gap-1.5 transition-colors border-l border-border",
+              state.tool === "frame-edit" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/40",
+            )}
+            onClick={() => setTool("frame-edit")}
+            title="Frame-by-frame edit mode"
+          >
+            🎞
           </button>
         </div>
         <button

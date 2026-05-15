@@ -51,6 +51,9 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { useDiamonds } from "@/lib/diamonds-context";
 import ColorGradientPicker from "./ColorGradientPicker";
+import { ReplaceMediaModal } from "./ReplaceMediaModal";
+import { FrameEditor } from "./FrameEditor";
+import { ANIMATED_MASK_PRESETS, ANIMATED_MASK_CATEGORIES, type AnimatedMaskCategory } from "../lib/mask-animations";
 import { Slider } from "@/components/ui/slider";
 import {
   Select,
@@ -98,6 +101,9 @@ import {
   ChevronRight as ChevronRightIcon,
   FolderOpen,
   RefreshCw,
+  Film,
+  Sparkles,
+  Replace,
 } from "lucide-react";
 import { Dispatch, useEffect, useRef, useState } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -2086,6 +2092,9 @@ export default function PropertiesInspector({
 }: PropertiesInspectorProps) {
   const clip = state.clips.find((c) => state.selectedClipIds.includes(c.id));
   const [activeTab, setActiveTab] = useState<string>("basic");
+  const [showReplaceMedia, setShowReplaceMedia] = useState(false);
+  const [showFrameEditor, setShowFrameEditor] = useState(false);
+  const [maskAnimCat, setMaskAnimCat] = useState<AnimatedMaskCategory>("Circles");
 
   // When the selected clip changes, jump to the most relevant tab. Text
   // clips open the Text panel; everything else falls back to Basic. Tracking
@@ -2667,37 +2676,28 @@ export default function PropertiesInspector({
                         {clip.src.split("/").pop()?.slice(0, 36) ??
                           clip.src.slice(0, 36)}
                       </p>
-                      <label className="flex items-center gap-1.5 cursor-pointer">
+                      <div className="flex gap-1">
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-6 text-[10px] gap-1 w-full"
-                          asChild
+                          className="h-6 text-[10px] gap-1 flex-1"
+                          onClick={() => setShowReplaceMedia(true)}
                         >
-                          <span>
-                            <FolderOpen className="w-3 h-3" />
-                            Replace Media…
-                            <input
-                              type="file"
-                              accept={
-                                clip.mediaType === "video"
-                                  ? "video/*"
-                                  : "image/*"
-                              }
-                              className="sr-only"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (!file) return;
-                                const url = URL.createObjectURL(file);
-                                update({
-                                  src: url,
-                                  label: file.name.replace(/\.[^.]+$/, ""),
-                                });
-                              }}
-                            />
-                          </span>
+                          <Replace className="w-3 h-3" />
+                          Replace…
                         </Button>
-                      </label>
+                        {clip.mediaType === "video" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 text-[10px] gap-1 px-2"
+                            onClick={() => setShowFrameEditor(true)}
+                            title="Frame-by-frame editor"
+                          >
+                            <Film className="w-3 h-3" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   )}
                 {clip.mediaType === "audio" && clip.src && (
@@ -2738,6 +2738,98 @@ export default function PropertiesInspector({
                     </label>
                   </div>
                 )}
+              </Section>
+
+              <Separator />
+
+              <Section title="Mask Role">
+                <div className="space-y-2">
+                  <label className="flex items-center justify-between gap-2 cursor-pointer">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">Acts as Mask</p>
+                      <p className="text-[10px] text-muted-foreground leading-tight">
+                        This clip's bounds cut through clips below it
+                      </p>
+                    </div>
+                    <button
+                      className={`w-8 h-4 rounded-full transition-colors relative flex-shrink-0 ${clip.actsAsMask ? "bg-primary" : "bg-muted"}`}
+                      onClick={() =>
+                        dispatch({
+                          type: "SET_ACTS_AS_MASK",
+                          payload: { clipId: clip.id, enabled: !clip.actsAsMask },
+                        })
+                      }
+                    >
+                      <span
+                        className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${clip.actsAsMask ? "left-4" : "left-0.5"}`}
+                      />
+                    </button>
+                  </label>
+                  {clip.actsAsMask && (
+                    <>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">Mask Mode</Label>
+                        <Select
+                          value={clip.actsAsMaskMode ?? "luminance"}
+                          onValueChange={(v) =>
+                            dispatch({
+                              type: "SET_ACTS_AS_MASK",
+                              payload: {
+                                clipId: clip.id,
+                                enabled: true,
+                                mode: v as "alpha" | "luminance",
+                              },
+                            })
+                          }
+                        >
+                          <SelectTrigger className="h-7 text-xs mt-1">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="luminance">Luminance</SelectItem>
+                            <SelectItem value="alpha">Alpha</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <label className="flex items-center justify-between cursor-pointer">
+                        <span className="text-[10px] text-muted-foreground">Invert mask</span>
+                        <input
+                          type="checkbox"
+                          checked={clip.actsAsMaskInvert ?? false}
+                          onChange={(e) =>
+                            dispatch({
+                              type: "SET_ACTS_AS_MASK",
+                              payload: {
+                                clipId: clip.id,
+                                enabled: true,
+                                invert: e.target.checked,
+                              },
+                            })
+                          }
+                          className="w-3 h-3"
+                        />
+                      </label>
+                      <div>
+                        <Label className="text-[10px] text-muted-foreground">
+                          Feather: {clip.actsAsMaskFeather ?? 0}px
+                        </Label>
+                        <Slider
+                          value={[clip.actsAsMaskFeather ?? 0]}
+                          min={0}
+                          max={30}
+                          step={1}
+                          onValueChange={([v]) =>
+                            dispatch({
+                              type: "SET_ACTS_AS_MASK",
+                              payload: { clipId: clip.id, enabled: true, feather: v },
+                            })
+                          }
+                          className="mt-1"
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
               </Section>
 
               {/*
@@ -3201,6 +3293,70 @@ export default function PropertiesInspector({
                       </>
                     )}
                     <MaskSection clip={clip} dispatch={dispatch} />
+
+                    <Separator />
+
+                    <Section title={`Animated Mask Presets (${ANIMATED_MASK_PRESETS.length})`}>
+                      <div className="flex gap-1 flex-wrap mb-2">
+                        {ANIMATED_MASK_CATEGORIES.map((cat) => (
+                          <button
+                            key={cat}
+                            onClick={() => setMaskAnimCat(cat)}
+                            className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${maskAnimCat === cat ? "border-primary bg-primary/20 text-primary" : "border-border text-muted-foreground hover:border-primary/50"}`}
+                          >
+                            {cat}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-3 gap-1 max-h-48 overflow-y-auto">
+                        {ANIMATED_MASK_PRESETS.filter((p) => p.category === maskAnimCat).map((p) => (
+                          <button
+                            key={p.key}
+                            title={p.name}
+                            onClick={() =>
+                              dispatch({
+                                type: "UPDATE_CLIP",
+                                payload: {
+                                  id: clip.id,
+                                  updates: {
+                                    animatedMask: p.key,
+                                    mask: {
+                                      src: "",
+                                      mode: "alpha",
+                                      invert: false,
+                                      fit: "cover",
+                                      scale: 1,
+                                      offsetX: 0,
+                                      offsetY: 0,
+                                      opacity: 1,
+                                    },
+                                  },
+                                },
+                              })
+                            }
+                            className={`h-10 rounded border text-[9px] text-center leading-tight p-1 transition-colors overflow-hidden ${clip.animatedMask === p.key ? "border-primary bg-primary/20" : "border-border bg-black/40 hover:border-primary/60"}`}
+                          >
+                            <div className="text-[10px] text-muted-foreground/60 font-mono truncate">{p.key.slice(0, 6)}</div>
+                            <div className="text-muted-foreground truncate">{p.name}</div>
+                          </button>
+                        ))}
+                      </div>
+                      {clip.animatedMask && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-[10px] w-full mt-1"
+                          onClick={() =>
+                            dispatch({
+                              type: "UPDATE_CLIP",
+                              payload: { id: clip.id, updates: { animatedMask: undefined } },
+                            })
+                          }
+                        >
+                          Clear Animated Mask
+                        </Button>
+                      )}
+                    </Section>
 
                     <Separator />
 
@@ -3872,6 +4028,18 @@ export default function PropertiesInspector({
           </div>
         </Tabs>
       )}
+      <ReplaceMediaModal
+        open={showReplaceMedia}
+        onOpenChange={setShowReplaceMedia}
+        clip={clip ?? null}
+        dispatch={dispatch}
+      />
+      <FrameEditor
+        open={showFrameEditor}
+        onOpenChange={setShowFrameEditor}
+        clip={clip ?? null}
+        dispatch={dispatch}
+      />
     </div>
   );
 }
